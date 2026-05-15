@@ -1,6 +1,7 @@
 -- ================================================
 -- ঘর খরচ — Supabase Database Migration v1.0
 -- Supabase Dashboard > SQL Editor-এ paste করুন
+-- বারবার run করলেও কোনো error হবে না ✅
 -- ================================================
 
 -- 1. PROFILES TABLE
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_profile" ON profiles;
 CREATE POLICY "own_profile" ON profiles
   FOR ALL USING (auth.uid() = id);
 
@@ -32,6 +34,8 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "categories_read" ON categories;
+DROP POLICY IF EXISTS "categories_write" ON categories;
 CREATE POLICY "categories_read" ON categories
   FOR SELECT USING (is_preset = true OR auth.uid() = user_id);
 CREATE POLICY "categories_write" ON categories
@@ -50,6 +54,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_transactions" ON transactions;
 CREATE POLICY "own_transactions" ON transactions
   FOR ALL USING (auth.uid() = user_id);
 
@@ -66,6 +71,7 @@ CREATE TABLE IF NOT EXISTS budgets (
 );
 
 ALTER TABLE budgets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_budgets" ON budgets;
 CREATE POLICY "own_budgets" ON budgets
   FOR ALL USING (auth.uid() = user_id);
 
@@ -82,6 +88,7 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 
 ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_todos" ON todos;
 CREATE POLICY "own_todos" ON todos
   FOR ALL USING (auth.uid() = user_id);
 
@@ -96,6 +103,7 @@ CREATE TABLE IF NOT EXISTS smart_notices (
 );
 
 ALTER TABLE smart_notices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own_notices" ON smart_notices;
 CREATE POLICY "own_notices" ON smart_notices
   FOR ALL USING (auth.uid() = user_id);
 
