@@ -142,8 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_todos_user_date
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, phone)
-  VALUES (new.id, new.phone)
+  INSERT INTO public.profiles (id)
+  VALUES (new.id)
   ON CONFLICT (id) DO NOTHING;
   RETURN new;
 END;
