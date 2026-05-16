@@ -87,11 +87,14 @@ export default function ReportsPage() {
   const [editForm, setEditForm] = useState({ amount: '', category_id: '', date: '', note: '' })
   const [actionLoading, setActionLoading] = useState(false)
 
-  useEffect(() => {
-    if (filter === 'daily') setRef(todayStr)
-    else if (filter === 'monthly') setRef(monthStr)
-    else if (filter === 'yearly') setRef(yearStr)
-  }, [filter])
+  // Atomically update both filter and ref together to avoid a race condition
+  // where fetchTransactions fires once with the new filter but the old ref.
+  const handleFilterChange = (newFilter: Filter) => {
+    if (newFilter === 'daily') { setFilter(newFilter); setRef(todayStr) }
+    else if (newFilter === 'monthly') { setFilter(newFilter); setRef(monthStr) }
+    else if (newFilter === 'yearly') { setFilter(newFilter); setRef(yearStr) }
+    else { setFilter(newFilter) }
+  }
 
   const fetchTransactions = useCallback(async () => {
     if (!user || !effectiveUserId) return
@@ -239,7 +242,7 @@ export default function ReportsPage() {
 
         <div className="bg-gray-100 rounded-2xl p-1 flex gap-1">
           {TABS.map(({key, label}) => (
-            <button key={key} onClick={() => setFilter(key)}
+            <button key={key} onClick={() => handleFilterChange(key)}
               className={cn('flex-1 py-2 rounded-xl text-xs font-semibold transition-all',
                 filter===key ? 'bg-primary-500 text-white shadow-sm' : 'text-gray-500')}>
               {label}
@@ -430,8 +433,8 @@ export default function ReportsPage() {
 
       {/* PIN Verification Modal */}
       {(modalMode === 'pin-delete' || modalMode === 'pin-edit') && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 animate-slide-up">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
+          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 animate-slide-up" style={{paddingBottom:'max(1.5rem, env(safe-area-inset-bottom))'}}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800 text-base">
                 {modalMode === 'pin-delete' ? '🗑️ এন্ট্রি মুছে ফেলুন' : '✏️ এন্ট্রি সম্পাদনা করুন'}
@@ -475,8 +478,8 @@ export default function ReportsPage() {
 
       {/* Edit Modal */}
       {modalMode === 'edit' && targetTx && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md flex flex-col" style={{maxHeight:'90vh'}}>
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
+          <div className="bg-white rounded-t-3xl w-full max-w-md flex flex-col" style={{maxHeight:'92vh'}}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
               <h3 className="font-bold text-gray-800 text-base">✏️ এন্ট্রি সম্পাদনা</h3>
@@ -529,7 +532,7 @@ export default function ReportsPage() {
               </div>
             </div>
             {/* Sticky save button */}
-            <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 bg-white">
+            <div className="flex-shrink-0 px-6 pt-4 border-t border-gray-100 bg-white" style={{paddingBottom:'max(1rem, env(safe-area-inset-bottom))'}}>
               <button
                 onClick={doEdit}
                 disabled={actionLoading || !editForm.amount || !editForm.category_id}
