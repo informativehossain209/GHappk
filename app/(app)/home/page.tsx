@@ -12,7 +12,8 @@ import { Pencil, Trash2, X, TrendingUp, TrendingDown } from 'lucide-react'
 type ModalMode = 'pin-delete' | 'pin-edit' | 'edit' | null
 
 export default function HomePage() {
-  const { user } = useAuthStore()
+  const { user, isViewer, viewingUserId } = useAuthStore()
+  const effectiveUserId = viewingUserId || user?.id
   const [summary, setSummary] = useState({ income: 0, expense: 0 })
   const [lastMonthExpense, setLastMonthExpense] = useState(0)
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -31,7 +32,7 @@ export default function HomePage() {
   const [actionLoading, setActionLoading] = useState(false)
 
   const fetchData = useCallback(async () => {
-    if (!user) return
+    if (!user || !effectiveUserId) return
     setLoading(true)
     const { start, end } = getCurrentMonthRange()
     const todayStr = new Date().toISOString().split('T')[0]
@@ -44,13 +45,13 @@ export default function HomePage() {
     const [txRes, noticeRes, todoRes, lmRes] = await Promise.all([
       supabase.from('transactions')
         .select('*, category:categories(name, icon, color)')
-        .eq('user_id', user.id).gte('date', start).lte('date', end)
+        .eq('user_id', effectiveUserId).gte('date', start).lte('date', end)
         .order('date', { ascending: false }),
-      supabase.from('notices').select('*').eq('user_id', user.id).eq('is_read', false)
+      supabase.from('notices').select('*').eq('user_id', effectiveUserId).eq('is_read', false)
         .order('created_at', { ascending: false }).limit(3),
-      supabase.from('todos').select('*').eq('user_id', user.id).eq('completed', false)
+      supabase.from('todos').select('*').eq('user_id', effectiveUserId).eq('completed', false)
         .order('date', { ascending: true }).limit(3),
-      supabase.from('transactions').select('amount').eq('user_id', user.id)
+      supabase.from('transactions').select('amount').eq('user_id', effectiveUserId)
         .eq('type', 'expense').gte('date', lmStart).lte('date', lmEnd),
     ])
 
@@ -106,7 +107,7 @@ export default function HomePage() {
     if (modalMode === 'pin-delete') {
       await doDelete()
     } else if (modalMode === 'pin-edit' && targetTx) {
-      const { data: cats } = await supabase.from('categories').select('*').eq('user_id', user.id).eq('type', targetTx.type)
+      const { data: cats } = await supabase.from('categories').select('*').eq('user_id', effectiveUserId).eq('type', targetTx.type)
       setEditCategories(cats || [])
       setEditForm({ amount: String(targetTx.amount), category_id: targetTx.category_id, date: targetTx.date, note: targetTx.note || '' })
       setModalMode('edit')
@@ -351,12 +352,14 @@ export default function HomePage() {
                     {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
                   </p>
                   <div className="flex gap-1 flex-shrink-0">
-                    <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
-                      <Pencil size={11} className="text-blue-500" />
-                    </button>
-                    <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
-                      <Trash2 size={11} className="text-red-500" />
-                    </button>
+                    {!isViewer && <>
+                      <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
+                        <Pencil size={11} className="text-blue-500" />
+                      </button>
+                      <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
+                        <Trash2 size={11} className="text-red-500" />
+                      </button>
+                    </>}
                   </div>
                 </div>
               ))}
@@ -411,14 +414,16 @@ export default function HomePage() {
       {/* Edit Modal */}
       {modalMode === 'edit' && targetTx && (
         <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-t-3xl w-full max-w-md flex flex-col" style={{maxHeight:'90vh'}}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
               <h3 className="font-bold text-gray-800 text-base">✏️ এন্ট্রি সম্পাদনা</h3>
               <button onClick={closeModal} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                 <X size={16} className="text-gray-600" />
               </button>
             </div>
-            <div className="space-y-4">
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-6 space-y-4 pb-2">
               <div>
                 <label className="text-gray-500 text-xs block mb-1.5">পরিমাণ (টাকা)</label>
                 <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
@@ -455,6 +460,9 @@ export default function HomePage() {
                   placeholder="বিস্তারিত লিখুন..."
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-800 focus:outline-none placeholder-gray-300" />
               </div>
+            </div>
+            {/* Sticky save button */}
+            <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 bg-white">
               <button onClick={doEdit} disabled={actionLoading || !editForm.amount || !editForm.category_id}
                 className="w-full bg-primary-500 text-white font-bold py-3.5 rounded-2xl transition-all active:scale-95 disabled:opacity-50">
                 {actionLoading ? 'সংরক্ষণ হচ্ছে...' : '✅ পরিবর্তন সংরক্ষণ করুন'}

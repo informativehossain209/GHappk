@@ -63,7 +63,8 @@ const TABS: {key: Filter; label: string}[] = [
 ]
 
 export default function ReportsPage() {
-  const { user } = useAuthStore()
+  const { user, isViewer, viewingUserId } = useAuthStore()
+  const effectiveUserId = viewingUserId || user?.id
   const todayStr = new Date().toISOString().split('T')[0]
   const monthStr = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`
   const yearStr = String(new Date().getFullYear())
@@ -93,14 +94,14 @@ export default function ReportsPage() {
   }, [filter])
 
   const fetchTransactions = useCallback(async () => {
-    if (!user) return
+    if (!user || !effectiveUserId) return
     const { start, end } = getDateRange(filter, ref, customFrom, customTo)
     if (!start || !end || start > end) return
     setLoading(true)
     const { data } = await supabase
       .from('transactions')
       .select('*, category:categories(name, icon, color)')
-      .eq('user_id', user.id)
+      .eq('user_id', effectiveUserId)
       .gte('date', start)
       .lte('date', end)
       .order('date', { ascending: false })
@@ -145,7 +146,7 @@ export default function ReportsPage() {
       await doDelete()
     } else if (modalMode === 'pin-edit' && targetTx) {
       // Load categories for editing
-      const { data: cats } = await supabase.from('categories').select('*').eq('user_id', user.id).eq('type', targetTx.type)
+      const { data: cats } = await supabase.from('categories').select('*').eq('user_id', effectiveUserId).eq('type', targetTx.type)
       setCategories(cats || [])
       setEditForm({
         amount: String(targetTx.amount),
@@ -340,12 +341,14 @@ export default function ReportsPage() {
                           </div>
                           <p className="text-sm font-bold text-success mr-2">+{formatCurrency(tx.amount)}</p>
                           <div className="flex gap-1.5 flex-shrink-0">
-                            <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
-                              <Pencil size={12} className="text-blue-500" />
-                            </button>
-                            <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
-                              <Trash2 size={12} className="text-red-500" />
-                            </button>
+                            {!isViewer && <>
+                              <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
+                                <Pencil size={12} className="text-blue-500" />
+                              </button>
+                              <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
+                                <Trash2 size={12} className="text-red-500" />
+                              </button>
+                            </>}
                           </div>
                         </div>
                       ))}
@@ -373,12 +376,14 @@ export default function ReportsPage() {
                           </div>
                           <p className="text-sm font-bold text-danger mr-2">-{formatCurrency(tx.amount)}</p>
                           <div className="flex gap-1.5 flex-shrink-0">
-                            <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
-                              <Pencil size={12} className="text-blue-500" />
-                            </button>
-                            <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
-                              <Trash2 size={12} className="text-red-500" />
-                            </button>
+                            {!isViewer && <>
+                              <button onClick={() => openEditModal(tx)} className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center active:scale-95">
+                                <Pencil size={12} className="text-blue-500" />
+                              </button>
+                              <button onClick={() => openDeleteModal(tx)} className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center active:scale-95">
+                                <Trash2 size={12} className="text-red-500" />
+                              </button>
+                            </>}
                           </div>
                         </div>
                       ))}
@@ -471,14 +476,16 @@ export default function ReportsPage() {
       {/* Edit Modal */}
       {modalMode === 'edit' && targetTx && (
         <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-t-3xl w-full max-w-md flex flex-col" style={{maxHeight:'90vh'}}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
               <h3 className="font-bold text-gray-800 text-base">✏️ এন্ট্রি সম্পাদনা</h3>
               <button onClick={closeModal} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
                 <X size={16} className="text-gray-600" />
               </button>
             </div>
-            <div className="space-y-4">
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-6 space-y-4 pb-2">
               <div>
                 <label className="text-gray-500 text-xs block mb-1.5">পরিমাণ (টাকা)</label>
                 <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
@@ -520,6 +527,9 @@ export default function ReportsPage() {
                   placeholder="বিস্তারিত লিখুন..."
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-gray-800 focus:outline-none focus:border-primary-300 placeholder-gray-300" />
               </div>
+            </div>
+            {/* Sticky save button */}
+            <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 bg-white">
               <button
                 onClick={doEdit}
                 disabled={actionLoading || !editForm.amount || !editForm.category_id}
