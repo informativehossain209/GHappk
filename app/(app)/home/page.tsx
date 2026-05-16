@@ -130,7 +130,7 @@ export default function HomePage() {
   const doEdit = async () => {
     if (!targetTx || !editForm.amount || !editForm.category_id) return
     setActionLoading(true)
-    const { data: updatedCat } = await supabase.from('categories').select('name, icon, color').eq('id', editForm.category_id).single()
+    const { data: updatedCat } = await supabase.from('categories').select('id, user_id, name, icon, color, type, is_default').eq('id', editForm.category_id).single()
     await supabase.from('transactions').update({
       amount: parseFloat(editForm.amount),
       category_id: editForm.category_id,
