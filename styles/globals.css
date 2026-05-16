@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #1B6CA8;
+  --color-accent: #F4A025;
+  --color-bg: #F0F4F8;
+  --color-card: #FFFFFF;
+  --color-text: #1A202C;
+  --color-muted: #64748B;
+  --color-border: #E2E8F0;
+  --color-success: #22C55E;
+  --color-danger: #EF4444;
+  --nav-height: 72px;
+}
+
+.dark {
+  --color-bg: #0F172A;
+  --color-card: #1E293B;
+  --color-text: #F1F5F9;
+  --color-muted: #94A3B8;
+  --color-border: #334155;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-family: 'Hind Siliguri', sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  font-family: 'Hind Siliguri', sans-serif;
+  background-color: var(--color-bg);
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+/* PIN input style */
+.pin-input {
+  letter-spacing: 0.5rem;
+  font-size: 2rem;
+  text-align: center;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* Page transition */
+.page-enter {
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Card styles */
+.card {
+  background: var(--color-card);
+  border-radius: 1.25rem;
+  box-shadow: 0 2px 16px 0 rgba(27, 108, 168, 0.07);
+}
+
+/* Bottom nav safe area */
+.bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Number input hide arrows */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] { -moz-appearance: textfield; }
