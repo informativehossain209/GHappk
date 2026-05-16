@@ -111,19 +111,23 @@ export default function AddPage() {
         <div>
           <label className="text-gray-500 text-xs block mb-2 px-1">ক্যাটাগরি বেছে নিন</label>
           <div className="grid grid-cols-4 gap-2">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setForm({ ...form, category_id: cat.id })}
-                className={cn(
-                  'card p-2 flex flex-col items-center gap-1 transition-all active:scale-95',
-                  form.category_id === cat.id ? 'ring-2 ring-primary-500 bg-primary-50' : ''
-                )}
-              >
-                <span className="text-2xl">{cat.icon}</span>
-                <span className="text-[10px] text-gray-600 text-center leading-tight">{cat.name}</span>
-              </button>
-            ))}
+            {categories.map((cat) => {
+              const selected = form.category_id === cat.id
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setForm({ ...form, category_id: cat.id })}
+                  className="card p-2 flex flex-col items-center gap-1 transition-all active:scale-95 relative"
+                  style={selected ? { outline: '2.5px solid #1B6CA8', backgroundColor: '#EBF4FB' } : {}}
+                >
+                  {selected && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary-500 flex items-center justify-center text-white text-[9px] font-bold">✓</span>
+                  )}
+                  <span className="text-2xl">{cat.icon}</span>
+                  <span className={cn('text-[10px] text-center leading-tight', selected ? 'text-primary-600 font-semibold' : 'text-gray-600')}>{cat.name}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
