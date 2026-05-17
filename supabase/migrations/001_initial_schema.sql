@@ -1,24 +1,21 @@
 -- ================================================================
--- Ghar Khoroch — Database Schema (Multi-User Secure)
--- Run this in your Supabase SQL editor
+-- Ghar Khoroch — Database Schema
+-- Phone + PIN authentication (no Supabase Auth / email required)
 --
--- ⚠️  BEFORE RUNNING:
---   Go to Supabase Dashboard → Authentication → Providers → Email
---   Turn OFF "Enable email confirmations"
---   (The app uses phone numbers as fake emails; no real email is sent)
+-- Run this in your Supabase SQL editor.
 -- ================================================================
 
 create extension if not exists "uuid-ossp";
 
 -- ================================================================
 -- USERS TABLE
--- id is linked to Supabase Auth so each app user has an Auth account
+-- Standalone — NOT linked to Supabase Auth
 -- ================================================================
 create table if not exists public.users (
-  id uuid primary key references auth.users(id) on delete cascade,
+  id uuid default uuid_generate_v4() primary key,
   name text not null,
   phone text not null unique,
-  pin text not null,        -- SHA-256 hashed, used for in-app PIN prompts
+  pin text not null,        -- hashed PIN
   address text,
   created_at timestamptz default now()
 );
@@ -103,7 +100,8 @@ create table if not exists public.shared_access (
 );
 
 -- ================================================================
--- ENABLE ROW LEVEL SECURITY
+-- ROW LEVEL SECURITY
+-- Open policies — access is controlled by the app via PIN verification
 -- ================================================================
 alter table public.users enable row level security;
 alter table public.categories enable row level security;
@@ -113,99 +111,13 @@ alter table public.notices enable row level security;
 alter table public.todos enable row level security;
 alter table public.shared_access enable row level security;
 
--- ================================================================
--- USERS policies — each user owns only their own row
--- ================================================================
-create policy "users_select_own" on public.users
-  for select using (id = auth.uid());
-
-create policy "users_insert_own" on public.users
-  for insert with check (id = auth.uid());
-
-create policy "users_update_own" on public.users
-  for update using (id = auth.uid()) with check (id = auth.uid());
-
--- ================================================================
--- CATEGORIES policies — owner writes, viewers read
--- ================================================================
-create policy "categories_select" on public.categories
-  for select using (
-    user_id = auth.uid() or
-    exists (select 1 from public.shared_access sa
-            where sa.owner_user_id = categories.user_id
-              and sa.viewer_user_id = auth.uid())
-  );
-
-create policy "categories_insert" on public.categories
-  for insert with check (user_id = auth.uid());
-
-create policy "categories_update" on public.categories
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-create policy "categories_delete" on public.categories
-  for delete using (user_id = auth.uid());
-
--- ================================================================
--- TRANSACTIONS policies — owner writes, viewers read
--- ================================================================
-create policy "transactions_select" on public.transactions
-  for select using (
-    user_id = auth.uid() or
-    exists (select 1 from public.shared_access sa
-            where sa.owner_user_id = transactions.user_id
-              and sa.viewer_user_id = auth.uid())
-  );
-
-create policy "transactions_insert" on public.transactions
-  for insert with check (user_id = auth.uid());
-
-create policy "transactions_update" on public.transactions
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-create policy "transactions_delete" on public.transactions
-  for delete using (user_id = auth.uid());
-
--- ================================================================
--- BUDGETS policies — owner writes, viewers read
--- ================================================================
-create policy "budgets_select" on public.budgets
-  for select using (
-    user_id = auth.uid() or
-    exists (select 1 from public.shared_access sa
-            where sa.owner_user_id = budgets.user_id
-              and sa.viewer_user_id = auth.uid())
-  );
-
-create policy "budgets_insert" on public.budgets
-  for insert with check (user_id = auth.uid());
-
-create policy "budgets_update" on public.budgets
-  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-create policy "budgets_delete" on public.budgets
-  for delete using (user_id = auth.uid());
-
--- ================================================================
--- NOTICES policies — owner only
--- ================================================================
-create policy "notices_own" on public.notices
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-
--- ================================================================
--- TODOS policies — owner only
--- ================================================================
-create policy "todos_own" on public.todos
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-
--- ================================================================
--- SHARED_ACCESS policies
--- Owner manages their viewers list; viewer can read their own entry
--- ================================================================
-create policy "shared_access_owner" on public.shared_access
-  for all using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
-
-create policy "shared_access_viewer_read" on public.shared_access
-  for select using (viewer_user_id = auth.uid());
+create policy "open_users"          on public.users          for all using (true) with check (true);
+create policy "open_categories"     on public.categories     for all using (true) with check (true);
+create policy "open_transactions"   on public.transactions   for all using (true) with check (true);
+create policy "open_budgets"        on public.budgets        for all using (true) with check (true);
+create policy "open_notices"        on public.notices        for all using (true) with check (true);
+create policy "open_todos"          on public.todos          for all using (true) with check (true);
+create policy "open_shared_access"  on public.shared_access  for all using (true) with check (true);
 
 -- ================================================================
 -- INDEXES
@@ -221,8 +133,6 @@ create index if not exists idx_shared_viewer          on public.shared_access(vi
 
 -- ================================================================
 -- DONE!
--- Next steps:
---   1. Supabase Dashboard → Auth → Email → disable email confirmations
---   2. Run this entire SQL script
---   3. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local
+-- No Supabase Auth setup needed.
+-- Just add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local
 -- ================================================================

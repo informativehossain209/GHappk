@@ -13,7 +13,6 @@ export default function RegisterPage() {
   const router = useRouter()
   const { setUser } = useAuthStore()
   const [step, setStep] = useState(1)
-  // pinStep controls whether we're setting the PIN or confirming it
   const [pinStep, setPinStep] = useState<'set' | 'confirm'>('set')
   const [form, setForm] = useState({ name: '', phone: '', pin: '', confirmPin: '' })
   const [loading, setLoading] = useState(false)
@@ -24,7 +23,10 @@ export default function RegisterPage() {
     if (!form.phone.trim() || form.phone.length < 11) return setError('সঠিক মোবাইল নম্বর দিন')
     setLoading(true)
     setError('')
-    const { data: existing } = await supabase.from('users').select('id').eq('phone', form.phone.trim())
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('phone', form.phone.trim())
     setLoading(false)
     if (existing && existing.length > 0) {
       return setError('এই মোবাইল নম্বর ইতিমধ্যে নিবন্ধিত।')
@@ -36,26 +38,10 @@ export default function RegisterPage() {
     setLoading(true)
     setError('')
     try {
-      const fakeEmail = `${form.phone.trim()}@ghar-khoroch.app`
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: fakeEmail,
-        password: pin + 'GK##',   // Supabase requires 6+ chars; PIN is 4 digits so we pad consistently
-      })
-
-      if (authError || !authData.user) {
-        setError(authError?.message || 'রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
-        // Reset back to PIN entry on auth failure
-        setForm(f => ({ ...f, pin: '', confirmPin: '' }))
-        setPinStep('set')
-        setLoading(false)
-        return
-      }
-
       const hashed = hashPin(pin)
       const { data: newUser, error: userError } = await supabase
         .from('users')
         .insert({
-          id: authData.user.id,
           name: form.name.trim(),
           phone: form.phone.trim(),
           pin: hashed,
@@ -64,7 +50,6 @@ export default function RegisterPage() {
         .single()
 
       if (userError || !newUser) {
-        await supabase.auth.signOut()
         setError('রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
         setForm(f => ({ ...f, pin: '', confirmPin: '' }))
         setPinStep('set')
@@ -72,6 +57,7 @@ export default function RegisterPage() {
         return
       }
 
+      // Seed default categories
       const expenseCats = DEFAULT_EXPENSE_CATEGORIES.map((c) => ({
         user_id: newUser.id, name: c.name, icon: c.icon, type: 'expense', is_default: true, color: c.color,
       }))
@@ -97,7 +83,6 @@ export default function RegisterPage() {
       if (form.pin.length >= 4) return
       const newPin = form.pin + d
       setForm(f => ({ ...f, pin: newPin }))
-      // Auto-advance to confirm once 4 digits entered
       if (newPin.length === 4) {
         setTimeout(() => setPinStep('confirm'), 200)
       }
@@ -107,14 +92,12 @@ export default function RegisterPage() {
       setForm(f => ({ ...f, confirmPin: newConfirm }))
       if (newConfirm.length === 4) {
         if (form.pin !== newConfirm) {
-          // Mismatch — clear BOTH pins, go back to set step
           setTimeout(() => {
             setError('পিন মিলেনি। আবার নতুন পিন দিন।')
             setForm(f => ({ ...f, pin: '', confirmPin: '' }))
             setPinStep('set')
           }, 300)
         } else {
-          // Match — register
           setTimeout(() => handleRegister(newConfirm), 200)
         }
       }
@@ -127,7 +110,6 @@ export default function RegisterPage() {
       if (form.confirmPin.length > 0) {
         setForm(f => ({ ...f, confirmPin: f.confirmPin.slice(0, -1) }))
       } else {
-        // Backspace on empty confirm → go back to re-enter first PIN
         setForm(f => ({ ...f, pin: '', confirmPin: '' }))
         setPinStep('set')
       }
@@ -169,8 +151,9 @@ export default function RegisterPage() {
                 <input
                   type="tel"
                   value={form.phone}
-                  onChange={e => { setForm(f => ({ ...f, phone: e.target.value })); setError('') }}
+                  onChange={e => { setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })); setError('') }}
                   placeholder="01XXXXXXXXX"
+                  inputMode="numeric"
                   className="w-full bg-white/20 text-white placeholder-white/40 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-white/40"
                 />
               </div>
@@ -187,7 +170,6 @@ export default function RegisterPage() {
 
           {step === 2 && (
             <div>
-              {/* Header — switches label between set and confirm */}
               <div className="mb-5 text-center">
                 <h2 className="text-white font-bold text-lg">
                   {pinStep === 'set' ? 'পিন সেট করুন' : 'পিন নিশ্চিত করুন'}
@@ -197,7 +179,6 @@ export default function RegisterPage() {
                 </p>
               </div>
 
-              {/* Single dot indicator */}
               <div className="flex justify-center gap-4 mb-4">
                 {dots.map((_, i) => (
                   <div
@@ -209,7 +190,6 @@ export default function RegisterPage() {
                 ))}
               </div>
 
-              {/* Progress indicator */}
               <div className="flex justify-center gap-2 mb-5">
                 <div className={`h-1 w-8 rounded-full transition-all ${pinStep === 'set' ? 'bg-white' : 'bg-white/40'}`} />
                 <div className={`h-1 w-8 rounded-full transition-all ${pinStep === 'confirm' ? 'bg-white' : 'bg-white/40'}`} />
@@ -217,7 +197,6 @@ export default function RegisterPage() {
 
               {error && <p className="text-red-200 text-sm text-center mb-4">{error}</p>}
 
-              {/* Single keypad — always present */}
               <div className="grid grid-cols-3 gap-2">
                 {[1,2,3,4,5,6,7,8,9].map(n => (
                   <button

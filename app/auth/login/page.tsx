@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
+import { hashPin } from '@/lib/utils'
 import { X } from 'lucide-react'
 
 export default function LoginPage() {
@@ -31,7 +32,6 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      // Look up the user profile to display their name on the PIN screen
       const { data, error: dbErr } = await supabase
         .from('users')
         .select('id, name')
@@ -69,30 +69,24 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      // Sign in via Supabase Auth — this creates a proper JWT session
-      // so that row-level security policies (auth.uid()) work correctly.
-      const fakeEmail = `${phone.trim()}@ghar-khoroch.app`
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: fakeEmail,
-        password: pinValue + 'GK##',   // Must match the suffix used during registration
-      })
+      // Fetch the full user profile and verify PIN
+      const { data: profile, error: profileErr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', foundUser.id)
+        .single()
 
-      if (authError || !authData.user) {
-        setError('ভুল পিন। আবার চেষ্টা করুন।')
+      if (profileErr || !profile) {
+        setError('প্রোফাইল লোড করতে সমস্যা হয়েছে।')
         setPin('')
         setLoading(false)
         return
       }
 
-      // Fetch the full user profile
-      const { data: profile } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single()
-
-      if (!profile) {
-        setError('প্রোফাইল লোড করতে সমস্যা হয়েছে।')
+      // Verify the hashed PIN
+      if (profile.pin !== hashPin(pinValue)) {
+        setError('ভুল পিন। আবার চেষ্টা করুন।')
+        setPin('')
         setLoading(false)
         return
       }
@@ -103,7 +97,7 @@ export default function LoginPage() {
       const { data: sharedRows } = await supabase
         .from('shared_access')
         .select('owner_user_id, owner:users!shared_access_owner_user_id_fkey(id, name, phone)')
-        .eq('viewer_user_id', authData.user.id)
+        .eq('viewer_user_id', profile.id)
         .eq('permission', 'view')
 
       if (sharedRows && sharedRows.length > 0) {
@@ -146,7 +140,7 @@ export default function LoginPage() {
               <input
                 type="tel"
                 value={phone}
-                onChange={(e) => { setPhone(e.target.value.replace(/\D/, '').slice(0, 11)); setError('') }}
+                onChange={(e) => { setPhone(e.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }}
                 placeholder="017XXXXXXXX"
                 maxLength={11}
                 inputMode="numeric"
@@ -201,7 +195,6 @@ export default function LoginPage() {
         <p className="text-white/30 text-xs mt-4">Developed by Sakib Hossain</p>
       </div>
 
-      {/* Owner picker for viewers with multiple owner accounts */}
       {viewerOwners.length > 1 && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.6)'}}>
           <div className="bg-white rounded-t-3xl w-full max-w-md p-6 animate-slide-up" style={{paddingBottom:'max(1.5rem, env(safe-area-inset-bottom))'}}>
