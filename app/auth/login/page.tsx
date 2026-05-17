@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/auth'
-import { hashPin } from '@/lib/utils'
 import { X } from 'lucide-react'
 
 export default function LoginPage() {
@@ -17,8 +16,7 @@ export default function LoginPage() {
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [foundUser, setFoundUser] = useState<{ id: string; name: string; pin: string } | null>(null)
-  // For viewer: if logged-in user has multiple owners, let them pick
+  const [foundUser, setFoundUser] = useState<{ id: string; name: string } | null>(null)
   const [viewerOwners, setViewerOwners] = useState<{ id: string; name: string; phone: string }[]>([])
 
   useEffect(() => {
@@ -33,14 +31,14 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     try {
+      // Look up the user profile to display their name on the PIN screen
       const { data, error: dbErr } = await supabase
         .from('users')
-        .select('id, name, pin')
+        .select('id, name')
         .eq('phone', phone.trim())
         .single()
       if (dbErr || !data) {
         setError('এই নম্বরে কোনো অ্যাকাউন্ট নেই')
-        setLoading(false)
         return
       }
       setFoundUser(data)
@@ -71,38 +69,54 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     try {
-      const hashed = hashPin(pinValue)
-      if (hashed !== foundUser.pin) {
+      // Sign in via Supabase Auth — this creates a proper JWT session
+      // so that row-level security policies (auth.uid()) work correctly.
+      const fakeEmail = `${phone.trim()}@ghar-khoroch.app`
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: fakeEmail,
+        password: pinValue,
+      })
+
+      if (authError || !authData.user) {
         setError('ভুল পিন। আবার চেষ্টা করুন।')
         setPin('')
         setLoading(false)
         return
       }
-      const { data } = await supabase.from('users').select('*').eq('id', foundUser.id).single()
-      if (data) {
-        setUser(data)
-        // Check if this user is a viewer for someone else's account
-        const { data: sharedRows } = await supabase
-          .from('shared_access')
-          .select('owner_user_id, owner:users!shared_access_owner_user_id_fkey(id, name, phone)')
-          .eq('viewer_user_id', foundUser.id)
-          .eq('permission', 'view')
 
-        if (sharedRows && sharedRows.length > 0) {
-          const owners = sharedRows.map((r: any) => r.owner).filter(Boolean)
-          if (owners.length === 1) {
-            // Only one owner — go straight to viewer mode
-            setIsViewer(true, owners[0].id)
-            router.replace('/home')
-          } else {
-            // Multiple owners — let user pick
-            setViewerOwners(owners)
-          }
-        } else {
-          // Regular owner account
-          setIsViewer(false)
+      // Fetch the full user profile
+      const { data: profile } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single()
+
+      if (!profile) {
+        setError('প্রোফাইল লোড করতে সমস্যা হয়েছে।')
+        setLoading(false)
+        return
+      }
+
+      setUser(profile)
+
+      // Check if this user is a viewer for another account
+      const { data: sharedRows } = await supabase
+        .from('shared_access')
+        .select('owner_user_id, owner:users!shared_access_owner_user_id_fkey(id, name, phone)')
+        .eq('viewer_user_id', authData.user.id)
+        .eq('permission', 'view')
+
+      if (sharedRows && sharedRows.length > 0) {
+        const owners = sharedRows.map((r: any) => r.owner).filter(Boolean)
+        if (owners.length === 1) {
+          setIsViewer(true, owners[0].id)
           router.replace('/home')
+        } else {
+          setViewerOwners(owners)
         }
+      } else {
+        setIsViewer(false)
+        router.replace('/home')
       }
     } catch {
       setError('কোনো সমস্যা হয়েছে। আবার চেষ্টা করুন।')
@@ -178,6 +192,7 @@ export default function LoginPage() {
           )}
         </div>
       </div>
+
       <div className="text-center pb-8 px-4">
         <p className="text-white/60 text-sm">
           নতুন অ্যাকাউন্ট?{' '}
@@ -186,10 +201,10 @@ export default function LoginPage() {
         <p className="text-white/30 text-xs mt-4">Developed by Sakib Hossain</p>
       </div>
 
-      {/* Owner picker modal for viewers with multiple owners */}
+      {/* Owner picker for viewers with multiple owner accounts */}
       {viewerOwners.length > 1 && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.6)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 animate-slide-up">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.6)'}}>
+          <div className="bg-white rounded-t-3xl w-full max-w-md p-6 animate-slide-up" style={{paddingBottom:'max(1.5rem, env(safe-area-inset-bottom))'}}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800">👁️ কোন অ্যাকাউন্ট দেখবেন?</h3>
               <button onClick={() => setViewerOwners([])} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">

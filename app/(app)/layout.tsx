@@ -15,9 +15,13 @@ const navItems = [
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, isViewer } = useAuthStore()
+  const { user, isViewer, initializeAuth } = useAuthStore()
   const router = useRouter()
   const pathname = usePathname()
+
+  useEffect(() => {
+    initializeAuth()
+  }, [])
 
   useEffect(() => {
     if (!user) {

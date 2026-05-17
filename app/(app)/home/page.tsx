@@ -117,33 +117,29 @@ export default function HomePage() {
   const doDelete = async () => {
     if (!targetTx) return
     setActionLoading(true)
-    await supabase.from('transactions').delete().eq('id', targetTx.id)
-    setTransactions(prev => prev.filter(t => t.id !== targetTx.id))
-    const deleted = targetTx
-    setSummary(s => ({
-      income: deleted.type === 'income' ? s.income - deleted.amount : s.income,
-      expense: deleted.type === 'expense' ? s.expense - deleted.amount : s.expense,
-    }))
+    const { error } = await supabase.from('transactions').delete().eq('id', targetTx.id)
     setActionLoading(false)
+    if (error) { closeModal(); return }
     closeModal()
+    // Refetch everything so summary, todayExpense, dailyAvg, insights bar
+    // all reflect the correct post-delete numbers from the database.
+    fetchData()
   }
 
   const doEdit = async () => {
     if (!targetTx || !editForm.amount || !editForm.category_id) return
     setActionLoading(true)
-    const { data: updatedCat } = await supabase.from('categories').select('id, user_id, name, icon, color, type, is_default').eq('id', editForm.category_id).single()
-    await supabase.from('transactions').update({
+    const { error } = await supabase.from('transactions').update({
       amount: parseFloat(editForm.amount),
       category_id: editForm.category_id,
       date: editForm.date,
       note: editForm.note || null,
     }).eq('id', targetTx.id)
-    setTransactions(prev => prev.map(t => t.id === targetTx.id ? {
-      ...t, amount: parseFloat(editForm.amount), category_id: editForm.category_id,
-      date: editForm.date, note: editForm.note || undefined, category: updatedCat || t.category,
-    } : t))
     setActionLoading(false)
+    if (error) { closeModal(); return }
     closeModal()
+    // Refetch everything so summary, todayExpense, dailyAvg, insights bar
+    // all reflect the correct post-edit numbers from the database.
     fetchData()
   }
 
@@ -370,8 +366,8 @@ export default function HomePage() {
 
       {/* PIN Modal */}
       {(modalMode === 'pin-delete' || modalMode === 'pin-edit') && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
-          <div className="bg-white rounded-t-3xl w-full max-w-md p-6">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
+          <div className="bg-white rounded-t-3xl w-full max-w-md p-6" style={{paddingBottom:'max(1.5rem, env(safe-area-inset-bottom))'}}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-gray-800 text-base">
                 {modalMode === 'pin-delete' ? '🗑️ মুছে ফেলুন' : '✏️ সম্পাদনা করুন'}
@@ -413,7 +409,7 @@ export default function HomePage() {
 
       {/* Edit Modal */}
       {modalMode === 'edit' && targetTx && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{backgroundColor:'rgba(0,0,0,0.5)'}}>
           <div className="bg-white rounded-t-3xl w-full max-w-md flex flex-col" style={{maxHeight:'90vh'}}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
@@ -462,7 +458,7 @@ export default function HomePage() {
               </div>
             </div>
             {/* Sticky save button */}
-            <div className="flex-shrink-0 px-6 py-4 border-t border-gray-100 bg-white">
+            <div className="flex-shrink-0 px-6 pt-4 border-t border-gray-100 bg-white" style={{paddingBottom:'max(1rem, env(safe-area-inset-bottom))'}}> 
               <button onClick={doEdit} disabled={actionLoading || !editForm.amount || !editForm.category_id}
                 className="w-full bg-primary-500 text-white font-bold py-3.5 rounded-2xl transition-all active:scale-95 disabled:opacity-50">
                 {actionLoading ? 'সংরক্ষণ হচ্ছে...' : '✅ পরিবর্তন সংরক্ষণ করুন'}

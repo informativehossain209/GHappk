@@ -164,32 +164,31 @@ export default function ReportsPage() {
   const doDelete = async () => {
     if (!targetTx) return
     setActionLoading(true)
-    await supabase.from('transactions').delete().eq('id', targetTx.id)
-    setTransactions(prev => prev.filter(t => t.id !== targetTx.id))
+    const { error } = await supabase.from('transactions').delete().eq('id', targetTx.id)
     setActionLoading(false)
+    if (error) { closeModal(); return }
+    // Optimistic remove for instant feedback, then DB refetch to confirm totals
+    setTransactions(prev => prev.filter(t => t.id !== targetTx.id))
     closeModal()
+    fetchTransactions()
   }
 
   const doEdit = async () => {
     if (!targetTx || !editForm.amount || !editForm.category_id) return
     setActionLoading(true)
-    const { data: updatedCat } = await supabase.from('categories').select('id, user_id, name, icon, color, type, is_default').eq('id', editForm.category_id).single()
-    await supabase.from('transactions').update({
+    const { error } = await supabase.from('transactions').update({
       amount: parseFloat(editForm.amount),
       category_id: editForm.category_id,
       date: editForm.date,
       note: editForm.note || null,
     }).eq('id', targetTx.id)
-    setTransactions(prev => prev.map(t => t.id === targetTx.id ? {
-      ...t,
-      amount: parseFloat(editForm.amount),
-      category_id: editForm.category_id,
-      date: editForm.date,
-      note: editForm.note || undefined,
-      category: updatedCat || t.category,
-    } : t))
     setActionLoading(false)
+    if (error) { closeModal(); return }
     closeModal()
+    // Always refetch from DB after edit:
+    //  - If date was changed outside the current filter window, the entry vanishes correctly
+    //  - All totals (income, expense, profit) recalculate from actual DB values
+    fetchTransactions()
   }
 
   const closeModal = () => {

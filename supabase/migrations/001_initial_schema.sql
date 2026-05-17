@@ -1,19 +1,24 @@
 -- ================================================================
--- Ghar Khoroch — Database Schema
+-- Ghar Khoroch — Database Schema (Multi-User Secure)
 -- Run this in your Supabase SQL editor
+--
+-- ⚠️  BEFORE RUNNING:
+--   Go to Supabase Dashboard → Authentication → Providers → Email
+--   Turn OFF "Enable email confirmations"
+--   (The app uses phone numbers as fake emails; no real email is sent)
 -- ================================================================
 
--- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
 -- ================================================================
 -- USERS TABLE
+-- id is linked to Supabase Auth so each app user has an Auth account
 -- ================================================================
 create table if not exists public.users (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid primary key references auth.users(id) on delete cascade,
   name text not null,
   phone text not null unique,
-  pin text not null,
+  pin text not null,        -- SHA-256 hashed, used for in-app PIN prompts
   address text,
   created_at timestamptz default now()
 );
@@ -54,7 +59,7 @@ create table if not exists public.budgets (
   user_id uuid not null references public.users(id) on delete cascade,
   category_id uuid not null references public.categories(id) on delete cascade,
   monthly_limit numeric(12, 2) not null check (monthly_limit > 0),
-  month text not null, -- format: YYYY-MM
+  month text not null,
   created_at timestamptz default now(),
   unique(user_id, category_id, month)
 );
@@ -98,10 +103,8 @@ create table if not exists public.shared_access (
 );
 
 -- ================================================================
--- ROW LEVEL SECURITY (RLS)
+-- ENABLE ROW LEVEL SECURITY
 -- ================================================================
-
--- Enable RLS
 alter table public.users enable row level security;
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
@@ -110,52 +113,116 @@ alter table public.notices enable row level security;
 alter table public.todos enable row level security;
 alter table public.shared_access enable row level security;
 
--- NOTE: We use a custom auth system (PIN-based), not Supabase Auth.
--- RLS policies use anon key with service role bypass for our custom queries.
--- For production, consider using Supabase Auth with custom metadata.
+-- ================================================================
+-- USERS policies — each user owns only their own row
+-- ================================================================
+create policy "users_select_own" on public.users
+  for select using (id = auth.uid());
 
--- For the anon role, allow all operations (the app handles auth logic)
--- This is appropriate for a private family app.
+create policy "users_insert_own" on public.users
+  for insert with check (id = auth.uid());
 
-create policy "Allow anon full access to users" on public.users
-  for all using (true) with check (true);
+create policy "users_update_own" on public.users
+  for update using (id = auth.uid()) with check (id = auth.uid());
 
-create policy "Allow anon full access to categories" on public.categories
-  for all using (true) with check (true);
+-- ================================================================
+-- CATEGORIES policies — owner writes, viewers read
+-- ================================================================
+create policy "categories_select" on public.categories
+  for select using (
+    user_id = auth.uid() or
+    exists (select 1 from public.shared_access sa
+            where sa.owner_user_id = categories.user_id
+              and sa.viewer_user_id = auth.uid())
+  );
 
-create policy "Allow anon full access to transactions" on public.transactions
-  for all using (true) with check (true);
+create policy "categories_insert" on public.categories
+  for insert with check (user_id = auth.uid());
 
-create policy "Allow anon full access to budgets" on public.budgets
-  for all using (true) with check (true);
+create policy "categories_update" on public.categories
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 
-create policy "Allow anon full access to notices" on public.notices
-  for all using (true) with check (true);
+create policy "categories_delete" on public.categories
+  for delete using (user_id = auth.uid());
 
-create policy "Allow anon full access to todos" on public.todos
-  for all using (true) with check (true);
+-- ================================================================
+-- TRANSACTIONS policies — owner writes, viewers read
+-- ================================================================
+create policy "transactions_select" on public.transactions
+  for select using (
+    user_id = auth.uid() or
+    exists (select 1 from public.shared_access sa
+            where sa.owner_user_id = transactions.user_id
+              and sa.viewer_user_id = auth.uid())
+  );
 
-create policy "Allow anon full access to shared_access" on public.shared_access
-  for all using (true) with check (true);
+create policy "transactions_insert" on public.transactions
+  for insert with check (user_id = auth.uid());
+
+create policy "transactions_update" on public.transactions
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create policy "transactions_delete" on public.transactions
+  for delete using (user_id = auth.uid());
+
+-- ================================================================
+-- BUDGETS policies — owner writes, viewers read
+-- ================================================================
+create policy "budgets_select" on public.budgets
+  for select using (
+    user_id = auth.uid() or
+    exists (select 1 from public.shared_access sa
+            where sa.owner_user_id = budgets.user_id
+              and sa.viewer_user_id = auth.uid())
+  );
+
+create policy "budgets_insert" on public.budgets
+  for insert with check (user_id = auth.uid());
+
+create policy "budgets_update" on public.budgets
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create policy "budgets_delete" on public.budgets
+  for delete using (user_id = auth.uid());
+
+-- ================================================================
+-- NOTICES policies — owner only
+-- ================================================================
+create policy "notices_own" on public.notices
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ================================================================
+-- TODOS policies — owner only
+-- ================================================================
+create policy "todos_own" on public.todos
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ================================================================
+-- SHARED_ACCESS policies
+-- Owner manages their viewers list; viewer can read their own entry
+-- ================================================================
+create policy "shared_access_owner" on public.shared_access
+  for all using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
+
+create policy "shared_access_viewer_read" on public.shared_access
+  for select using (viewer_user_id = auth.uid());
 
 -- ================================================================
 -- INDEXES
 -- ================================================================
 create index if not exists idx_transactions_user_date on public.transactions(user_id, date desc);
-create index if not exists idx_transactions_category on public.transactions(category_id);
-create index if not exists idx_categories_user on public.categories(user_id, type);
-create index if not exists idx_budgets_user_month on public.budgets(user_id, month);
-create index if not exists idx_notices_user on public.notices(user_id, is_read);
-create index if not exists idx_todos_user on public.todos(user_id, completed, date);
-create index if not exists idx_shared_owner on public.shared_access(owner_user_id);
-create index if not exists idx_shared_viewer on public.shared_access(viewer_user_id);
+create index if not exists idx_transactions_category  on public.transactions(category_id);
+create index if not exists idx_categories_user        on public.categories(user_id, type);
+create index if not exists idx_budgets_user_month     on public.budgets(user_id, month);
+create index if not exists idx_notices_user           on public.notices(user_id, is_read);
+create index if not exists idx_todos_user             on public.todos(user_id, completed, date);
+create index if not exists idx_shared_owner           on public.shared_access(owner_user_id);
+create index if not exists idx_shared_viewer          on public.shared_access(viewer_user_id);
 
 -- ================================================================
--- DONE
--- ================================================================
--- Your database is ready!
+-- DONE!
 -- Next steps:
--- 1. Go to your Supabase project → SQL Editor
--- 2. Paste and run this entire script
--- 3. Copy your Project URL and Anon Key
--- 4. Add them to your .env.local file
+--   1. Supabase Dashboard → Auth → Email → disable email confirmations
+--   2. Run this entire SQL script
+--   3. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local
+-- ================================================================

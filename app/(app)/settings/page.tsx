@@ -96,8 +96,8 @@ export default function SettingsPage() {
     setViewerPin('')
   }
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     router.replace('/auth/login')
   }
 
