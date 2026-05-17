@@ -13,6 +13,8 @@ export default function RegisterPage() {
   const router = useRouter()
   const { setUser } = useAuthStore()
   const [step, setStep] = useState(1)
+  // pinStep controls whether we're setting the PIN or confirming it
+  const [pinStep, setPinStep] = useState<'set' | 'confirm'>('set')
   const [form, setForm] = useState({ name: '', phone: '', pin: '', confirmPin: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -30,31 +32,26 @@ export default function RegisterPage() {
     setStep(2)
   }
 
-  const handleRegister = async () => {
-    if (form.pin.length !== 4) return setError('৪ সংখ্যার পিন দিন')
-    if (form.pin !== form.confirmPin) return setError('পিন মিলছে না')
-
+  const handleRegister = async (pin: string) => {
     setLoading(true)
     setError('')
     try {
-      // Step 1: Create a Supabase Auth account.
-      // We use phone@ghar-khoroch.app as a fake email (no real email is sent).
-      // Make sure "Enable email confirmations" is OFF in Supabase Auth settings.
       const fakeEmail = `${form.phone.trim()}@ghar-khoroch.app`
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: fakeEmail,
-        password: form.pin,   // Supabase hashes this; we also store our own hash below
+        password: pin,
       })
 
       if (authError || !authData.user) {
         setError(authError?.message || 'রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
+        // Reset back to PIN entry on auth failure
+        setForm(f => ({ ...f, pin: '', confirmPin: '' }))
+        setPinStep('set')
         setLoading(false)
         return
       }
 
-      // Step 2: Insert the user profile linked to the auth account.
-      // id must equal authData.user.id so the RLS policy (id = auth.uid()) works.
-      const hashed = hashPin(form.pin)
+      const hashed = hashPin(pin)
       const { data: newUser, error: userError } = await supabase
         .from('users')
         .insert({
@@ -67,14 +64,14 @@ export default function RegisterPage() {
         .single()
 
       if (userError || !newUser) {
-        // Clean up the auth user we just created so the phone can be re-used
         await supabase.auth.signOut()
         setError('রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
+        setForm(f => ({ ...f, pin: '', confirmPin: '' }))
+        setPinStep('set')
         setLoading(false)
         return
       }
 
-      // Step 3: Seed default categories
       const expenseCats = DEFAULT_EXPENSE_CATEGORIES.map((c) => ({
         user_id: newUser.id, name: c.name, icon: c.icon, type: 'expense', is_default: true, color: c.color,
       }))
@@ -87,32 +84,59 @@ export default function RegisterPage() {
       router.replace('/home')
     } catch {
       setError('কোনো সমস্যা হয়েছে। আবার চেষ্টা করুন।')
+      setForm(f => ({ ...f, pin: '', confirmPin: '' }))
+      setPinStep('set')
     } finally {
       setLoading(false)
     }
   }
 
   const handlePinDigit = (d: string) => {
-    if (form.pin.length < 4) {
-      // Still entering the first PIN
-      setForm(f => ({ ...f, pin: f.pin + d }))
-      setError('')
+    setError('')
+    if (pinStep === 'set') {
+      if (form.pin.length >= 4) return
+      const newPin = form.pin + d
+      setForm(f => ({ ...f, pin: newPin }))
+      // Auto-advance to confirm once 4 digits entered
+      if (newPin.length === 4) {
+        setTimeout(() => setPinStep('confirm'), 200)
+      }
     } else {
-      // First PIN complete — now filling confirmPin
-      if (form.confirmPin.length < 4) {
-        const newConfirm = form.confirmPin + d
-        setForm(f => ({ ...f, confirmPin: newConfirm }))
-        setError('')
-        if (newConfirm.length === 4) {
-          if (form.pin !== newConfirm) {
-            setError('পিন মিলছে না')
-            setForm(f => ({ ...f, confirmPin: '' }))
-          }
+      if (form.confirmPin.length >= 4) return
+      const newConfirm = form.confirmPin + d
+      setForm(f => ({ ...f, confirmPin: newConfirm }))
+      if (newConfirm.length === 4) {
+        if (form.pin !== newConfirm) {
+          // Mismatch — clear BOTH pins, go back to set step
+          setTimeout(() => {
+            setError('পিন মিলেনি। আবার নতুন পিন দিন।')
+            setForm(f => ({ ...f, pin: '', confirmPin: '' }))
+            setPinStep('set')
+          }, 300)
+        } else {
+          // Match — register
+          setTimeout(() => handleRegister(newConfirm), 200)
         }
       }
     }
   }
 
+  const handleDelete = () => {
+    setError('')
+    if (pinStep === 'confirm') {
+      if (form.confirmPin.length > 0) {
+        setForm(f => ({ ...f, confirmPin: f.confirmPin.slice(0, -1) }))
+      } else {
+        // Backspace on empty confirm → go back to re-enter first PIN
+        setForm(f => ({ ...f, pin: '', confirmPin: '' }))
+        setPinStep('set')
+      }
+    } else {
+      setForm(f => ({ ...f, pin: f.pin.slice(0, -1) }))
+    }
+  }
+
+  const activeDots = pinStep === 'set' ? form.pin.length : form.confirmPin.length
   const dots = Array(4).fill(0)
 
   return (
@@ -163,56 +187,61 @@ export default function RegisterPage() {
 
           {step === 2 && (
             <div>
-              <h2 className="text-white font-bold text-lg mb-1">পিন সেট করুন</h2>
-              <p className="text-white/60 text-xs mb-5">৪ সংখ্যার গোপন পিন (মনে রাখুন)</p>
-              <div className="flex justify-center gap-4 mb-5">
+              {/* Header — switches label between set and confirm */}
+              <div className="mb-5 text-center">
+                <h2 className="text-white font-bold text-lg">
+                  {pinStep === 'set' ? 'পিন সেট করুন' : 'পিন নিশ্চিত করুন'}
+                </h2>
+                <p className="text-white/60 text-xs mt-1">
+                  {pinStep === 'set' ? '৪ সংখ্যার গোপন পিন (মনে রাখুন)' : 'আবার একই পিন দিন'}
+                </p>
+              </div>
+
+              {/* Single dot indicator */}
+              <div className="flex justify-center gap-4 mb-4">
                 {dots.map((_, i) => (
-                  <div key={i} className={`w-4 h-4 rounded-full transition-all duration-200 ${i < form.pin.length ? 'bg-white scale-110' : 'bg-white/30'}`} />
+                  <div
+                    key={i}
+                    className={`w-4 h-4 rounded-full transition-all duration-200 ${
+                      i < activeDots ? 'bg-white scale-110' : 'bg-white/30'
+                    }`}
+                  />
                 ))}
               </div>
-              {error && <p className="text-red-200 text-sm text-center mb-3">{error}</p>}
+
+              {/* Progress indicator */}
+              <div className="flex justify-center gap-2 mb-5">
+                <div className={`h-1 w-8 rounded-full transition-all ${pinStep === 'set' ? 'bg-white' : 'bg-white/40'}`} />
+                <div className={`h-1 w-8 rounded-full transition-all ${pinStep === 'confirm' ? 'bg-white' : 'bg-white/40'}`} />
+              </div>
+
+              {error && <p className="text-red-200 text-sm text-center mb-4">{error}</p>}
+
+              {/* Single keypad — always present */}
               <div className="grid grid-cols-3 gap-2">
                 {[1,2,3,4,5,6,7,8,9].map(n => (
-                  <button key={n} onClick={() => handlePinDigit(String(n))}
-                    className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all">{n}</button>
+                  <button
+                    key={n}
+                    onClick={() => handlePinDigit(String(n))}
+                    disabled={loading}
+                    className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all disabled:opacity-50"
+                  >{n}</button>
                 ))}
                 <div />
-                <button onClick={() => handlePinDigit('0')} className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all">0</button>
-                <button onClick={() => {
-                  if (form.pin.length === 4) {
-                    setForm(f => ({ ...f, confirmPin: f.confirmPin.slice(0, -1) }))
-                  } else {
-                    setForm(f => ({ ...f, pin: f.pin.slice(0, -1) }))
-                  }
-                  setError('')
-                }} className="h-12 rounded-2xl bg-white/20 text-white text-lg active:bg-white/30 active:scale-95 transition-all">⌫</button>
+                <button
+                  onClick={() => handlePinDigit('0')}
+                  disabled={loading}
+                  className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all disabled:opacity-50"
+                >0</button>
+                <button
+                  onClick={handleDelete}
+                  className="h-12 rounded-2xl bg-white/20 text-white text-lg active:bg-white/30 active:scale-95 transition-all"
+                >⌫</button>
               </div>
-              {form.pin.length === 4 && (
-                <div className="mt-5">
-                  <p className="text-white/70 text-xs mb-3 text-center">পিন নিশ্চিত করুন</p>
-                  <div className="flex justify-center gap-4 mb-4">
-                    {dots.map((_, i) => (
-                      <div key={i} className={`w-4 h-4 rounded-full transition-all duration-200 ${i < form.confirmPin.length ? 'bg-white scale-110' : 'bg-white/30'}`} />
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[1,2,3,4,5,6,7,8,9].map(n => (
-                      <button key={n} onClick={() => handlePinDigit(String(n))}
-                        className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all">{n}</button>
-                    ))}
-                    <div />
-                    <button onClick={() => handlePinDigit('0')} className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all">0</button>
-                    <button onClick={() => setForm(f => ({ ...f, confirmPin: f.confirmPin.slice(0, -1) }))} className="h-12 rounded-2xl bg-white/20 text-white text-lg active:bg-white/30 active:scale-95 transition-all">⌫</button>
-                  </div>
-                  {form.confirmPin.length === 4 && form.pin === form.confirmPin && (
-                    <button
-                      onClick={handleRegister}
-                      disabled={loading}
-                      className="w-full bg-white text-primary-600 font-bold py-3.5 rounded-2xl mt-4 active:scale-95 transition-all disabled:opacity-50"
-                    >
-                      {loading ? 'অ্যাকাউন্ট তৈরি হচ্ছে...' : '✅ অ্যাকাউন্ট তৈরি করুন'}
-                    </button>
-                  )}
+
+              {loading && (
+                <div className="flex justify-center mt-5">
+                  <div className="w-6 h-6 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                 </div>
               )}
             </div>
