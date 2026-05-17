@@ -74,7 +74,7 @@ export default function LoginPage() {
       const fakeEmail = `${phone.trim()}@ghar-khoroch.app`
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
-        password: pinValue,
+        password: pinValue + 'GK##',   // Must match the suffix used during registration
       })
 
       if (authError || !authData.user) {

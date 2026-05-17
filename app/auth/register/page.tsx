@@ -39,7 +39,7 @@ export default function RegisterPage() {
       const fakeEmail = `${form.phone.trim()}@ghar-khoroch.app`
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: fakeEmail,
-        password: pin,
+        password: pin + 'GK##',   // Supabase requires 6+ chars; PIN is 4 digits so we pad consistently
       })
 
       if (authError || !authData.user) {
