@@ -132,6 +132,16 @@ create index if not exists idx_shared_owner           on public.shared_access(ow
 create index if not exists idx_shared_viewer          on public.shared_access(viewer_user_id);
 
 -- ================================================================
+-- GRANT table access to the anon and authenticated roles
+-- Required so the Supabase anon key can actually read/write data.
+-- RLS policies above control row-level filtering, but Postgres-level
+-- permissions must be granted separately.
+-- ================================================================
+grant usage on schema public to anon, authenticated;
+grant all on all tables in schema public to anon, authenticated;
+grant all on all sequences in schema public to anon, authenticated;
+
+-- ================================================================
 -- DONE!
 -- No Supabase Auth setup needed.
 -- Just add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local

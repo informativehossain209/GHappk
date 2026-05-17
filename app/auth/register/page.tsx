@@ -50,7 +50,7 @@ export default function RegisterPage() {
         .single()
 
       if (userError || !newUser) {
-        setError('রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
+        setError(userError?.message || 'রেজিস্ট্রেশন ব্যর্থ হয়েছে। আবার চেষ্টা করুন।')
         setForm(f => ({ ...f, pin: '', confirmPin: '' }))
         setPinStep('set')
         setLoading(false)
