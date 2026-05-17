@@ -93,12 +93,12 @@ export default function RegisterPage() {
   }
 
   const handlePinDigit = (d: string) => {
-    if (step === 2) {
-      if (form.pin.length < 4) {
-        setForm(f => ({ ...f, pin: f.pin + d }))
-        setError('')
-      }
+    if (form.pin.length < 4) {
+      // Still entering the first PIN
+      setForm(f => ({ ...f, pin: f.pin + d }))
+      setError('')
     } else {
+      // First PIN complete — now filling confirmPin
       if (form.confirmPin.length < 4) {
         const newConfirm = form.confirmPin + d
         setForm(f => ({ ...f, confirmPin: newConfirm }))
@@ -178,7 +178,14 @@ export default function RegisterPage() {
                 ))}
                 <div />
                 <button onClick={() => handlePinDigit('0')} className="h-12 rounded-2xl bg-white/20 text-white text-lg font-semibold active:bg-white/30 active:scale-95 transition-all">0</button>
-                <button onClick={() => setForm(f => ({ ...f, pin: f.pin.slice(0, -1) }))} className="h-12 rounded-2xl bg-white/20 text-white text-lg active:bg-white/30 active:scale-95 transition-all">⌫</button>
+                <button onClick={() => {
+                  if (form.pin.length === 4) {
+                    setForm(f => ({ ...f, confirmPin: f.confirmPin.slice(0, -1) }))
+                  } else {
+                    setForm(f => ({ ...f, pin: f.pin.slice(0, -1) }))
+                  }
+                  setError('')
+                }} className="h-12 rounded-2xl bg-white/20 text-white text-lg active:bg-white/30 active:scale-95 transition-all">⌫</button>
               </div>
               {form.pin.length === 4 && (
                 <div className="mt-5">
