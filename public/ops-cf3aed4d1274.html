@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>দোকানদার — প্ল্যাটফর্ম অ্যাডমিন</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Baloo+Da+2:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --header:#1E7145; --hdr1:#123D26; --hdr2:#25995C;
+    --body-bg:#EFF4F1; --card:#FFFFFF; --bdr:#DCE6E0; --text:#12201A;
+    --muted:#6B786F; --danger:#C1443C; --success:#3B6D11; --kpi-blue:#0C447C;
+    --amber-bg:#FAEEDA; --amber-fg:#854F0B; --gold:#F2B84B;
+    --radius:16px; --shadow:0 2px 10px rgba(18,32,26,.07);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Hind Siliguri',sans-serif;background:var(--body-bg);color:var(--text);}
+  button{font-family:inherit;cursor:pointer;}
+  input,select{font-family:inherit;}
+  .num{font-variant-numeric:tabular-nums;}
+  #app{max-width:560px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:32px;}
+  .topbar{background:linear-gradient(100deg,var(--hdr1),var(--hdr2));color:#fff;padding:18px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20;box-shadow:0 2px 10px rgba(18,61,38,.25);}
+  .topbar .shopinfo{flex:1;min-width:0;}
+  .topbar .shopname{font-weight:700;font-size:16px;}
+  .topbar .shopid{font-size:11px;opacity:.85;}
+  .gear{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+  .backbtn{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.15);border:none;color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;}
+  .screen{padding:14px;}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:10px;border:1.5px solid var(--bdr);box-shadow:var(--shadow);}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .muted{color:var(--muted);font-size:12.5px;}
+  .danger{color:var(--danger);}
+  .success{color:var(--success);}
+  h2.pagetitle{font-size:17px;margin:2px 0 12px;font-weight:700;}
+  input[type=text],input[type=password],input[type=tel],input[type=number]{
+    width:100%;padding:10px 12px;border:1px solid var(--bdr);border-radius:10px;font-size:14px;margin-bottom:10px;background:var(--card);color:inherit;
+  }
+  label{font-size:12.5px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted);}
+  .btn{display:inline-block;padding:11px 18px;border-radius:11px;border:none;font-weight:700;font-size:14px;text-align:center;transition:.12s;}
+  .btn:active{transform:scale(.97);}
+  .btn-primary{background:linear-gradient(100deg,var(--hdr1),var(--hdr2));color:#fff;width:100%;box-shadow:0 3px 10px rgba(18,61,38,.3);}
+  .btn-outline{background:transparent;border:1.5px solid var(--header);color:var(--header);width:100%;}
+  .btn-danger{background:var(--danger);color:#fff;}
+  .badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;}
+  .badge-danger{background:#FCE7E5;color:var(--danger);}
+  .badge-success{background:#E7F1DE;color:var(--success);}
+  .badge-warn{background:var(--amber-bg);color:var(--amber-fg);}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;}
+  .tab{padding:8px 14px;border-radius:999px;background:var(--card);border:1.5px solid var(--bdr);font-size:13px;font-weight:600;white-space:nowrap;}
+  .tab.active{background:linear-gradient(100deg,var(--hdr1),var(--hdr2));color:#fff;border-color:transparent;}
+  .kpi-card{background:linear-gradient(135deg,var(--kpi-blue),#1665B0);color:#fff;margin:12px 14px;border-radius:18px;padding:18px;box-shadow:0 4px 16px rgba(12,68,124,.28);}
+  .kpi-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;}
+  .kpi-row .big{font-size:22px;font-weight:800;font-family:'Baloo Da 2';}
+  .progress-track{background:rgba(255,255,255,.25);height:8px;border-radius:8px;overflow:hidden;}
+  .progress-fill{background:var(--gold);height:100%;border-radius:8px;}
+  .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 14px 4px;}
+  .metric{background:var(--card);border:1.5px solid var(--bdr);border-radius:14px;padding:12px;text-align:center;box-shadow:var(--shadow);}
+  .metric .mv{font-size:18px;font-weight:800;margin:3px 0;}
+  .metric .ml{font-size:10.5px;color:var(--muted);font-weight:600;}
+  .searchbar{display:flex;align-items:center;background:var(--card);border-radius:24px;padding:10px 16px;gap:8px;margin-bottom:12px;border:1.5px solid var(--bdr);box-shadow:var(--shadow);}
+  .searchbar input{border:none;background:transparent;outline:none;flex:1;font-size:14px;color:inherit;margin:0;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:10px;font-size:13.5px;z-index:100;max-width:90%;text-align:center;}
+  .center-screen{display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:28px 22px;}
+  .logo-wrap{text-align:center;margin-bottom:22px;}
+  .logo-wrap .brandname{font-size:26px;font-weight:800;color:var(--header);}
+  .logo-wrap .tagline{color:var(--muted);font-size:13px;margin-top:4px;}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:flex-end;justify-content:center;}
+  .modal-sheet{background:var(--card);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px;max-height:88vh;overflow-y:auto;}
+  .list-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid rgba(0,0,0,.06);}
+  .list-row:last-child{border-bottom:none;}
+  .footer-credit{text-align:center;font-size:11px;color:var(--muted);padding:20px 0 6px;}
+  .footer-credit b{color:var(--header);}
+</style>
+</head>
+<body>
+<div id="toast-holder"></div>
+<div id="app"></div>
+<script>
+// ════════════════════════════════════════════════════════════════════════
+// দোকানদার — Platform Admin (standalone, separate from the shop app)
+// This file is intentionally NOT linked anywhere in the shop-facing
+// index.html — it is only reachable by whoever has this URL directly.
+// Bookmark it; don't share the link with shop owners/staff.
+// Developed by Axiion Technology.
+// ════════════════════════════════════════════════════════════════════════
+const API = '/api';
+const state = { adminToken: sessionStorage.getItem('dokan_admin_token') || null, name: sessionStorage.getItem('dokan_admin_name') || '' };
+
+function toast(msg, isError){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  if(isError) el.style.background = '#C1443C';
+  el.textContent = msg;
+  document.getElementById('toast-holder').appendChild(el);
+  setTimeout(()=>el.remove(), 2600);
+}
+
+async function api(action, opts){
+  opts = opts || {};
+  const headers = {'Content-Type':'application/json'};
+  if(state.adminToken) headers['Authorization'] = 'Bearer ' + state.adminToken;
+  const fetchOpts = {method: opts.method||'GET', headers};
+  if(opts.body) fetchOpts.body = JSON.stringify(opts.body);
+  let url = `${API}/auth?action=${action}`;
+  if(opts.query) url += '&' + new URLSearchParams(opts.query).toString();
+  try{
+    const r = await fetch(url, fetchOpts);
+    return await r.json();
+  }catch(e){
+    return { ok:false, error: 'নেটওয়ার্ক সমস্যা' };
+  }
+}
+
+function openModal(innerHtml, afterRender){
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-backdrop';
+  wrap.innerHTML = `<div class="modal-sheet">${innerHtml}</div>`;
+  document.body.appendChild(wrap);
+  wrap.onclick = (e)=>{ if(e.target === wrap) wrap.remove(); };
+  if(afterRender) afterRender(()=>wrap.remove());
+}
+
+function renderLogin(){
+  document.getElementById('app').innerHTML = `
+  <div class="center-screen">
+    <div class="logo-wrap">
+      <div class="brandname">দোকানদার</div>
+      <div class="tagline">প্ল্যাটফর্ম অ্যাডমিন</div>
+    </div>
+    <div class="card">
+      <label>ইউজারনেম</label><input type="text" id="pa-user" autocomplete="off">
+      <label>পাসওয়ার্ড</label><input type="password" id="pa-pass" autocomplete="off">
+      <button class="btn btn-primary" id="pa-submit" style="width:100%;margin-top:4px;">লগইন</button>
+      <div id="pa-err" class="danger" style="margin-top:8px;font-size:13px;"></div>
+    </div>
+    <div class="footer-credit">দোকানদার · Developed by <b>Axiion Technology</b></div>
+  </div>`;
+  document.getElementById('pa-submit').onclick = async ()=>{
+    const username = document.getElementById('pa-user').value.trim();
+    const password = document.getElementById('pa-pass').value;
+    const r = await api('platform-login', {method:'POST', body:{username,password}});
+    if(!r.ok){ document.getElementById('pa-err').textContent = r.error; return; }
+    state.adminToken = r.adminToken; state.name = r.name;
+    sessionStorage.setItem('dokan_admin_token', r.adminToken);
+    sessionStorage.setItem('dokan_admin_name', r.name);
+    renderDashboard();
+  };
+}
+
+function roleLabelBn(cat){ return cat || '—'; }
+function statusBadge(t){
+  const map = {active:['badge-success','সক্রিয়'], pending:['badge-warn','অপেক্ষমাণ'], suspended:['badge-danger','সাসপেন্ড'], rejected:['badge-danger','বাতিল']};
+  const [cls,label] = map[t.status] || ['badge-warn', t.status];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function renderDashboard(){
+  document.getElementById('app').innerHTML = `
+  <div class="topbar">
+    <div class="shopinfo"><div class="shopname">প্ল্যাটফর্ম ড্যাশবোর্ড</div><div class="shopid">${state.name} · দোকানদার অ্যাডমিন</div></div>
+    <button class="gear" id="pa-logout" title="লগ আউট">⎋</button>
+  </div>
+  <div class="screen">
+    <div class="searchbar">
+      <span>🔍</span>
+      <input type="text" id="pa-search" placeholder="দোকানের নাম বা মোবাইল নম্বর দিয়ে খুঁজুন">
+    </div>
+    <div id="pa-stats-wrap"></div>
+    <div class="tabs" id="pa-tabs">
+      <button class="tab active" data-tab="pending">অপেক্ষমাণ</button>
+      <button class="tab" data-tab="all">সব দোকান</button>
+    </div>
+    <div id="pa-list">লোড হচ্ছে...</div>
+  </div>
+  <div class="footer-credit">দোকানদার প্ল্যাটফর্ম অ্যাডমিন · Developed by <b>Axiion Technology</b></div>`;
+  document.getElementById('pa-logout').onclick = ()=>{ sessionStorage.clear(); state.adminToken=null; renderLogin(); };
+
+  (async ()=>{
+    const stats = await api('platform-stats');
+    if(!stats.ok){ sessionStorage.clear(); state.adminToken = null; renderLogin(); return; }
+    const rc = stats.rowCounts || {};
+    document.getElementById('pa-stats-wrap').innerHTML = `
+      <div class="kpi-card">
+        <div class="kpi-row"><span>মোট দোকান</span><span class="big num">${stats.totalShops}</span></div>
+        <div class="kpi-row"><span>সক্রিয়</span><span class="num">${stats.activeShops}</span></div>
+        <div class="kpi-row"><span>অপেক্ষমাণ</span><span class="num">${stats.pendingShops}</span></div>
+        <div class="muted" style="color:#dfe;font-size:11px;margin-top:6px;">📦 ছবি/স্টোরেজ ব্যবহার: ${(stats.totalStorageBytes/1e6).toFixed(1)} MB / ${(stats.storageCapBytes/1e9*1000).toFixed(0)} MB ${stats.nearLimit?'⚠️ প্রায় সীমায় পৌঁছেছে':''}</div>
+        <div class="progress-track" style="margin-top:6px;"><div class="progress-fill" style="width:${Math.min(100, stats.totalStorageBytes/stats.storageCapBytes*100)}%"></div></div>
+      </div>
+      <div class="metric-grid">
+        <div class="metric"><div class="ml">👥 মোট স্টাফ (সব দোকান)</div><div class="mv num">${rc.staff||0}</div></div>
+        <div class="metric"><div class="ml">📦 মোট পণ্য (সব দোকান)</div><div class="mv num">${rc.products||0}</div></div>
+        <div class="metric"><div class="ml">🧾 মোট লেনদেন</div><div class="mv num">${rc.transactions||0}</div></div>
+        <div class="metric"><div class="ml">🧑‍🤝‍🧑 মোট কাস্টমার</div><div class="mv num">${rc.customers||0}</div></div>
+      </div>`;
+  })();
+
+  async function loadTab(tab){
+    document.getElementById('pa-list').innerHTML = 'লোড হচ্ছে...';
+    const r = await api(tab === 'pending' ? 'platform-pending-tenants' : 'platform-all-tenants');
+    renderTenantList(r.tenants || []);
+  }
+  function renderTenantList(rows){
+    if(!rows.length){ document.getElementById('pa-list').innerHTML = `<div class="card muted" style="text-align:center;">কিছু নেই</div>`; return; }
+    document.getElementById('pa-list').innerHTML = rows.map(t=>`
+      <div class="card" data-open="${t.id}" style="cursor:pointer;">
+        <div class="row"><b>${t.shop_name}</b>${statusBadge(t)}</div>
+        <div class="muted">মালিক: ${t.owner_name} · ${t.mobile} · ${roleLabelBn(t.category)}</div>
+        ${t.staff_count!=null?`<div class="muted">স্টাফ: ${t.staff_count} · পণ্য: ${t.product_count}</div>`:''}
+        <div style="margin-top:8px;display:flex;gap:8px;" onclick="event.stopPropagation()">
+          ${t.status==='pending'?`<button class="btn btn-primary" data-approve="${t.id}" style="flex:1;">অনুমোদন</button><button class="btn btn-danger" data-reject="${t.id}" style="flex:1;">বাতিল</button>`:''}
+          ${t.status==='active'?`<button class="btn btn-outline" data-suspend="${t.id}" style="flex:1;">সাসপেন্ড</button>`:''}
+          ${t.status==='suspended'?`<button class="btn btn-primary" data-unsuspend="${t.id}" style="flex:1;">পুনরায় সক্রিয়</button>`:''}
+        </div>
+      </div>`).join('');
+    document.querySelectorAll('[data-open]').forEach(el=>el.onclick=()=>openTenantDetail(el.dataset.open));
+    document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); await api('platform-approve',{method:'POST',body:{tenantId:b.dataset.approve, decision:'active'}}); toast('অনুমোদিত হয়েছে'); refreshCurrentTab(); });
+    document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); await api('platform-approve',{method:'POST',body:{tenantId:b.dataset.reject, decision:'rejected'}}); toast('বাতিল হয়েছে'); refreshCurrentTab(); });
+    document.querySelectorAll('[data-suspend]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); await api('platform-suspend',{method:'POST',body:{tenantId:b.dataset.suspend, suspend:true}}); toast('সাসপেন্ড হয়েছে'); refreshCurrentTab(); });
+    document.querySelectorAll('[data-unsuspend]').forEach(b=>b.onclick=async(e)=>{ e.stopPropagation(); await api('platform-suspend',{method:'POST',body:{tenantId:b.dataset.unsuspend, suspend:false}}); toast('সক্রিয় হয়েছে'); refreshCurrentTab(); });
+  }
+  let currentTab = 'pending', searchMode = false;
+  function refreshCurrentTab(){ searchMode ? doSearch(document.getElementById('pa-search').value) : loadTab(currentTab); }
+  document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
+    currentTab = t.dataset.tab; searchMode = false;
+    document.getElementById('pa-search').value = '';
+    loadTab(currentTab);
+  });
+
+  let searchDebounce;
+  async function doSearch(q){
+    q = (q||'').trim();
+    if(!q){ searchMode = false; return loadTab(currentTab); }
+    searchMode = true;
+    document.getElementById('pa-list').innerHTML = 'খোঁজা হচ্ছে...';
+    const r = await api('platform-search-tenants', {query:{q}});
+    renderTenantList(r.tenants || []);
+  }
+  document.getElementById('pa-search').oninput = (e)=>{
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(()=>doSearch(e.target.value), 350);
+  };
+
+  loadTab('pending');
+
+  // ── Shop detail + correction modal ──────────────────────────────────
+  async function openTenantDetail(tenantId){
+    openModal(`<div style="text-align:center;padding:20px;">লোড হচ্ছে...</div>`, (close)=>{
+      (async ()=>{
+        const r = await api('platform-tenant-detail', {query:{tenantId}});
+        if(!r.ok){ toast(r.error, true); close(); return; }
+        const t = r.tenant;
+        document.querySelector('.modal-sheet').innerHTML = `
+          <h2 class="pagetitle">দোকানের তথ্য ${statusBadge(t)}</h2>
+          <div class="metric-grid" style="margin:0 0 14px;">
+            <div class="metric"><div class="ml">স্টাফ</div><div class="mv num">${r.staff.length}</div></div>
+            <div class="metric"><div class="ml">পণ্য</div><div class="mv num">${r.productCount}</div></div>
+            <div class="metric"><div class="ml">কাস্টমার</div><div class="mv num">${r.customerCount}</div></div>
+            <div class="metric"><div class="ml">লেনদেন</div><div class="mv num">${r.transactionCount}</div></div>
+          </div>
+          <label>দোকানের নাম</label><input type="text" id="ed-shop" value="${t.shop_name||''}">
+          <label>মালিকের নাম</label><input type="text" id="ed-owner" value="${t.owner_name||''}">
+          <label>মোবাইল নম্বর</label><input type="tel" id="ed-mobile" value="${t.mobile||''}">
+          <label>ব্যবসার ধরন</label><input type="text" id="ed-cat" value="${t.category||''}">
+          <label>ঠিকানা</label><input type="text" id="ed-addr" value="${t.address||''}">
+          <label>লোকেশন (lat, lng)</label>
+          <div style="display:flex;gap:8px;">
+            <input type="number" id="ed-lat" placeholder="lat" value="${t.lat!=null?t.lat:''}" step="any">
+            <input type="number" id="ed-lng" placeholder="lng" value="${t.lng!=null?t.lng:''}" step="any">
+          </div>
+          <label>পাঞ্চ ব্যাসার্ধ (মিটার)</label><input type="number" id="ed-radius" value="${t.geo_radius_m||150}">
+          <button class="btn btn-primary" style="width:100%;margin-top:4px;" id="ed-save">তথ্য সংরক্ষণ করুন</button>
+          <hr style="margin:16px 0;border:none;border-top:1px solid rgba(0,0,0,.08);">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px;">স্টাফ তালিকা (${r.staff.length})</div>
+          ${r.staff.map(s=>`<div class="list-row"><span>${s.name} <span class="muted">(${s.role})</span></span><span class="num">PIN: ${s.pin}${!s.active?' · নিষ্ক্রিয়':''}</span></div>`).join('') || '<div class="muted">কোনো স্টাফ নেই</div>'}
+          <button class="btn btn-outline" style="width:100%;margin-top:16px;" id="ed-close">বন্ধ করুন</button>
+        `;
+        document.getElementById('ed-close').onclick = close;
+        document.getElementById('ed-save').onclick = async ()=>{
+          const body = {
+            tenantId,
+            shopName: document.getElementById('ed-shop').value.trim(),
+            ownerName: document.getElementById('ed-owner').value.trim(),
+            mobile: document.getElementById('ed-mobile').value.trim(),
+            category: document.getElementById('ed-cat').value.trim(),
+            address: document.getElementById('ed-addr').value.trim(),
+            lat: document.getElementById('ed-lat').value === '' ? null : document.getElementById('ed-lat').value,
+            lng: document.getElementById('ed-lng').value === '' ? null : document.getElementById('ed-lng').value,
+            geoRadiusM: document.getElementById('ed-radius').value,
+          };
+          const res = await api('platform-update-tenant', {method:'PUT', body});
+          if(!res.ok) return toast(res.error, true);
+          toast('তথ্য হালনাগাদ হয়েছে'); close(); refreshCurrentTab();
+        };
+      })();
+    });
+  }
+}
+
+// Boot: if we already have a session token, go straight to the dashboard
+// (it'll bounce back to login if the token turns out to be invalid).
+if (state.adminToken) renderDashboard(); else renderLogin();
+</script>
+</body>
+</html>
