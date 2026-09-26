@@ -154,6 +154,41 @@ input:focus,select:focus{border-color:var(--bl);box-shadow:0 0 0 2px rgba(13,71,
 .nav-box.active{border-color:var(--bl);background:var(--bll)}
 .nav-box.active .nb-lb{color:var(--bl)}
 
+/* ══════════════════════════════════════════════════════
+   Premium collapsible sections — Owner/Manager home (V-redesign).
+   Each info group (today, month, stock, SR performance, SKU rank,
+   dues, deposits...) lives inside one of these instead of being
+   dumped flat on the page. Header always visible + tappable; body
+   height-animates open/close so the home page reads as a clean,
+   "drill-down" summary rather than one long uninterrupted scroll.
+   ══════════════════════════════════════════════════════ */
+.acc-sec{background:var(--card);border:1px solid var(--bdr);border-radius:var(--rad);box-shadow:var(--shad);margin-bottom:10px;overflow:hidden;animation:accIn .38s cubic-bezier(.2,.8,.2,1) both}
+.acc-sec:nth-of-type(2){animation-delay:.03s}
+.acc-sec:nth-of-type(3){animation-delay:.06s}
+.acc-sec:nth-of-type(4){animation-delay:.09s}
+.acc-sec:nth-of-type(5){animation-delay:.12s}
+.acc-sec:nth-of-type(6){animation-delay:.15s}
+.acc-sec:nth-of-type(7){animation-delay:.18s}
+@keyframes accIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.acc-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 14px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+.acc-hd:active{background:var(--bg)}
+.acc-hd-l{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:var(--txt);min-width:0}
+.acc-hd-ic{font-size:16px;flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:7px;background:var(--bll)}
+.acc-hd-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-badge{background:linear-gradient(135deg,var(--bl),var(--bl2));color:#fff;font-size:10px;font-weight:700;border-radius:20px;padding:2px 8px;flex-shrink:0}
+.acc-chev{font-size:10px;color:var(--mt2);transition:transform .3s ease;flex-shrink:0}
+.acc-sec.open .acc-chev{transform:rotate(180deg);color:var(--bl)}
+.acc-body{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(.2,.8,.2,1)}
+.acc-sec.open .acc-body{max-height:4000px}
+.acc-body-in{padding:0 14px 14px}
+
+/* Animated relative-value bars — used for SR performance & SKU
+   ranking so numbers read as an at-a-glance "graph", not just text.
+   Bars start at 0 width and grow to their data-pct value the moment
+   their section opens (see _toggleAcc / _animateAccBars). */
+.bar-trk{background:var(--bg);border-radius:5px;height:6px;overflow:hidden}
+.bar-fill{height:100%;border-radius:5px;width:0;transition:width .55s cubic-bezier(.2,.8,.2,1);background:linear-gradient(90deg,var(--bl),var(--bl2))}
+
 .tbar{display:flex;gap:5px;margin-bottom:12px;flex-wrap:wrap}
 .tb{flex:1;min-width:70px;padding:8px 4px;border-radius:7px;border:2px solid var(--bdr);background:var(--card);font-size:11px;font-weight:700;cursor:pointer;color:var(--mt);transition:.12s;text-align:center;font-family:'Noto Sans','Hind Siliguri',sans-serif}
 .tb.tg{border-color:var(--bl);background:var(--bll);color:var(--bl);box-shadow:0 0 0 2px var(--bl),0 0 13px 3px var(--bl);animation:tbGlow 1.4s ease-in-out infinite}
@@ -3016,86 +3051,132 @@ function _tickerStart() {
   _tickerRAF = requestAnimationFrame(tick);
 }
 
+// ── Premium collapsible ("accordion") sections for the Owner/Manager
+// home page — V-redesign. Each info group is tappable to expand/
+// collapse in place (no full re-render), open/closed state remembered
+// per-session in S.dashAcc so it survives the periodic dash refresh.
+function _accOpen(id, dflt) {
+  if (!S.dashAcc) S.dashAcc = {};
+  if (S.dashAcc[id] === undefined) S.dashAcc[id] = dflt;
+  return S.dashAcc[id];
+}
+function _accSection(id, icon, title, body, dflt, badge) {
+  var open = _accOpen(id, dflt);
+  var h = '<div class="acc-sec'+(open?' open':'')+'" id="acc-'+id+'">';
+  h += '<div class="acc-hd" onclick="_toggleAcc(\''+id+'\')"><div class="acc-hd-l"><span class="acc-hd-ic">'+icon+'</span><span class="acc-hd-t">'+title+'</span></div>';
+  h += (badge?('<span class="acc-badge">'+badge+'</span>'):'')+'<span class="acc-chev">▾</span></div>';
+  h += '<div class="acc-body"><div class="acc-body-in">'+body+'</div></div></div>';
+  return h;
+}
+function _toggleAcc(id) {
+  if (!S.dashAcc) S.dashAcc = {};
+  S.dashAcc[id] = !S.dashAcc[id];
+  var sec = document.getElementById('acc-'+id);
+  if (!sec) return;
+  sec.classList.toggle('open', S.dashAcc[id]);
+  // Premium touch: the moment a section opens, any relative-value bars
+  // inside it (SR performance, SKU ranking) grow from 0 → their real
+  // width instead of just appearing — reads like a live little graph.
+  if (S.dashAcc[id]) {
+    var bars = sec.querySelectorAll('.bar-fill[data-pct]');
+    bars.forEach(function(b){
+      b.style.width='0%';
+      requestAnimationFrame(function(){ requestAnimationFrame(function(){ b.style.width=b.getAttribute('data-pct')+'%'; }); });
+    });
+  }
+}
+// One-time entrance animation for bars inside sections that are
+// already open on first paint (nothing to click to trigger them).
+function _animateOpenAccBars() {
+  document.querySelectorAll('.acc-sec.open .bar-fill[data-pct]').forEach(function(b){
+    b.style.width='0%';
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ b.style.width=b.getAttribute('data-pct')+'%'; }); });
+  });
+}
+
 function renderDash(d) {
   var t=d.today, m=d.month, st=d.stock, dues=d.dues, dmg=d.damage, bon=d.bonus;
   var isOwner = S.role==='owner';
   var mpc=m.profit>=0?'var(--gr)':'var(--re)';
   var h=_noticeBanner()+_radtWidgetHtml();
 
-  // ── Daily summary banner
-  h+='<div style="display:grid;grid-template-columns:'+(isOwner?'1fr 1fr':'1fr')+';gap:8px;margin-bottom:10px">';
-  h+='<div style="background:linear-gradient(135deg,var(--bl),var(--bl2));color:#fff;border-radius:10px;padding:12px;text-align:center"><div style="font-size:10px;opacity:.8">আজ বিক্রি</div><div style="font-size:22px;font-weight:700">৳'+fm(t.revenue)+'</div></div>';
-  if(isOwner) h+='<div style="background:linear-gradient(135deg,'+(t.profit>=0?'var(--gr)':'var(--re)')+','+(t.profit>=0?'#388E3C':'#D32F2F')+');color:#fff;border-radius:10px;padding:12px;text-align:center"><div style="font-size:10px;opacity:.8">আজ '+(t.profit>=0?'লাভ':'ক্ষতি')+'</div><div style="font-size:22px;font-weight:700">৳'+fm(Math.abs(t.profit))+'</div></div>';
+  // ── Hero: today's headline numbers — the one thing that should be
+  // visible at a glance with zero taps, everything else drills down.
+  h+='<div style="display:grid;grid-template-columns:'+(isOwner?'1fr 1fr':'1fr')+';gap:8px;margin-bottom:12px">';
+  h+='<div style="background:linear-gradient(135deg,var(--bl),var(--bl2));color:#fff;border-radius:14px;padding:14px;text-align:center;box-shadow:var(--shad)"><div style="font-size:10px;opacity:.85">আজ বিক্রি</div><div style="font-size:23px;font-weight:800;letter-spacing:-.3px">৳'+fm(t.revenue)+'</div></div>';
+  if(isOwner) h+='<div style="background:linear-gradient(135deg,'+(t.profit>=0?'var(--gr)':'var(--re)')+','+(t.profit>=0?'#388E3C':'#D32F2F')+');color:#fff;border-radius:14px;padding:14px;text-align:center;box-shadow:var(--shad)"><div style="font-size:10px;opacity:.85">আজ '+(t.profit>=0?'লাভ':'ক্ষতি')+'</div><div style="font-size:23px;font-weight:800;letter-spacing:-.3px">৳'+fm(Math.abs(t.profit))+'</div></div>';
   h+='</div>';
 
-  h+='<div class="ct">📅 আজকের বিক্রয়</div>';
-  h+='<div class="mets">';
-  h+='<div class="met met-b"><div class="ml">দেওয়া হয়েছে</div><div class="mv">'+fn(t.givenUnits)+'<small style="font-size:10px">পিস</small></div></div>';
-  h+='<div class="met met-a"><div class="ml">ফেরত এসেছে</div><div class="mv">'+fn(t.returnUnits)+'<small style="font-size:10px">পিস</small></div></div>';
-  h+='</div>';
-
-  // ── Month stats
-  h+='<div class="ct">📆 এই মাস</div>';
-  h+='<div class="mets">';
-  h+='<div class="met met-b"><div class="ml">মোট বিক্রয়</div><div class="mv">৳'+fm(m.revenue)+'</div></div>';
-  if(isOwner) h+='<div class="met" style="border-top:3px solid '+mpc+'"><div class="ml">'+(m.profit>=0?'মোট লাভ':'মোট ক্ষতি')+'</div><div class="mv" style="color:'+mpc+'">৳'+fm(Math.abs(m.profit))+'</div></div>';
-  h+='<div class="met met-a"><div class="ml">পেমেন্ট আদায়</div><div class="mv">৳'+fm(m.payments)+'</div></div>';
-  h+='<div class="met met-r"><div class="ml">মোট বাকি</div><div class="mv">৳'+fm(dues.total)+'</div></div>';
-  h+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">আজকের নতুন বাকি</div><div class="mv" style="font-size:15px">৳'+fm(dues.todayNew||0)+'</div></div>';
-  h+='</div>';
-
-  // ── Stock value cards (Owner only)
-  if (isOwner) {
-    h+='<div class="ct">📊 স্টক মূল্য বিশ্লেষণ</div>';
-    h+='<div class="mets">';
-    h+='<div class="met met-b"><div class="ml">মোট স্টক মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalSellValue||st.totalSell)+'</div></div>';
-    h+='<div class="met met-g"><div class="ml">মোট ক্রয় মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalBuyValue||0)+'</div></div>';
-    h+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">মোট বিক্রয় মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalSellValue||st.totalSell)+'</div></div>';
-    var ep=st.estimatedProfit||0;
-    h+='<div class="met" style="border-top:3px solid '+(ep>=0?'var(--gr)':'var(--re)')+'"><div class="ml">আনুমানিক লাভ</div><div class="mv" style="font-size:15px;color:'+(ep>=0?'var(--gr)':'var(--re)')+'">৳'+fm(Math.abs(ep))+'</div></div>';
-    h+='</div>';
-  }
-
-  // ── Business alerts
+  // ── Business alerts — actionable, so they stay outside the fold too
   if (dmg.pendingAmt>0) h+='<div class="wb">⚠️ মুলতুবি ড্যামেজ দাবি: ৳'+fm(dmg.pendingAmt)+'</div>';
   if (bon.pendingAmt>0) h+='<div class="ib">🎁 সংগ্রহযোগ্য বোনাস: ৳'+fm(bon.pendingAmt)+'</div>';
 
-  // ── Low stock alert
+  // ── Low stock alert — collapsible, but pre-opened when it's non-empty
   var ls=d.lowStock||[];
   if (ls.length) {
-    h+='<div class="ct">🔴 কম স্টক সতর্কতা</div><div class="card" style="padding:0;overflow:hidden;border:2px solid var(--am)">';
+    var lsBody='<div class="card" style="padding:0;overflow:hidden;margin:0;border:none;box-shadow:none">';
     ls.forEach(function(p){
       var cs=num(p.caseSize)||1, u=p.units||0, cases=Math.floor(u/cs), rem=u%cs;
       var ti=thumbImg(p,'8px');
       var stStr=(cases?(cases+(p.unitType||'কেস')+' '):'')+(rem?rem+'পিস':'');
       if(!stStr)stStr='স্টক নেই';
-      h+='<div class="sku-row"><div class="sku-i">'+(ti||'📦')+'</div>';
-      h+='<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px">'+esc(p.name)+'<span class="low-alert">কম স্টক</span></div>';
-      h+='<div style="font-size:10px;color:var(--mt2)">'+esc(p.sku)+'</div></div>';
-      h+='<div style="text-align:right"><div class="stk-lo">'+stStr+'</div></div></div>';
+      lsBody+='<div class="sku-row"><div class="sku-i">'+(ti||'📦')+'</div>';
+      lsBody+='<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px">'+esc(p.name)+'<span class="low-alert">কম স্টক</span></div>';
+      lsBody+='<div style="font-size:10px;color:var(--mt2)">'+esc(p.sku)+'</div></div>';
+      lsBody+='<div style="text-align:right"><div class="stk-lo">'+stStr+'</div></div></div>';
     });
-    h+='</div>';
+    lsBody+='</div>';
+    h+=_accSection('lowstock','🔴','কম স্টক সতর্কতা',lsBody,true,String(ls.length));
   }
 
-  // ── SR Performance panel
+  // ── আজকের বিক্রয় (today's given/return units)
+  var todayBody='<div class="mets" style="margin:0">';
+  todayBody+='<div class="met met-b"><div class="ml">দেওয়া হয়েছে</div><div class="mv">'+fn(t.givenUnits)+'<small style="font-size:10px">পিস</small></div></div>';
+  todayBody+='<div class="met met-a"><div class="ml">ফেরত এসেছে</div><div class="mv">'+fn(t.returnUnits)+'<small style="font-size:10px">পিস</small></div></div>';
+  todayBody+='</div>';
+  h+=_accSection('today','📅','আজকের বিক্রয়',todayBody,true);
+
+  // ── এই মাস (month stats)
+  var monthBody='<div class="mets" style="margin:0">';
+  monthBody+='<div class="met met-b"><div class="ml">মোট বিক্রয়</div><div class="mv">৳'+fm(m.revenue)+'</div></div>';
+  if(isOwner) monthBody+='<div class="met" style="border-top:3px solid '+mpc+'"><div class="ml">'+(m.profit>=0?'মোট লাভ':'মোট ক্ষতি')+'</div><div class="mv" style="color:'+mpc+'">৳'+fm(Math.abs(m.profit))+'</div></div>';
+  monthBody+='<div class="met met-a"><div class="ml">পেমেন্ট আদায়</div><div class="mv">৳'+fm(m.payments)+'</div></div>';
+  monthBody+='<div class="met met-r"><div class="ml">মোট বাকি</div><div class="mv">৳'+fm(dues.total)+'</div></div>';
+  monthBody+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">আজকের নতুন বাকি</div><div class="mv" style="font-size:15px">৳'+fm(dues.todayNew||0)+'</div></div>';
+  monthBody+='</div>';
+  h+=_accSection('month','📆','এই মাস',monthBody,true);
+
+  // ── স্টক মূল্য বিশ্লেষণ (Owner only)
+  if (isOwner) {
+    var ep=st.estimatedProfit||0;
+    var stockBody='<div class="mets" style="margin:0">';
+    stockBody+='<div class="met met-b"><div class="ml">মোট স্টক মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalSellValue||st.totalSell)+'</div></div>';
+    stockBody+='<div class="met met-g"><div class="ml">মোট ক্রয় মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalBuyValue||0)+'</div></div>';
+    stockBody+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">মোট বিক্রয় মূল্য</div><div class="mv" style="font-size:15px">৳'+fm(st.totalSellValue||st.totalSell)+'</div></div>';
+    stockBody+='<div class="met" style="border-top:3px solid '+(ep>=0?'var(--gr)':'var(--re)')+'"><div class="ml">আনুমানিক লাভ</div><div class="mv" style="font-size:15px;color:'+(ep>=0?'var(--gr)':'var(--re)')+'">৳'+fm(Math.abs(ep))+'</div></div>';
+    stockBody+='</div>';
+    h+=_accSection('stock','📊','স্টক মূল্য বিশ্লেষণ',stockBody,false);
+  }
+
+  // ── SR Performance panel — with animated relative-revenue bars
   var srp=d.srPerformance||[];
   if (srp.length) {
-    h+='<div class="ct">🏆 SR পারফরম্যান্স (এই মাস)</div><div class="card" style="padding:0;overflow:hidden">';
     var maxRev=srp[0].revenue||1;
-    srp.slice(0,5).forEach(function(sr,i){
+    var srBody='<div class="card" style="padding:0;overflow:hidden;margin:0;border:none;box-shadow:none">';
+    srp.slice(0,5).forEach(function(sr){
       var pct=Math.round((sr.revenue/maxRev)*100);
       var ti=thumbImg(sr,'50%'), letter=esc(sr.name.charAt(0)||'?');
-      h+='<div style="padding:9px 11px;border-bottom:1px solid #EEF2FF">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
-      h+='<div style="display:flex;align-items:center;gap:8px"><div class="sr-av" style="width:32px;height:32px;font-size:13px">'+(ti||letter)+'</div>';
-      h+='<div><div style="font-weight:700;font-size:12px">'+esc(sr.name)+'</div>';
-      h+='<div style="font-size:10px;color:var(--mt2)">'+(sr.area||'—')+'</div></div></div>';
-      h+='<div style="text-align:right"><div style="font-size:13px;font-weight:700;color:var(--bl)">৳'+fm(sr.revenue)+'</div>';
-      h+='<div style="font-size:10px;color:var(--mt2)">'+fn(sr.soldUnits)+' পিস</div></div></div>';
-      h+='<div style="background:#E8EAF6;border-radius:4px;height:5px;overflow:hidden">';
-      h+='<div style="background:var(--bl);height:100%;width:'+pct+'%;border-radius:4px;transition:.3s"></div></div></div>';
+      srBody+='<div style="padding:9px 11px;border-bottom:1px solid var(--bdr)">';
+      srBody+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
+      srBody+='<div style="display:flex;align-items:center;gap:8px"><div class="sr-av" style="width:32px;height:32px;font-size:13px">'+(ti||letter)+'</div>';
+      srBody+='<div><div style="font-weight:700;font-size:12px">'+esc(sr.name)+'</div>';
+      srBody+='<div style="font-size:10px;color:var(--mt2)">'+(sr.area||'—')+'</div></div></div>';
+      srBody+='<div style="text-align:right"><div style="font-size:13px;font-weight:700;color:var(--bl)">৳'+fm(sr.revenue)+'</div>';
+      srBody+='<div style="font-size:10px;color:var(--mt2)">'+fn(sr.soldUnits)+' পিস</div></div></div>';
+      srBody+='<div class="bar-trk"><div class="bar-fill" data-pct="'+pct+'" style="width:'+(_accOpen('srperf',false)?pct:0)+'%"></div></div></div>';
     });
-    h+='</div>';
+    srBody+='</div>';
+    h+=_accSection('srperf','🏆','SR পারফরম্যান্স (এই মাস)',srBody,false,String(srp.length));
   }
 
   // ── Full ranked SKU list — Today & This Month, ranked in cases (§47)
@@ -3103,48 +3184,50 @@ function renderDash(d) {
   //    hid everything past 4th place. Every SKU that exists is listed
   //    here, #1 (best-selling) down to the lowest, in one scrollable
   //    panel — medal icons for the top 3, a plain rank number after
-  //    that.
+  //    that, plus a relative bar against the #1 seller for a quick
+  //    at-a-glance graph.
   var medals=['🥇','🥈','🥉'];
-  function renderRankedSellers(list, label) {
-    if (!list || !list.length) return '';
-    var out='<div class="ct">🔥 সম্পূর্ণ SKU র‍্যাংকিং ('+label+')</div>';
-    out+='<div class="card" style="padding:0;overflow:hidden">';
-    out+='<div style="max-height:340px;overflow-y:auto">';
+  function rankedSellersBody(list, open) {
+    var maxC = (list[0]&&list[0].cases) || 1;
+    var out='<div style="max-height:340px;overflow-y:auto">';
     list.forEach(function(p){
       var rankTag = p.rank<=3 ? medals[p.rank-1] : ('#'+p.rank);
       var ti=thumbImg(p,'8px');
-      out+='<div class="sku-row" title="সঠিক হিসাব: '+p.exactCases+' '+(p.unitType||'কেস')+'">';
+      var pct=Math.round((num(p.cases)/maxC)*100);
+      out+='<div class="sku-row" title="সঠিক হিসাব: '+p.exactCases+' '+(p.unitType||'কেস')+'" style="flex-wrap:wrap;align-items:center">';
       out+='<div class="sku-i" style="font-size:'+(p.rank<=3?'16px':'11px')+';font-weight:700">'+(p.rank<=3?rankTag:(ti||rankTag))+'</div>';
       out+='<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px">'+esc(p.productName||'—')+'</div>';
       out+='<div style="font-size:10px;color:var(--mt2)">'+(p.rank<=3?'':'র‍্যাংক '+p.rank)+'</div></div>';
-      out+='<div style="text-align:right"><div style="font-size:13px;font-weight:700;color:var(--bl)">'+fn(p.cases)+' '+(p.unitType||'কেস')+'</div></div></div>';
+      out+='<div style="text-align:right"><div style="font-size:13px;font-weight:700;color:var(--bl)">'+fn(p.cases)+' '+(p.unitType||'কেস')+'</div></div>';
+      out+='<div style="flex-basis:100%;margin-top:5px"><div class="bar-trk"><div class="bar-fill" data-pct="'+pct+'" style="width:'+(open?pct:0)+'%"></div></div></div></div>';
     });
-    out+='</div></div>';
+    out+='</div>';
     return out;
   }
-  h+=renderRankedSellers(d.rankedToday, 'আজ');
-  h+=renderRankedSellers(d.rankedMonth, 'এই মাস');
+  if (d.rankedToday && d.rankedToday.length) h+=_accSection('rankToday','🔥','সম্পূর্ণ SKU র‍্যাংকিং (আজ)',rankedSellersBody(d.rankedToday,_accOpen('rankToday',false)),false);
+  if (d.rankedMonth && d.rankedMonth.length) h+=_accSection('rankMonth','🔥','সম্পূর্ণ SKU র‍্যাংকিং (এই মাস)',rankedSellersBody(d.rankedMonth,_accOpen('rankMonth',false)),false);
 
   // ── Dues list — Update #49: tap a DSR/SO's due figure to see their
   //    full due transaction history (source, dates, shops), instead of
   //    just the bare total.
-  h+='<div class="ct">💰 DSR/SO বাকির তালিকা</div><div class="card" style="padding:0;overflow:hidden">';
   var ad=dues.list.filter(function(s){return s.due!==0||s.givenUnits>0;});
-  if (!ad.length) h+='<div style="padding:20px;text-align:center;color:var(--mt2)">কোনো বাকি নেই</div>';
+  var duesBody='<div class="card" style="padding:0;overflow:hidden;margin:0;border:none;box-shadow:none">';
+  if (!ad.length) duesBody+='<div style="padding:20px;text-align:center;color:var(--mt2)">কোনো বাকি নেই</div>';
   ad.forEach(function(sr){
     var dc=sr.due>0?'var(--re)':'var(--gr)';
     var ti=thumbImg(sr,'50%'), letter=esc(sr.name.charAt(0)||'?');
-    h+='<div class="dr" style="cursor:pointer" onclick="openSrDueHistory(\''+sr.srId+'\',decodeURIComponent(\''+encodeURIComponent(sr.name||'—')+'\'))"><div style="display:flex;align-items:center;gap:9px">';
-    h+='<div class="sr-av" style="width:40px;height:40px;font-size:16px">'+(ti||letter)+'</div>';
-    h+='<div><div style="font-weight:700">'+esc(sr.name)+'</div><div style="font-size:10px;color:var(--mt2)">'+(sr.area||sr.phone||'—')+'</div></div></div>';
-    h+='<div style="text-align:right"><div style="font-size:15px;font-weight:700;color:'+dc+'">৳'+fm(sr.due)+'</div><div style="font-size:9px;color:var(--mt2)">'+(sr.due>0?'বাকি · বিস্তারিত ▶':'পরিশোধিত · বিস্তারিত ▶')+'</div></div></div>';
+    duesBody+='<div class="dr" style="cursor:pointer" onclick="openSrDueHistory(\''+sr.srId+'\',decodeURIComponent(\''+encodeURIComponent(sr.name||'—')+'\'))"><div style="display:flex;align-items:center;gap:9px">';
+    duesBody+='<div class="sr-av" style="width:40px;height:40px;font-size:16px">'+(ti||letter)+'</div>';
+    duesBody+='<div><div style="font-weight:700">'+esc(sr.name)+'</div><div style="font-size:10px;color:var(--mt2)">'+(sr.area||sr.phone||'—')+'</div></div></div>';
+    duesBody+='<div style="text-align:right"><div style="font-size:15px;font-weight:700;color:'+dc+'">৳'+fm(sr.due)+'</div><div style="font-size:9px;color:var(--mt2)">'+(sr.due>0?'বাকি · বিস্তারিত ▶':'পরিশোধিত · বিস্তারিত ▶')+'</div></div></div>';
   });
-  h+='<div style="padding:9px 11px;background:var(--rel);display:flex;justify-content:space-between;font-weight:700;font-size:12px"><span>মোট বাকি</span><span style="color:var(--re)">৳'+fm(dues.total)+'</span></div></div>';
+  duesBody+='<div style="padding:9px 11px;background:var(--rel);display:flex;justify-content:space-between;font-weight:700;font-size:12px"><span>মোট বাকি</span><span style="color:var(--re)">৳'+fm(dues.total)+'</span></div></div>';
+  h+=_accSection('dues','💰','DSR/SO বাকির তালিকা',duesBody,false,dues.total?('৳'+fm(dues.total)):undefined);
 
   // ── অনলাইন জমার পরিমাণ (V31, overhauled V55 #55) — company-wide
   // deposit log. Owner logs each new deposit entry (bank/depot) here;
   // every SO sees the same summed today/month figures read-only.
-  h+=_onlineDepositPanel(isOwner);
+  h+=_accSection('deposit','🏦','অনলাইন জমার পরিমাণ',_onlineDepositPanel(isOwner).replace(/^<div class="ct">[\s\S]*?<\/div>/,''),false);
 
   // Update #48 — "Recent Transactions" widget removed entirely.
   // ── Manager: show own pending submissions ──────────────────────────
@@ -3154,6 +3237,7 @@ function renderDash(d) {
   h+='<div style="text-align:center;font-size:10px;color:var(--mt2);padding:8px">'+esc(S.shopName||'AXIION DMS')+' · Powered by <span style="color:#FFD700;font-weight:700">AXIION DMS</span></div>';
   document.getElementById('pg-dash').innerHTML = h;
   setTimeout(_tickerStart, 50);
+  setTimeout(_animateOpenAccBars, 60);
   _fillRadtWidget();
 }
 
@@ -3206,6 +3290,12 @@ function loadSoDash() {
 
 function renderSoDash() {
   var el = document.getElementById('pg-dash'); if (!el) return;
+  // "📦 স্টক" used to be a tab here too, but it rendered the exact same
+  // buildStockPage() as the "পণ্য" item in the left option panel — pure
+  // duplication. Removed from home; stock now lives only in the side
+  // menu, so the home page reads as a summary/quick-actions screen
+  // instead of a second copy of the nav.
+  if (S.soTab==='stock') S.soTab='overview';
   var tabs = [
     {id:'overview', lbl:'📊 সারসংক্ষেপ'},
     {id:'todaysale', lbl:'📦 আজকের মোট বিক্রয়'},
@@ -3213,7 +3303,6 @@ function renderSoDash() {
     {id:'dsr-dues', lbl:'💰 DSR বাকি'},
     {id:'sale',     lbl:'🛒 বিক্রয়'},
     {id:'salesview', lbl:'📅 বিক্রয় হিসাব'},
-    {id:'stock',    lbl:'📦 স্টক'},
     {id:'catalogue', lbl:'🖼️ ক্যাটালগ'}
   ];
   var h=_roadDutyBanner(S.soDashData && S.soDashData.roadDuty, 'so')+_noticeBanner()+_navBoxBar(tabs, S.soTab, function(id){ return "S.soTab='"+id+"';renderSoDash()"; });
@@ -3223,7 +3312,6 @@ function renderSoDash() {
   else if (S.soTab==='dsr-dues') h+=_soDsrDues();
   else if (S.soTab==='sale')     h+=_soSale();
   else if (S.soTab==='salesview') h+=_soSalesView();
-  else if (S.soTab==='stock')     h+=_soStock();
   else if (S.soTab==='catalogue') h+=buildShowcasePage();
   h+='<div style="text-align:center;font-size:10px;color:var(--mt2);padding:8px">'+esc(S.shopName||'AXIION DMS')+' · Powered by <span style="color:#FFD700;font-weight:700">AXIION DMS</span></div>';
   el.innerHTML = h;

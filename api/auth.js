@@ -240,7 +240,6 @@ module.exports = async (req, res) => {
 
     res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (e) {
-    console.error('AUTH ERROR:', e.message, e); // temporary — remove once diagnosed
     res.json({ ok: false, error: safeErr(e) });
   }
 };
