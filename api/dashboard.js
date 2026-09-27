@@ -55,6 +55,49 @@ module.exports = async (req, res) => {
     }
 
     // ══════════════════════════════════════════════════════
+    //  SALES-RANGE — the hero "আজ বিক্রি" card's small range picker
+    //  (আজ/৭ দিন/এই মাস/এই বছর/কাস্টম). Kept as its own lightweight
+    //  action on the existing dashboard.js route (never a 13th api/*.js
+    //  file — see SETUP.md §5 on the Vercel Hobby 12-function cap) so
+    //  the Owner dashboard can re-query just the sales/profit figures
+    //  for an arbitrary window without re-loading the whole dashboard.
+    //  GET /api/dashboard?action=sales-range&range=today|7d|30d|month|year|custom&from=&to=
+    // ══════════════════════════════════════════════════════
+    if (action === 'sales-range') {
+      const today = bdtToday();
+      const range = String(req.query.range || 'today');
+      let from = today, to = today, label = 'আজ';
+      if (range === '7d') {
+        const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 6);
+        from = d.toISOString().slice(0, 10); label = 'গত ৭ দিন';
+      } else if (range === '30d') {
+        const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 29);
+        from = d.toISOString().slice(0, 10); label = 'গত ৩০ দিন';
+      } else if (range === 'month') {
+        from = _cycleMonthStart(today); label = 'এই মাস';
+      } else if (range === 'year') {
+        from = today.slice(0, 4) + '-01-01'; label = 'এই বছর';
+      } else if (range === 'custom') {
+        from = String(req.query.from || today).slice(0, 10);
+        to   = String(req.query.to   || today).slice(0, 10);
+        label = 'কাস্টম';
+      }
+      if (from > to) { const t = from; from = to; to = t; } // guard against a swapped custom range
+
+      const txRows = await fetchAll(() => supabase.from('transactions').select('type,total_units,total_revenue,total_cost').gte('date', from).lte('date', to));
+      const tx = txRows.map(mapTx);
+      const gU  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalUnits), 0);
+      const rtU = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalUnits), 0);
+      const gR  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalRevenue), 0);
+      const rtR = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalRevenue), 0);
+      const gC  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalCost), 0);
+      const rtC = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalCost), 0);
+      const revenue = gR - rtR;
+      const profit  = revenue - (gC - rtC);
+      return res.json({ ok: true, range, label, from, to, revenue, profit, givenUnits: gU, returnUnits: rtU });
+    }
+
+    // ══════════════════════════════════════════════════════
     //  SO DASHBOARD — isolated to SO's own data + assigned DSRs
     // ══════════════════════════════════════════════════════
     if (role === 'so' && userId) {

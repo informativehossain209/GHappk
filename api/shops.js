@@ -118,8 +118,32 @@ module.exports = async (req, res) => {
         return res.json({ ok: false, error: 'এই নামে ইতিমধ্যে অন্য একটি শপ আছে — আলাদা করতে নামের সাথে একটি নম্বর/সংযোজন যোগ করুন' });
       }
 
+      const update = { name: str(name, 200), phone: str(d.phone, 30) };
+
+      // ── Road / DSR reassignment — Owner can move a shop to a different
+      //    road (and its paired DSR come along automatically) after
+      //    registration, or manually detach it from any road entirely.
+      //    d.roadId === undefined  -> road left untouched (old clients).
+      //    d.roadId === '' (empty) -> road explicitly cleared.
+      //    d.roadId === '<id>'     -> shop moves to that road's DSR.
+      if (d.roadId !== undefined) {
+        const roadId = String(d.roadId || '').trim();
+        if (roadId) {
+          const { data: road, error: roadErr } = await supabase.from('roads').select('*').eq('id', roadId).single();
+          if (roadErr || !road) return res.json({ ok: false, error: 'রোড পাওয়া যায়নি' });
+          if (!road.dsr_id) return res.json({ ok: false, error: 'এই রোডে এখনো DSR নেই — আগে SO নিয়োগ করুন' });
+          update.road_id = String(road.id);
+          update.road_name = road.name || '';
+          update.assigned_dsr_id = road.dsr_id;
+          update.assigned_dsr_name = road.dsr_name || '';
+        } else {
+          update.road_id = '';
+          update.road_name = '';
+        }
+      }
+
       const { data, error } = await supabase.from('shops')
-        .update({ name: str(name, 200), phone: str(d.phone, 30) })
+        .update(update)
         .eq('id', d.shopId).select().single();
       if (error) throw error;
       if (!data) return res.json({ ok: false, error: 'দোকান পাওয়া যায়নি' });

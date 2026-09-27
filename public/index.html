@@ -477,6 +477,7 @@ tr:hover td{background:#F5F7FF}
 .road-duty-banner{display:flex;align-items:center;gap:8px;border-radius:9px;padding:8px 11px;margin-bottom:10px;cursor:pointer}
 .road-duty-banner-so{background:linear-gradient(90deg,#E3F2FD,#EAF4FE);border:1.5px solid #1565C0}
 .road-duty-banner-dsr{background:linear-gradient(90deg,#E8F5E9,#EFFAF0);border:1.5px solid #2E7D32;cursor:default}
+.deposit-banner{display:flex;align-items:center;gap:8px;border-radius:9px;padding:8px 11px;margin-bottom:10px;background:linear-gradient(90deg,#FFF3E0,#FFF8E1);border:1.5px solid #EF6C00}
 .notice-track{flex:1;overflow:hidden;position:relative;height:20px}
 .notice-scroll{position:absolute;top:0;left:0;display:inline-block;white-space:nowrap;font-size:12px;font-weight:700;color:#E65100;line-height:20px;will-change:transform}
 .notice-short{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:700;color:#E65100;line-height:20px}
@@ -2431,6 +2432,7 @@ function _salaryPanelHtml(scopeId, v) {
     if (s.paid) h += '<div class="att-badge-perfect" style="background:#E8F5E9;color:#2E7D32;border-color:#A5D6A7">✅ পরিশোধিত — ৳'+fm(s.paidAmount)+' ('+fmtBn(_isoOnly(s.paidAt))+')</div>';
     else h += '<div class="att-badge-perfect" style="background:#FFEBEE;color:#C62828;border-color:#EF9A9A">🔴 এই মাসের বেতন বাকি</div>';
     h += '</div>';
+    h += '<button class="btn btn-gh btn-w btn-sm" style="margin-top:8px" onclick="openSalarySlipModal(\''+scopeId+'\')">🧾 বেতন স্লিপ দেখুন / ডাউনলোড</button>';
   }
 
   if (v.isOwnerView) {
@@ -2448,6 +2450,78 @@ function _salaryPanelHtml(scopeId, v) {
     h += '</div>';
   }
   return h;
+}
+
+// ── Salary slip — printable breakdown so an employee can see exactly
+//    why their pay came out the way it did (base × valid days, every
+//    bonus/penalty line, advance deduction, net payable). Uses the same
+//    computeSalary() figures already loaded into ATT_VIEWS — no extra
+//    API call needed. Works both from the Owner's per-person view and
+//    the employee's own self-view. ──
+var _ROLE_LABEL_BN = { dsr:'DSR', so:'SO', manager:'ম্যানেজার', driver:'ড্রাইভার', owner:'মালিক' };
+function _salarySlipCardHtml(v) {
+  var s = v.salary;
+  var h = '<div style="text-align:center;font-weight:700;font-size:15px">'+esc(S.shopName||'AXIION DMS')+'</div>';
+  h += '<div style="text-align:center;font-size:11px;color:var(--mt2);margin-bottom:8px">বেতন স্লিপ · '+_monthLabelBn(v.month)+'</div>';
+  h += '<div style="border-top:1px dashed var(--bd);padding-top:6px;font-size:12px">';
+  h += '<div style="display:flex;justify-content:space-between"><span>নাম</span><span style="font-weight:700">'+esc(v.userName||'')+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between"><span>পদ</span><span>'+esc(_ROLE_LABEL_BN[v.role]||v.role||'')+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between"><span>প্রতি দিনের বেতন</span><span>৳'+fm(s.dailyRate)+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between"><span>উপস্থিত (গণনাযোগ্য) দিন</span><span>'+s.validDays+' / '+s.workingDays+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between;font-weight:700"><span>অর্জিত বেতন</span><span>৳'+fm(s.salaryEarned)+'</span></div>';
+  h += '</div>';
+
+  var lines = '';
+  function _line(label, amt) {
+    var neg = amt < 0;
+    lines += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:1px 0"><span>'+esc(label)+'</span><span style="color:'+(neg?'var(--re)':'var(--gr)')+'">'+(neg?'−':'+')+'৳'+fm(Math.abs(amt))+'</span></div>';
+  }
+  if (s.bonusEnabled) {
+    if (s.dailyBonus)   _line('অন-টাইম বোনাস', s.dailyBonus);
+    if (s.perfectMonth) _line('পারফেক্ট মান্থ বোনাস', s.perfectBonus);
+    if (s.penalty)      _line('লেট পেনাল্টি', s.penalty);
+  }
+  if (s.fridayBonusDays > 0) _line('শুক্রবার উপস্থিতি বোনাস ('+s.fridayBonusDays+' দিন)', s.fridayBonusAmount);
+  if (s.noGapBonus > 0)      _line('নো-গ্যাপ উপস্থিতি বোনাস', s.noGapBonus);
+  if (s.targetBonus && s.targetBonus.status === 'settled') _line('টার্গেট বোনাস', s.targetBonus.amount);
+  if (lines) h += '<div style="border-top:1px dashed var(--bd);margin-top:6px;padding-top:6px">'+lines+'</div>';
+
+  h += '<div style="border-top:1px solid var(--bd);margin-top:6px;padding-top:6px;font-size:13px">';
+  h += '<div style="display:flex;justify-content:space-between;font-weight:700"><span>সর্বমোট</span><span>৳'+fm(s.total)+'</span></div>';
+  if (s.advanceApproved > 0) {
+    h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--re)"><span>অগ্রিম কর্তন</span><span>−৳'+fm(s.advanceApproved)+'</span></div>';
+  }
+  h += '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:15px;margin-top:4px"><span>পরিশোধযোগ্য</span><span>৳'+fm(s.payable)+'</span></div>';
+  h += '</div>';
+
+  if (s.paid) h += '<div style="text-align:center;color:var(--gr);font-weight:700;margin-top:8px">✅ পরিশোধিত — ৳'+fm(s.paidAmount)+' ('+fmtBn(_isoOnly(s.paidAt))+')</div>';
+  else h += '<div style="text-align:center;color:var(--re);font-weight:700;margin-top:8px">🔴 এই মাসের বেতন বাকি</div>';
+  h += '<div style="text-align:center;font-size:9px;color:var(--mt2);margin-top:10px">তৈরি: '+fmtBn(new Date().toISOString())+'</div>';
+  return h;
+}
+function openSalarySlipModal(scopeId) {
+  var v = ATT_VIEWS[scopeId]; if (!v || !v.salary || !v.salary.settings) return;
+  var modal = document.createElement('div');
+  modal.className = 'due-modal-bg';
+  modal.onclick = function(e){ if (e.target === modal) document.body.removeChild(modal); };
+  var h = '<div class="due-modal">';
+  h += '<div class="due-modal-title">🧾 বেতন স্লিপ</div>';
+  h += '<div class="card" id="salary-slip-card">'+_salarySlipCardHtml(v)+'</div>';
+  h += '<div class="g2" style="margin-top:10px">';
+  h += '<button class="btn btn-bl btn-w" onclick="printSalarySlip()">🖨️ প্রিন্ট/ডাউনলোড</button>';
+  h += '<button class="btn btn-gh btn-w" onclick="document.body.removeChild(document.querySelector(\'.due-modal-bg\'))">বন্ধ</button>';
+  h += '</div></div>';
+  modal.innerHTML = h;
+  document.body.appendChild(modal);
+}
+function printSalarySlip() {
+  var card = document.getElementById('salary-slip-card'); if (!card) return;
+  var w = window.open('', '_blank');
+  if (!w) { toast('পপ-আপ ব্লক করা আছে — অনুমতি দিন'); return; }
+  w.document.write('<html><head><title>বেতন স্লিপ</title><meta charset="utf-8">'
+    + '<style>body{font-family:sans-serif;padding:16px;max-width:340px;margin:0 auto}div{font-size:13px}</style></head><body>' + card.innerHTML + '</body></html>');
+  w.document.close();
+  setTimeout(function(){ w.focus(); w.print(); }, 200);
 }
 
 // ── Advance salary request modal (self-service, Manager/DSR/SO/Driver) ──
@@ -2887,6 +2961,21 @@ function _roadDutyBanner(duty, role) {
     + '</div>';
 }
 
+// ── Online-deposit banner (SO panel) — read-only figure hovering at the
+//    very top of the SO's own panel, on every tab, same pattern as
+//    _roadDutyBanner above. The Owner is still the only one who can
+//    *enter* a deposit amount (accordion on the Owner dashboard, further
+//    down); the SO just needed visibility into today's total without
+//    having to be given Owner access. ──
+function _onlineDepositBanner() {
+  var dep = S.onlineDeposit; if (!dep) return '';
+  return '<div class="deposit-banner">'
+    + '<span class="notice-banner-icon">🏦</span>'
+    + '<div style="font-size:13px;flex:1">আজকের অনলাইন জমা: <b>৳'+fm(dep.today)+'</b>'
+    + '<span style="color:var(--mt2);font-weight:400"> · এই মাস: ৳'+fm(dep.month)+'</span></div>'
+    + '</div>';
+}
+
 // ── Notice banner helper (Manager / SO / DSR only) ──────────────
 function _noticeBanner() {
   if (S.role === 'owner' || !S.activeNotice || !S.activeNotice.content) return '';
@@ -2971,17 +3060,66 @@ function _animateNum(el, target, isMoney) {
   requestAnimationFrame(step);
 }
 
+// ── Sales-range picker (hero card, owner/manager dashboard) ───────────
+var DASH_RANGES = [
+  {id:'today', lbl:'আজ'}, {id:'7d', lbl:'৭ দিন'}, {id:'month', lbl:'এই মাস'},
+  {id:'year', lbl:'এই বছর'}, {id:'custom', lbl:'কাস্টম'}
+];
+function _dashRangeBarHtml() {
+  var h = '<div class="card" style="padding:6px;display:flex;gap:4px;margin-bottom:10px">';
+  DASH_RANGES.forEach(function(r){
+    h += '<button class="sbt'+(S.dashRange===r.id?' active':'')+'" onclick="_dashRangeSelect(\''+r.id+'\')">'+esc(r.lbl)+'</button>';
+  });
+  h += '</div>';
+  return h;
+}
+function _dashCustomRangeHtml() {
+  var f = S.dashCustomFrom || S.dashRangeData && S.dashRangeData.from || '';
+  var t = S.dashCustomTo   || S.dashRangeData && S.dashRangeData.to   || '';
+  var h = '<div class="card" style="margin-bottom:10px;display:flex;gap:6px;align-items:end">';
+  h += '<div class="fg" style="flex:1;margin-bottom:0"><label class="fl">শুরু</label><input type="date" id="dash-custom-from" value="'+esc(f)+'"></div>';
+  h += '<div class="fg" style="flex:1;margin-bottom:0"><label class="fl">শেষ</label><input type="date" id="dash-custom-to" value="'+esc(t)+'"></div>';
+  h += '<button class="btn btn-bl btn-sm" onclick="_dashRangeSelect(\'custom\')">প্রয়োগ</button>';
+  h += '</div>';
+  return h;
+}
+async function _dashRangeSelect(range) {
+  S.dashRange = range;
+  if (range === 'custom') {
+    var fEl = document.getElementById('dash-custom-from'), tEl = document.getElementById('dash-custom-to');
+    S.dashCustomFrom = fEl ? fEl.value : (S.dashCustomFrom || '');
+    S.dashCustomTo   = tEl ? tEl.value : (S.dashCustomTo   || '');
+    if (!S.dashCustomFrom || !S.dashCustomTo) { renderDash(_dashCache); return; } // just show the date pickers first
+  }
+  if (range === 'today') { renderDash(_dashCache); return; } // no fetch needed — already have d.today cached
+
+  var url = '/api/dashboard?action=sales-range&range=' + encodeURIComponent(range);
+  if (range === 'custom') url += '&from=' + encodeURIComponent(S.dashCustomFrom) + '&to=' + encodeURIComponent(S.dashCustomTo);
+  var r = await apiGet(url);
+  if (!r || !r.ok) { toast((r&&r.error)||'লোড ব্যর্থ'); return; }
+  S.dashRangeData = r;
+  renderDash(_dashCache);
+}
+
 function renderDash(d) {
   var t=d.today, m=d.month, st=d.stock, dues=d.dues, dmg=d.damage, bon=d.bonus;
   var isOwner = S.role==='owner';
   var mpc=m.profit>=0?'var(--gr)':'var(--re)';
   var h=_noticeBanner()+_radtWidgetHtml();
 
+  // ── Sales-range picker — small pill row above the hero cards so the
+  //    Owner/Manager can flip "আজ বিক্রি" between today/7-day/month/
+  //    year/custom without leaving the dashboard. See _dashRangeBarHtml
+  //    + _dashRangeSelect below; api/dashboard.js?action=sales-range.
+  if (!S.dashRange) S.dashRange = 'today';
+  h += _dashRangeBarHtml();
+  if (S.dashRange === 'custom') h += _dashCustomRangeHtml();
+
   // ── HERO — the only thing shown "loud" on open; numbers count up
   // instead of a full page of static cards (V59 minimalist redesign).
   h+='<div class="hero-grid" style="grid-template-columns:'+(isOwner?'1fr 1fr':'1fr')+'">';
-  h+='<div class="hero-card" style="background:linear-gradient(135deg,var(--bl),var(--bl2))"><div class="hero-l">আজ বিক্রি</div><div class="hero-v" id="hv-rev">৳0</div></div>';
-  if(isOwner) h+='<div class="hero-card" style="background:linear-gradient(135deg,'+(t.profit>=0?'var(--gr)':'var(--re)')+','+(t.profit>=0?'#388E3C':'#D32F2F')+')"><div class="hero-l">আজ '+(t.profit>=0?'লাভ':'ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div></div>';
+  h+='<div class="hero-card" style="background:linear-gradient(135deg,var(--bl),var(--bl2))"><div class="hero-l" id="hv-rev-lbl">আজ বিক্রি</div><div class="hero-v" id="hv-rev">৳0</div></div>';
+  if(isOwner) h+='<div class="hero-card" id="hv-prof-card" style="background:linear-gradient(135deg,'+(t.profit>=0?'var(--gr)':'var(--re)')+','+(t.profit>=0?'#388E3C':'#D32F2F')+')"><div class="hero-l" id="hv-prof-lbl">আজ '+(t.profit>=0?'লাভ':'ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div></div>';
   h+='</div>';
 
   // ── Compact today strip — replaces the old standalone "আজকের বিক্রয়"
@@ -3111,8 +3249,20 @@ function renderDash(d) {
   document.getElementById('pg-dash').innerHTML = h;
   setTimeout(_tickerStart, 50);
   _fillRadtWidget();
-  _animateNum(document.getElementById('hv-rev'), t.revenue, true);
-  if (isOwner) _animateNum(document.getElementById('hv-prof'), Math.abs(t.profit), true);
+  // ── Hero card figures — "today" uses the already-cached dashboard
+  //    payload; any other range uses the last sales-range fetch (see
+  //    _dashRangeSelect above). Falls back to today's figures if a
+  //    range other than 'today' has no data yet (e.g. custom range
+  //    with dates not applied).
+  var heroData = (S.dashRange !== 'today' && S.dashRangeData) ? S.dashRangeData : { revenue: t.revenue, profit: t.profit, label: 'আজ' };
+  var revLbl = document.getElementById('hv-rev-lbl'); if (revLbl) revLbl.textContent = heroData.label + ' বিক্রি';
+  _animateNum(document.getElementById('hv-rev'), heroData.revenue, true);
+  if (isOwner) {
+    var profLbl = document.getElementById('hv-prof-lbl'); if (profLbl) profLbl.textContent = heroData.label + ' ' + (heroData.profit>=0?'লাভ':'ক্ষতি');
+    var profCard = document.getElementById('hv-prof-card');
+    if (profCard) profCard.style.background = 'linear-gradient(135deg,'+(heroData.profit>=0?'var(--gr)':'var(--re)')+','+(heroData.profit>=0?'#388E3C':'#D32F2F')+')';
+    _animateNum(document.getElementById('hv-prof'), Math.abs(heroData.profit), true);
+  }
   _animateBarsIn(document.getElementById('pg-dash'));
 }
 
@@ -3146,16 +3296,21 @@ function loadSoDash() {
   Promise.all([
     apiGet('/api/dashboard?action=load-all'),
     apiGet('/api/dashboard?role=so&userId='+encodeURIComponent(S.userId)),
-    apiGet('/api/sr-payments?srId='+encodeURIComponent(S.userId))
+    apiGet('/api/sr-payments?srId='+encodeURIComponent(S.userId)),
+    // Read-only — owner is still the only one who can *set* this
+    // (enforced server-side in api/expenses.js), the SO can just see
+    // today's figure at the top of their own panel now.
+    apiGet('/api/expenses?action=deposit-get')
   ]).then(function(res) {
     hideOvl();
-    var allData=res[0], soData=res[1], pays=res[2];
+    var allData=res[0], soData=res[1], pays=res[2], dep=res[3];
     if (allData.ok) { S.products=allData.products||[]; S.srs=allData.srs||[]; S.stockMap=allData.stockMap||{}; }
     if (soData.ok) {
       S.soDashData     = soData;
       S.soAssignedDsrs = soData.assignedDsrs || [];
     }
     S.soPayments = Array.isArray(pays) ? pays : [];
+    S.onlineDeposit = (dep && dep.ok) ? dep : null;
     if (!S.soTab) S.soTab = 'overview';
     renderSoDash();
   });
@@ -3173,7 +3328,7 @@ function renderSoDash() {
     {id:'stock',    lbl:'📦 স্টক'},
     {id:'catalogue', lbl:'🖼️ ক্যাটালগ'}
   ];
-  var h=_roadDutyBanner(S.soDashData && S.soDashData.roadDuty, 'so')+_noticeBanner()+_navBoxBar(tabs, S.soTab, function(id){ return "S.soTab='"+id+"';renderSoDash()"; });
+  var h=_onlineDepositBanner()+_roadDutyBanner(S.soDashData && S.soDashData.roadDuty, 'so')+_noticeBanner()+_navBoxBar(tabs, S.soTab, function(id){ return "S.soTab='"+id+"';renderSoDash()"; });
   if (S.soTab==='overview')  h+=_radtWidgetHtml()+_soOverview();
   else if (S.soTab==='todaysale') h+=_soTodaySale();
   else if (S.soTab==='dsr-tx')   h+=_soDsrTx();
@@ -3846,15 +4001,21 @@ async function _openShopDetail(id) {
   _paintShopsMapTab();
 }
 
-// ── Update #37 — Owner-only shop edit (name + phone; GPS locked) ──────
+// ── Update #37 — Owner-only shop edit (name + phone; GPS locked).
+//    Extended: road (and therefore DSR) can now also be reassigned here,
+//    so a mis-registered or reorganised shop doesn't need to be deleted
+//    and re-registered just to move it under the right road. ──────
 async function _shopEditSave(shopId) {
   var name = (document.getElementById('shed-name')||{}).value || '';
   var phone = (document.getElementById('shed-phone')||{}).value || '';
+  var roadId = (document.getElementById('shed-road')||{}).value;
   if (!name.trim()) return toast('দোকানের নাম লিখুন');
   var ok = await confirmOwnerPin('শপ তথ্য সম্পাদনা নিশ্চিত করতে Owner PIN দিন');
   if (!ok) return;
   showOvl('সংরক্ষণ হচ্ছে...');
-  var r = await apiPost('/api/shops', { action: 'edit', shopId: shopId, name: name.trim(), phone: phone.trim(), ownerPin: window._lastOwnerPin });
+  var body = { action: 'edit', shopId: shopId, name: name.trim(), phone: phone.trim(), ownerPin: window._lastOwnerPin };
+  if (roadId !== undefined) body.roadId = roadId; // '' clears the road, an id reassigns it
+  var r = await apiPost('/api/shops', body);
   hideOvl();
   if (!r || !r.ok) return toast((r&&r.error)||'সংরক্ষণ ব্যর্থ');
   toast('✅ শপ তথ্য হালনাগাদ হয়েছে');
@@ -3891,6 +4052,13 @@ function _renderShopsMapDetail() {
     h += '<div class="card" style="margin-bottom:10px">';
     h += '<div class="fg"><label class="fl">দোকানের নাম *</label><input id="shed-name" maxlength="200" value="'+esc(shop.name)+'"></div>';
     h += '<div class="fg"><label class="fl">ফোন নম্বর</label><input id="shed-phone" type="tel" maxlength="30" value="'+esc(shop.phone||'')+'"></div>';
+    h += '<div class="fg"><label class="fl">🛣️ রোড (Road)</label><select id="shed-road">';
+    h += '<option value=""'+(!shop.roadId?' selected':'')+'>— কোনো রোড নেই —</option>';
+    (S.roads||[]).filter(function(rd){ return rd.dsrId; }).forEach(function(rd){
+      h += '<option value="'+rd.id+'"'+(shop.roadId===rd.id?' selected':'')+'>'+esc(rd.name)+' (SO: '+esc(rd.soName||'—')+' · DSR: '+esc(rd.dsrName||'—')+')</option>';
+    });
+    h += '</select>';
+    h += '<div style="font-size:10px;color:var(--mt2);margin-top:4px">রোড বদলালে এই শপের দায়িত্বপ্রাপ্ত DSR-ও স্বয়ংক্রিয়ভাবে নতুন রোডের DSR-এ পরিবর্তিত হবে।</div></div>';
     h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:8px">📍 GPS লোকেশন এখানে বদলানো যাবে না — সরাতে হলে শপটি মুছে নতুন করে নিবন্ধন করুন।</div>';
     h += '<div style="display:flex;gap:7px"><button class="btn btn-gh" style="flex:1" onclick="S.shopEditMode=false;_paintShopsMapTab()">বাতিল</button><button class="btn btn-bl" style="flex:1" onclick="_shopEditSave(\''+shop.id+'\')">✅ সংরক্ষণ করুন</button></div>';
     h += '</div>';
@@ -3900,6 +4068,7 @@ function _renderShopsMapDetail() {
 
   h += '<div class="card" style="margin-bottom:10px">';
   if (shop.keeperName) h += '<div style="font-size:12px;color:var(--mt)">🧑 মালিক: '+esc(shop.keeperName)+'</div>';
+  h += '<div style="font-size:12px;color:var(--mt)">🛣️ রোড: '+esc(shop.roadName||'—')+'</div>';
   h += '<div style="font-size:12px;color:var(--mt)">🚚 দায়িত্বে: '+esc(shop.assignedDsrName||'—')+'</div>';
   if (shop.address) h += '<div style="font-size:12px;color:var(--mt)">📍 '+esc(shop.address)+'</div>';
   if (shop.phone) h += '<a href="tel:'+esc(shop.phone)+'" style="font-size:13px;color:var(--bl);font-weight:700;text-decoration:none">📞 '+esc(shop.phone)+'</a>';
@@ -3944,12 +4113,23 @@ function _renderShopRegisterForm() {
   h += '<div class="fg"><label class="fl">দোকান মালিকের নাম (ঐচ্ছিক)</label><input id="shreg-keeper" placeholder="যেমন: করিম মিয়া" maxlength="200"></div>';
   h += '<div class="fg"><label class="fl">ফোন নম্বর (ঐচ্ছিক)</label><input id="shreg-phone" type="tel" placeholder="01XXXXXXXXX" maxlength="30"></div>';
   h += '<div class="fg"><label class="fl">ঠিকানা (ঐচ্ছিক)</label><input id="shreg-addr" placeholder="এলাকার নাম" maxlength="300"></div>';
+  // ── SO নির্বাচন করলে সেই SO-এর রোড নিচের Road ড্রপডাউনে স্বয়ংক্রিয়ভাবে
+  //    বসে যাবে (প্রতিটি SO ঠিক একটি রোডের সাথে যুক্ত থাকে) — তবে চাইলে
+  //    Road ড্রপডাউন থেকে ম্যানুয়ালি অন্য রোডও বেছে নেওয়া যাবে। ──
+  var _soList = (S.srs||[]).filter(function(p){ return p.role==='so'; });
+  h += '<div class="fg"><label class="fl">SO নির্বাচন করুন (ঐচ্ছিক — রোড অটো-ফিল করতে)</label><select id="shreg-so" onchange="_shregSoPicked()">';
+  h += '<option value="">— নির্বাচন করুন —</option>';
+  _soList.forEach(function(so){
+    h += '<option value="'+so.id+'" data-road="'+esc(so.roadId||'')+'">'+esc(so.name)+(so.roadName?' — '+esc(so.roadName):' (কোনো রোড নেই)')+'</option>';
+  });
+  h += '</select></div>';
   h += '<div class="fg"><label class="fl">রোড (Road) *</label><select id="shreg-road">';
   h += '<option value="">নির্বাচন করুন</option>';
   (S.roads||[]).filter(function(rd){ return rd.dsrId; }).forEach(function(rd){
     h += '<option value="'+rd.id+'">'+esc(rd.name)+' (SO: '+esc(rd.soName||'—')+' · DSR: '+esc(rd.dsrName||'—')+')</option>';
   });
   h += '</select>';
+  h += '<div style="font-size:10px;color:var(--mt2);margin-top:4px">উপরে SO বেছে নিলে এখানে সেই SO-এর রোড নিজে থেকে বসে যাবে — চাইলে এখান থেকে ভিন্ন রোডও বেছে নিতে পারবেন।</div>';
   if (!(S.roads||[]).some(function(rd){return rd.dsrId;})) {
     h += '<div style="font-size:11px;color:var(--re);margin-top:4px">⚠️ কোনো ব্যবহারযোগ্য রোড নেই — আগে "স্টাফ ম্যানেজমেন্ট → 🛣️ রোড" থেকে একটি রোড তৈরি করে SO নিয়োগ দিন।</div>';
   }
@@ -3960,6 +4140,19 @@ function _renderShopRegisterForm() {
   h += '<button class="btn btn-bl btn-w" style="margin-top:8px" onclick="_shregSubmit()">✅ শপ নিবন্ধন করুন</button>';
   h += '</div>';
   el.innerHTML = h;
+}
+
+// SO picked in the register form -> auto-select that SO's road in the
+// Road dropdown below (still fully overridable by hand afterwards).
+function _shregSoPicked() {
+  var soSel = document.getElementById('shreg-so');
+  var roadSel = document.getElementById('shreg-road');
+  if (!soSel || !roadSel) return;
+  var opt = soSel.options[soSel.selectedIndex];
+  var roadId = opt ? (opt.getAttribute('data-road') || '') : '';
+  if (!roadId) { if (soSel.value) toast('এই SO-এর কোনো রোড এখনো নির্ধারিত হয়নি — নিচে থেকে ম্যানুয়ালি একটি রোড বেছে নিন'); return; }
+  var has = Array.prototype.some.call(roadSel.options, function(o){ return o.value === roadId; });
+  if (has) roadSel.value = roadId;
 }
 
 var _shregCoords = null;
