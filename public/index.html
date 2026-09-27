@@ -14,11 +14,6 @@
      inconsistent next to the rest of the UI). Noto Sans has no Bengali
      glyphs, so every Bengali character still falls straight through to
      Hind Siliguri exactly as before — only the digit shapes change. -->
-<!-- Live Map (§14) — Leaflet + free tiles, no API key, no billing -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<!-- Shop QR codes (§11) — free, client-side only, no backend cost -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{
   /* AXIION DMS brand palette — brushed-silver/gold on charcoal, per the
@@ -428,22 +423,6 @@ tr:hover td{background:#F5F7FF}
 .att-met .mv{font-size:17px;font-weight:700}
 .att-badge-perfect{display:inline-block;background:#FFF8E1;color:#F57F17;border:1px solid #FFE082;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700;margin-top:6px}
 .att-so-note{background:var(--bll);color:var(--bl);border-radius:9px;padding:10px 12px;font-size:11.5px;line-height:1.5;margin-bottom:10px}
-.gmap-wrap{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--bdr);box-shadow:var(--shad);margin-bottom:8px}
-.gmap-box{width:100%;height:340px;background:#E5E3DF}
-.gmap-legend{position:absolute;bottom:8px;left:8px;background:rgba(255,255,255,.95);border-radius:8px;padding:6px 10px;font-size:10px;box-shadow:0 1px 4px rgba(0,0,0,.2);display:flex;gap:10px;flex-wrap:wrap;z-index:500}
-.gmap-legend span{display:flex;align-items:center;gap:4px}
-.gmap-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-.gmap-pin-pop{font-size:12px;line-height:1.5}
-.gmap-layer-btn{position:absolute;top:8px;right:8px;z-index:500;background:#fff;border:none;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:700;box-shadow:0 1px 6px rgba(0,0,0,.3);cursor:pointer;font-family:'Noto Sans','Hind Siliguri',sans-serif;color:var(--txt)}
-.gmap-fit-btn{position:absolute;top:8px;left:8px;z-index:500;background:#fff;border:none;border-radius:8px;width:32px;height:32px;font-size:15px;font-weight:700;box-shadow:0 1px 6px rgba(0,0,0,.3);cursor:pointer;color:var(--bl)}
-.gmap-people{display:flex;gap:6px;overflow-x:auto;padding:2px 1px 12px;-webkit-overflow-scrolling:touch}
-.gmap-people::-webkit-scrollbar{display:none}
-.gmap-chip{flex:0 0 auto;display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--bdr);border-radius:20px;padding:6px 12px 6px 8px;font-size:11px;font-weight:700;color:var(--txt);cursor:pointer;white-space:nowrap;font-family:'Noto Sans','Hind Siliguri',sans-serif}
-.gmap-chip:active{background:var(--bll)}
-.gmap-chip-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
-.gmap-chip-time{font-size:9.5px;color:var(--mt2);font-weight:600}
-.gmap-name-label{background:rgba(255,255,255,.95)!important;border:1px solid rgba(0,0,0,.15)!important;box-shadow:0 1px 4px rgba(0,0,0,.25)!important;border-radius:6px!important;padding:1px 7px!important;font-size:10.5px!important;font-weight:700!important;color:#222!important;font-family:'Noto Sans','Hind Siliguri',sans-serif!important;white-space:nowrap}
-.gmap-name-label::before{display:none}
 .att-office-card{background:var(--grl);border:1px solid #A5D6A7;border-radius:10px;padding:12px;margin-bottom:12px;font-size:11.5px;color:var(--txt);line-height:1.6}
 .att-office-card.unset{background:var(--rel);border-color:#EF9A9A}
 /* ── Attendance calendar day-status colors (§ salary system) ── */
@@ -567,6 +546,7 @@ tr:hover td{background:#F5F7FF}
     <div class="page" id="pg-cal"></div>
     <div class="page" id="pg-target"></div>
     <div class="page" id="pg-orders"></div>
+    <div class="page" id="pg-settings"></div>
     <div class="page" id="pg-reset"></div>
   </div>
 </div>
@@ -811,6 +791,7 @@ var MENU_ITEMS = [
   { id:'cal',           ic:'🗓️', lb:'ডিউ ক্যালেন্ডার' },
   { id:'target',        ic:'🎯', lb:'সেলস টার্গেট' },
   { id:'orders',        ic:'📋', lb:'অর্ডার ও গাড়ি লোড' },
+  { id:'settings',      ic:'⚙️', lb:'দোকান/ব্যবসার তথ্য' },
   { id:'reset',         ic:'🗑️', lb:'রিসেট সেন্টার' }
 ];
 // V44 #19 — every role now gets the 🔐 password-change page on its own
@@ -818,13 +799,13 @@ var MENU_ITEMS = [
 // OWN pin there — the "manage everyone's PIN" admin section underneath
 // stays gated to role==='owner' inside renderPwMgrTab() itself.
 var MENU_PERMS = {
-  owner:   ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','reset'],
+  owner:   ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'],
   manager: ['dash','prod','sr','tx','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','target','orders'],
   so:      ['dash','prod','pwmgr','attendance','shopsmap','chat','numbers','target','orders'],
   dsr:     ['dash','pwmgr','cal','attendance','chat','numbers','target','orders'],
   driver:  ['pwmgr','attendance','chat']
 };
-var TABS = ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','reset'];
+var TABS = ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'];
 
 function applyRole() {
   var r = S.role;
@@ -858,7 +839,7 @@ var MENU_GROUPS = [
   { lb: 'টিম ও উপস্থিতি',          ids: ['sr', 'attendance', 'chat', 'ownerapproval'] },
   { lb: 'দোকান ও এলাকা',           ids: ['shopsmap', 'cal'] },
   { lb: 'রিপোর্ট ও হিসাব',         ids: ['rep', 'exp', 'numbers'] },
-  { lb: 'সিস্টেম',                  ids: ['pwmgr', 'notice', 'reset'] }
+  { lb: 'সিস্টেম',                  ids: ['settings', 'pwmgr', 'notice', 'reset'] }
 ];
 
 function buildSideMenu() {
@@ -1986,6 +1967,10 @@ async function loadAll() {
   S.srs = r.srs || [];
   S.stockMap = r.stockMap || {};
   S.shopName = r.shopName || '';
+  S.shopAddress = r.shopAddress || '';
+  S.shopPhone = r.shopPhone || '';
+  S.distributorName = r.distributorName || '';
+  S.logoText = r.logoText || '';
   S.activeNotice = (nr && nr.ok) ? nr.notice : null;
   document.getElementById('hdr-sub').textContent = S.products.length+'টি পণ্য · '+S.srs.length+' জন DSR/SO';
   if (S.tab==='dash') loadDash();
@@ -2000,6 +1985,7 @@ async function refreshApp() {
   hideOvl();
   if (!r.ok) return toast('রিফ্রেশ ব্যর্থ');
   S.products = r.products||[]; S.srs = r.srs||[]; S.stockMap = r.stockMap||{}; S.shopName = r.shopName||'';
+  S.shopAddress = r.shopAddress||''; S.shopPhone = r.shopPhone||''; S.distributorName = r.distributorName||''; S.logoText = r.logoText||'';
   document.getElementById('hdr-sub').textContent = S.products.length+'টি পণ্য · '+S.srs.length+' জন DSR/SO';
   toast('✅ রিফ্রেশ সম্পন্ন');
   if (t==='dash') loadDash(true);
@@ -2048,6 +2034,7 @@ function gTab(t, _fromBack) {
   if (t==='numbers') renderNumbersTab();
   if (t==='target') renderTargetTab();
   if (t==='orders') renderOrdersTab();
+  if (t==='settings') renderSettingsTab();
   if (t==='reset')  renderResetTab();
 }
 
@@ -2201,10 +2188,7 @@ function renderOwnerAttendanceConsole() {
       loadAttScope('ownerpersonatt');
     }, 0);
   } else {
-    h += '<div id="oatt-shopname-wrap"><div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div></div>';
     h += '<div id="oatt-office-wrap"><div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div></div>';
-    h += '<div class="ct" style="margin-top:4px">📍 লাইভ লোকেশন — সবাই</div>';
-    h += _gmapHtml('oatt-map');
     h += '<div class="ct" style="margin-top:4px">👥 সব স্টাফ — উপস্থিতি ও বেতন দেখতে ট্যাপ করুন</div>';
     h += '<div id="oatt-stafflist"><div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div></div>';
     el.innerHTML = h;
@@ -2223,11 +2207,8 @@ async function renderSelfAttendanceTab() {
   if (S.role === 'so') {
     var h0 = '';
     h0 += '<div class="att-so-note">📍 আপনার লাইভ লোকেশন Owner দেখতে পাবেন। SO হিসেবে পাঞ্চ/উপস্থিতি ফিচারটি আপনার জন্য প্রযোজ্য নয়।</div>';
-    h0 += '<div class="ct" style="margin-top:4px">🚚 লাইভ লোকেশন — আমার DSR</div>';
-    h0 += _gmapHtml('att-map');
     el.innerHTML = h0;
-    startLocationTracking(); // keeps sending SO's own location to Owner
-    setTimeout(function(){ loadLiveMap('att-map', 'so', S.userId); }, 30);
+    startLocationTracking(); // keeps sending SO's own location to Owner (backend only, no map view)
     return;
   }
 
@@ -2263,17 +2244,10 @@ async function renderSelfAttendanceTab() {
 
   h += '<div id="attself-box"></div>';
 
-  // ── Manager also gets the Live Map (DSR/SO) ─────
-  if (S.role === 'manager') {
-    h += '<div class="ct" style="margin-top:4px">📍 লাইভ লোকেশন — DSR/SO</div>';
-    h += _gmapHtml('att-map');
-  }
-
   el.innerHTML = h;
   attScopeInit('attself', S.userId, S.userName, S.role, false);
   loadAttScope('attself');
-  startLocationTracking(); // no-op if already running
-  if (S.role === 'manager') setTimeout(function(){ loadLiveMap('att-map', 'manager'); }, 30);
+  startLocationTracking(); // no-op if already running (backend location process only, no map view)
 }
 
 async function doPunch(punchType) {
@@ -2704,171 +2678,77 @@ async function _sendLocationPing() {
   } catch(e) { /* network hiccup — next tick will retry */ }
 }
 
-// ── Live Map — Leaflet + free tiles, styled like a familiar maps app ─
-function _gmapHtml(id) {
-  return '<div class="gmap-wrap">'
-       +   '<div class="gmap-box" id="'+id+'"></div>'
-       +   '<div class="gmap-legend" id="'+id+'-legend"></div>'
-       +   '<button class="gmap-layer-btn" id="'+id+'-layerbtn" onclick="toggleMapLayer(\''+id+'\')">🛰️ স্যাটেলাইট</button>'
-       +   '<button class="gmap-fit-btn" onclick="loadLiveMap(\''+id+'\', _gmapViewerRole[\''+id+'\'], _gmapSoId[\''+id+'\'])" title="সবাইকে দেখান">⤢</button>'
-       + '</div>'
-       + '<div class="gmap-people" id="'+id+'-people"></div>';
-}
-var _leafletMaps = {};
-var _gmapViewerRole = {}; // remembers which viewerRole each map container was loaded with, for the "fit all" button
-var _gmapSoId = {}; // remembers the soId (when viewerRole==='so') for the "fit all" button
-var TILE_STREET = { url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', opts:{ maxZoom:20, subdomains:'abcd' } };
-var TILE_SAT    = { url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', opts:{ maxZoom:20 } };
-
-function toggleMapLayer(containerId) {
-  var mm = _leafletMaps[containerId]; if (!mm) return;
-  mm.satMode = !mm.satMode;
-  mm.map.removeLayer(mm.tileLayer);
-  var t = mm.satMode ? TILE_SAT : TILE_STREET;
-  mm.tileLayer = L.tileLayer(t.url, t.opts).addTo(mm.map);
-  var btn = document.getElementById(containerId+'-layerbtn');
-  if (btn) btn.innerHTML = mm.satMode ? '🗺️ স্ট্রিট' : '🛰️ স্যাটেলাইট';
-}
-
-// Tap a name in the staff list → fly straight to their pin, no manual hunting on the map
-function flyToPerson(containerId, userKey) {
-  var mm = _leafletMaps[containerId]; if (!mm || !mm.markerByKey[userKey]) return;
-  var mk = mm.markerByKey[userKey];
-  mm.map.flyTo(mk.getLatLng(), 17, { duration: 0.6 });
-  setTimeout(function(){ mk.openPopup(); }, 650);
-}
-
-async function loadLiveMap(containerId, viewerRole, soId) {
-  var box = document.getElementById(containerId); if (!box || typeof L === 'undefined') return;
-  _gmapViewerRole[containerId] = viewerRole;
-  _gmapSoId[containerId] = soId || '';
-  var locUrl = '/api/attendance?action=location-list&viewerRole='+viewerRole;
-  if (viewerRole === 'so' && soId) locUrl += '&soId='+encodeURIComponent(soId);
-  var [locR, offR] = await Promise.all([
-    apiGet(locUrl),
-    apiGet('/api/attendance?action=office-get')
-  ]);
-  var locs = (locR && locR.ok) ? locR.locations : [];
-  var office = (offR && offR.ok) ? offR.office : null;
-
-  // If the tab re-rendered, the old container div was destroyed and a new
-  // one with the same id exists now — the cached Leaflet instance is stale.
-  if (_leafletMaps[containerId] && _leafletMaps[containerId].map.getContainer() !== box) {
-    try { _leafletMaps[containerId].map.remove(); } catch(e) {}
-    delete _leafletMaps[containerId];
-  }
-
-  if (!_leafletMaps[containerId]) {
-    var map = L.map(containerId, { zoomControl:true, attributionControl:false });
-    var tileLayer = L.tileLayer(TILE_STREET.url, TILE_STREET.opts).addTo(map);
-    _leafletMaps[containerId] = { map: map, tileLayer: tileLayer, satMode: false, markers: [], markerByKey: {} };
-  }
-  var mm = _leafletMaps[containerId];
-  mm.markers.forEach(function(m){ mm.map.removeLayer(m); });
-  mm.markers = []; mm.markerByKey = {};
-
-  var pts = [];
-  if (office) {
-    var officeIcon = L.divIcon({ className:'', html:'<div style="font-size:22px;transform:translate(-50%,-90%)">🏢</div>', iconSize:[0,0] });
-    var om = L.marker([office.lat, office.lng], { icon: officeIcon }).addTo(mm.map)
-      .bindPopup('<div class="gmap-pin-pop"><b>🏢 অফিস</b><br>রেডিয়াস: '+office.radiusM+'মি</div>');
-    mm.markers.push(om);
-    L.circle([office.lat, office.lng], { radius: office.radiusM, color:'#0D47A1', fillColor:'#0D47A1', fillOpacity:.08, weight:1 }).addTo(mm.map);
-    pts.push([office.lat, office.lng]);
-  }
-  locs.forEach(function(p) {
-    var color = ROLE_COLORS[p.role] || '#546E7A';
-    var t = String(p.thumb||'').trim();
-    var hasPhoto = t.length>10 && (t.indexOf('data:image')===0 || t.indexOf('http')===0);
-    var innerHtml = hasPhoto
-      ? '<img src="'+t+'" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%" onerror="this.style.display=\'none\'">'
-      : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">'+(ROLE_ICONS[p.role]||'📍')+'</div>';
-    var icon = L.divIcon({
-      className:'', iconSize:[0,0],
-      html:'<div style="width:30px;height:30px;border-radius:50%;background:'+color+';border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);overflow:hidden;font-size:14px;transform:translate(-50%,-50%)">'+innerHtml+'</div>'
-    });
-    var mk = L.marker([p.lat, p.lng], { icon: icon }).addTo(mm.map)
-      .bindTooltip(esc(p.userName||p.userKey), { permanent:true, direction:'top', offset:[0,-16], className:'gmap-name-label' })
-      .bindPopup('<div class="gmap-pin-pop"><b>'+esc(p.userName||p.userKey)+'</b><br>'+(ROLE_LABELS[p.role]||p.role)+'<br><span style="color:#888">সর্বশেষ: '+_fmtHM(p.updatedAt)+'</span></div>');
-    mm.markers.push(mk);
-    mm.markerByKey[p.userKey] = mk;
-    pts.push([p.lat, p.lng]);
-  });
-
-  if (pts.length > 1) {
-    mm.map.fitBounds(pts, { padding:[40,40], maxZoom:15 });
-  } else if (pts.length === 1) {
-    mm.map.setView(pts[0], 15); // neighbourhood-level context instead of zooming in tight on one point
-  } else {
-    mm.map.setView([23.8103, 90.4125], 12); // Dhaka fallback
-  }
-  setTimeout(function(){ mm.map.invalidateSize(); }, 80);
-
-  var legend = document.getElementById(containerId+'-legend');
-  if (legend) {
-    var seenRoles = {}; locs.forEach(function(p){ seenRoles[p.role]=1; });
-    var lh = '';
-    Object.keys(seenRoles).forEach(function(r){ lh += '<span><span class="gmap-dot" style="background:'+(ROLE_COLORS[r]||'#546E7A')+'"></span>'+(ROLE_LABELS[r]||r)+'</span>'; });
-    if (office) lh += '<span>🏢 অফিস</span>';
-    legend.innerHTML = lh;
-  }
-
-  // Tap a name → fly straight to that person's pin (no manual hunting on the map)
-  var peopleEl = document.getElementById(containerId+'-people');
-  if (peopleEl) {
-    if (!locs.length) {
-      peopleEl.innerHTML = '<div style="font-size:11px;color:var(--mt2);padding:6px 2px">এখনো কারো লাইভ লোকেশন পাওয়া যায়নি</div>';
-    } else {
-      var ph = '';
-      locs.forEach(function(p) {
-        ph += '<button class="gmap-chip" onclick="flyToPerson(\''+containerId+'\',\''+p.userKey+'\')">'
-            + personAvatar(p.thumb, p.role, 20)
-            + esc(p.userName||p.userKey) + '<span class="gmap-chip-time">'+_fmtHM(p.updatedAt)+'</span></button>';
-      });
-      peopleEl.innerHTML = ph;
-    }
-  }
-}
-
-// ── Owner: Office Location + Live Map (everyone) + Reward table ──────
+// ── Owner: Office Location + Reward table (location processed on the
+//    backend only — no map view is rendered) ──────
 async function loadOwnerAttendance() {
-  await _renderShopNameCard();
   await _renderOfficeCard();
-  loadLiveMap('oatt-map', 'owner');
   loadOwnerStaffList();
 }
 
-// V58 — দোকান/প্রতিষ্ঠানের নাম card: the AXIION DMS software's own name
-// stays fixed in the UI chrome, but this value is what's printed on
-// every challan/report/POS slip/due notice, so it needs to be owner-
-// editable from inside the app (Blueprint request: "shop name" field).
-async function _renderShopNameCard() {
-  var el = document.getElementById('oatt-shopname-wrap'); if (!el) return;
-  var name = S.shopName || '';
+// V58/V59 — দোকান/ব্যবসার তথ্য (Business Info) card, now on its own
+// dedicated Settings page instead of tucked inside Attendance. These
+// values (name, address, phone, distributor line, logo initials) are
+// what get printed on every challan, memo, report and slip letterhead
+// (see _letterheadHtml() above) — so they need to be owner-editable
+// from inside the app rather than hard-coded per-install.
+function _renderShopInfoCard() {
+  var el = document.getElementById('settings-shopinfo-wrap'); if (!el) return;
   var h = '<div class="card" style="margin-bottom:12px">';
-  h += '<div class="ct" style="margin-bottom:6px">🏪 দোকান/প্রতিষ্ঠানের নাম</div>';
-  h += '<div style="font-size:10.5px;color:var(--mt2);margin-bottom:8px">প্রিন্ট হওয়া প্রতিটি চালান, রিপোর্ট ও রশিদে এই নামটি দেখানো হবে।</div>';
-  h += '<div class="fg"><input type="text" id="oatt-shopname-input" value="'+esc(name)+'" placeholder="যেমনঃ Miron Electronics" maxlength="120"></div>';
-  h += '<button class="btn btn-bl btn-w" ontouchstart="ownerSetShopName();event.preventDefault()" onclick="ownerSetShopName()">💾 সেভ করুন</button>';
+  h += '<div class="ct" style="margin-bottom:6px">🏪 দোকান/ব্যবসার তথ্য</div>';
+  h += '<div style="font-size:10.5px;color:var(--mt2);margin-bottom:10px">প্রিন্ট হওয়া প্রতিটি চালান, মেমো, রিপোর্ট ও রশিদে এই তথ্যগুলো দেখানো হবে। নাম ছাড়া বাকি সব ঐচ্ছিক — খালি রাখলে সেই লাইনটি প্রিন্টে দেখাবে না।</div>';
+
+  h += '<div class="fg"><label style="font-size:11px;color:var(--mt2);display:block;margin-bottom:3px">দোকান/প্রতিষ্ঠানের নাম *</label>'
+     + '<input type="text" id="si-name" value="'+esc(S.shopName||'')+'" placeholder="যেমনঃ Miron Electronics" maxlength="120"></div>';
+
+  h += '<div class="fg"><label style="font-size:11px;color:var(--mt2);display:block;margin-bottom:3px">ঠিকানা</label>'
+     + '<input type="text" id="si-address" value="'+esc(S.shopAddress||'')+'" placeholder="যেমনঃ বিসিক রোড, শাহজাদপুর, সিরাজগঞ্জ" maxlength="200"></div>';
+
+  h += '<div class="fg"><label style="font-size:11px;color:var(--mt2);display:block;margin-bottom:3px">মোবাইল নম্বর</label>'
+     + '<input type="text" id="si-phone" value="'+esc(S.shopPhone||'')+'" placeholder="যেমনঃ ০১৭xx-xxxxxx" maxlength="30"></div>';
+
+  h += '<div class="fg"><label style="font-size:11px;color:var(--mt2);display:block;margin-bottom:3px">পরিবেশক তথ্য (ঐচ্ছিক)</label>'
+     + '<input type="text" id="si-dist" value="'+esc(S.distributorName||'')+'" placeholder="যেমনঃ আকিজ ফুড এন্ড বেভারেজ লিঃ" maxlength="120"></div>';
+
+  h += '<div class="fg"><label style="font-size:11px;color:var(--mt2);display:block;margin-bottom:3px">লোগো সংক্ষিপ্ত রূপ (২-৪ অক্ষর, ঐচ্ছিক)</label>'
+     + '<input type="text" id="si-logo" value="'+esc(S.logoText||'')+'" placeholder="যেমনঃ ME" maxlength="4"></div>';
+
+  h += '<button class="btn btn-bl btn-w" ontouchstart="ownerSaveShopInfo();event.preventDefault()" onclick="ownerSaveShopInfo()">💾 সেভ করুন</button>';
   h += '</div>';
   el.innerHTML = h;
 }
 
-async function ownerSetShopName() {
-  var input = document.getElementById('oatt-shopname-input');
-  var shopName = input ? String(input.value || '').trim() : '';
+async function ownerSaveShopInfo() {
+  var v = function(id){ var e = document.getElementById(id); return e ? String(e.value||'').trim() : ''; };
+  var shopName = v('si-name');
   if (!shopName) return toast('❌ দোকান/প্রতিষ্ঠানের নাম দিন');
+  var shopAddress = v('si-address'), shopPhone = v('si-phone'), distributorName = v('si-dist'), logoText = v('si-logo');
 
-  var pinOk = await confirmOwnerPin('নাম পরিবর্তন করতে Owner PIN দিন');
+  var pinOk = await confirmOwnerPin('তথ্য পরিবর্তন করতে Owner PIN দিন');
   if (!pinOk) return;
 
   showOvl('সেভ হচ্ছে...');
-  var r = await apiPost('/api/due-calendar?action=settings-update', { shopName: shopName, setBy: S.userName || 'owner' });
+  var r = await apiPost('/api/due-calendar?action=settings-update', {
+    shopName: shopName, shopAddress: shopAddress, shopPhone: shopPhone,
+    distributorName: distributorName, logoText: logoText, setBy: S.userName || 'owner'
+  });
   hideOvl();
   if (!r || !r.ok) return toast((r&&r.error)||'ব্যর্থ');
   S.shopName = r.shopName || shopName;
+  S.shopAddress = r.shopAddress || shopAddress;
+  S.shopPhone = r.shopPhone || shopPhone;
+  S.distributorName = r.distributorName || distributorName;
+  S.logoText = r.logoText || logoText;
   toast('✅ সেভ হয়েছে');
-  _renderShopNameCard();
+  _renderShopInfoCard();
+}
+
+// ── Settings tab (⚙️) — currently just business identity, grouped with
+// পাসওয়ার্ড/নোটিশ/রিসেট under সিস্টেম so it's easy to find. ─────────
+function renderSettingsTab() {
+  var el = document.getElementById('pg-settings'); if (!el) return;
+  var h = '<div id="settings-shopinfo-wrap"></div>';
+  el.innerHTML = h;
+  _renderShopInfoCard();
 }
 
 async function _renderOfficeCard() {
@@ -2909,7 +2789,6 @@ async function ownerSetOffice() {
   if (!r || !r.ok) return toast((r&&r.error)||'ব্যর্থ');
   toast('✅ অফিস লোকেশন সেভ হয়েছে');
   _renderOfficeCard();
-  loadLiveMap('oatt-map', 'owner');
 }
 
 // ── Owner: staff list → per-person calendar + salary drill-down ────
@@ -3267,18 +3146,16 @@ function loadSoDash() {
   Promise.all([
     apiGet('/api/dashboard?action=load-all'),
     apiGet('/api/dashboard?role=so&userId='+encodeURIComponent(S.userId)),
-    apiGet('/api/sr-payments?srId='+encodeURIComponent(S.userId)),
-    apiGet('/api/expenses?action=deposit-get')
+    apiGet('/api/sr-payments?srId='+encodeURIComponent(S.userId))
   ]).then(function(res) {
     hideOvl();
-    var allData=res[0], soData=res[1], pays=res[2], dep=res[3];
+    var allData=res[0], soData=res[1], pays=res[2];
     if (allData.ok) { S.products=allData.products||[]; S.srs=allData.srs||[]; S.stockMap=allData.stockMap||{}; }
     if (soData.ok) {
       S.soDashData     = soData;
       S.soAssignedDsrs = soData.assignedDsrs || [];
     }
     S.soPayments = Array.isArray(pays) ? pays : [];
-    S.onlineDeposit = (dep && dep.ok) ? dep : null;
     if (!S.soTab) S.soTab = 'overview';
     renderSoDash();
   });
@@ -3389,8 +3266,6 @@ function _soOverview() {
   h+='<div class="met" style="border-top:3px solid var(--re)"><div class="ml">ড্যামেজ</div><div class="mv" style="font-size:14px;color:var(--re)">৳'+fm(num(tm.damage||0))+'</div></div>';
   h+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">ফেরত</div><div class="mv" style="font-size:14px;color:var(--am)">৳'+fm(num(tm.returns||0))+'</div></div>';
   h+='</div>';
-  // অনলাইন জমার পরিমাণ (V31) — read-only, same shared figure for every SO
-  h+=_onlineDepositPanel(false);
   h+='<div class="ct">💰 আমার পেমেন্ট ইতিহাস (সর্বশেষ ১৫টি)</div>';
   var pays=S.soPayments||[];
   if (!pays.length) { h+='<div class="card" style="text-align:center;color:var(--mt2);padding:16px">কোনো পেমেন্ট রেকর্ড নেই</div>'; }
@@ -3651,12 +3526,6 @@ async function loadDsrDash() {
     } catch (e) { S.dsrRoadDuty = []; }
   }
   var tab = S.dsrTab || 'tx';
-  // V33 ম্যাপ ট্যাব ছাড়া অন্য কোথাও গেলে লাইভ GPS watch বন্ধ করে দাও —
-  // ব্যাটারি/ডেটা অপচয় এড়াতে।
-  if (tab !== 'map' && S.dsrMapWatchId != null) {
-    try { navigator.geolocation.clearWatch(S.dsrMapWatchId); } catch(e) {}
-    S.dsrMapWatchId = null;
-  }
   if (tab === 'tx') {
     _loadDsrTxView();
   } else if (tab === 'dues') {
@@ -3667,20 +3536,18 @@ async function loadDsrDash() {
     _loadDsrShopView();
   } else if (tab === 'register') {
     _loadDsrRegisterView();
-  } else if (tab === 'map') {
-    _loadDsrMapView();
   }
 }
 
 // শপ ভিজিট + ক্লিয়ার প্লেট এখন একটাই ট্যাব — "শপ ডেলিভারি":
-// দোকান খোঁজা/GPS, ম্যাপ, বাকি দেখা, ডেলিভারি (বিক্রয়) এবং আজকের বাকি
+// দোকান খোঁজা/GPS, বাকি দেখা, ডেলিভারি (বিক্রয়) এবং আজকের বাকি
 // আদায়ের তালিকা — সব একই জায়গায়, যাতে DSR-কে আলাদা মেনুতে ঘুরতে না হয়।
-// V33: "শপ নিবন্ধন" ও "ম্যাপ" এখন নিজস্ব আলাদা ট্যাব — আগে নিবন্ধনের
+// V33: "শপ নিবন্ধন" এখন নিজস্ব আলাদা ট্যাব — আগে নিবন্ধনের
 // বাটনটা ডেলিভারি/বিক্রয়ের তালিকার মাঝেই থাকায় ভুলবশত চাপ পড়ে যেত
 // (mistouch); এখন সম্পূর্ণ আলাদা জায়গায়, তাই বিক্রয়ের সময় ভুলে
 // নিবন্ধনের পেজ খুলে যাওয়ার সুযোগ নেই।
 // Update #36 — verified: no manual SO↔DSR handshake/pairing UI remains
-// anywhere below (search/QR/sale/register/map/products tabs) — it was
+// anywhere below (search/QR/sale/register/products tabs) — it was
 // already fully removed app-wide back in Update #20's auto-pairing by
 // registration order. Nothing further to change here.
 var DSR_TABS = [
@@ -3688,7 +3555,6 @@ var DSR_TABS = [
   {id:'dues',     lbl:'💰 বাকি/পেমেন্ট'},
   {id:'shop',     lbl:'🚚 শপ ডেলিভারি'},
   {id:'register', lbl:'➕ শপ নিবন্ধন'},
-  {id:'map',      lbl:'🗺️ ম্যাপ'},
   {id:'products', lbl:'📦 পণ্য ক্যাটালগ'}
 ];
 function _dsrTabBar() {
@@ -3877,13 +3743,10 @@ async function _paintShopsMapTab() {
     S.roads.forEach(function(rd){ h += '<option value="'+rd.id+'"'+(S.shopsRoadFilter===rd.id?' selected':'')+'>'+esc(rd.name)+'</option>'; });
     h += '</select></div>';
   }
-  h += '<button class="btn btn-gh btn-w btn-sm" style="margin-bottom:6px" onclick="scanShopQr(function(id){_openShopDetail(id)})">📷 QR স্ক্যান করুন</button>';
   if (S.role === 'so') {
     h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mt);margin-bottom:8px"><input type="checkbox" style="width:auto" '+(S.shopsAll?'checked':'')+' onchange="S.shopsAll=this.checked;_shopsMapSearch()"> সব শপ দেখুন (শুধু আমার DSR নয়)</label>';
   }
   h += '<button class="btn btn-gh btn-w btn-sm" style="margin-bottom:10px" onclick="_shopsMapSearch()">🔍 খুঁজুন</button>';
-  h += '<div class="ct" style="margin-top:2px">🗺️ শপ ম্যাপ — আমাদের এলাকা</div>';
-  h += _shopsMapHtml('shmap-map');
   h += '<div class="ct" style="margin-top:4px">📋 শপ তালিকা <span id="shmap-count" style="font-size:11px;font-weight:400;color:var(--mt2)"></span></div>';
   h += '<div id="shmap-list"><div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div></div>';
   el.innerHTML = h;
@@ -3957,21 +3820,6 @@ async function _shopsMapSearch() {
   S.shopsList = shops;
   var countEl = document.getElementById('shmap-count'); if (countEl) countEl.textContent = '('+shops.length+'টি)';
   _paintShopsList(shops);
-  // Update #27 — show the viewer's own live GPS position on the map too,
-  // best-effort (never blocks the shop list from rendering if denied).
-  var myCoords = await _getCoords(6000).catch(function(){ return null; });
-  // Update #26 — today's visit ticks, colour-coded SO vs. DSR.
-  var visitUrl = '/api/shops?action=visit-log-list';
-  if (S.shopsRoadFilter) visitUrl += '&roadId=' + encodeURIComponent(S.shopsRoadFilter);
-  var vr = await apiGet(visitUrl);
-  var visitsByShop = {};
-  if (vr && vr.ok) {
-    (vr.visits || []).forEach(function(vis) {
-      if (!visitsByShop[vis.shopId]) visitsByShop[vis.shopId] = { so: false, dsr: false };
-      visitsByShop[vis.shopId][vis.visitRole] = true;
-    });
-  }
-  _plotShopsOnMap('shmap-map', shops, myCoords, visitsByShop);
 }
 
 function _paintShopsList(shops) {
@@ -4111,7 +3959,6 @@ function _renderShopRegisterForm() {
   h += '<div id="shreg-locstatus" style="font-size:11px;color:var(--mt2);margin-top:5px">এখনো লোকেশন ক্যাপচার করা হয়নি — দোকানে গিয়ে ক্যাপচার করুন</div></div>';
   h += '<button class="btn btn-bl btn-w" style="margin-top:8px" onclick="_shregSubmit()">✅ শপ নিবন্ধন করুন</button>';
   h += '</div>';
-  h += '<div id="shreg-qr-wrap"></div>';
   el.innerHTML = h;
 }
 
@@ -4142,164 +3989,7 @@ async function _shregSubmit() {
   if (!r || !r.ok) return toast((r&&r.error)||'নিবন্ধন ব্যর্থ');
   toast('✅ শপ নিবন্ধিত হয়েছে: ' + r.shop.shopNo);
   _shregCoords = null;
-  _showShopQr(r.shop);
 }
-
-// QR encodes the shop's stable id — scanning it (or typing the shop
-// number) is how the DSR "search" flow (§11/§20) instantly finds it again.
-function _showShopQr(shop) {
-  var wrap = document.getElementById('shreg-qr-wrap'); if (!wrap) return;
-  wrap.innerHTML = '<div class="ct">🏷️ '+esc(shop.name)+' — QR স্টিকার</div>'
-    + '<div class="card" style="text-align:center;padding:18px">'
-    + '<div id="shreg-qr-box" style="display:inline-block;background:#fff;padding:10px;border-radius:8px"></div>'
-    + '<div style="font-weight:700;margin-top:8px">'+esc(shop.shopNo)+'</div>'
-    + '<div style="font-size:11px;color:var(--mt2)">এই QR প্রিন্ট করে দোকানে লাগিয়ে দিন — পরে স্ক্যান করে সহজে দোকান খুঁজে পাওয়া যাবে</div>'
-    + '<button class="btn btn-gh btn-sm" style="margin-top:10px" onclick="window.print()">🖨️ প্রিন্ট করুন</button>'
-    + '</div>';
-  setTimeout(function() {
-    var box = document.getElementById('shreg-qr-box');
-    if (box && typeof QRCode !== 'undefined') new QRCode(box, { text: shop.id, width: 180, height: 180 });
-  }, 30);
-}
-
-// ── QR Scan — uses the native BarcodeDetector API (no extra library,
-//    free). Falls back to a friendly message on devices/WebViews that
-//    don't support it yet, so typing the shop number always still works.
-var _qrStream = null;
-function scanShopQr(onFound) {
-  if (!('BarcodeDetector' in window)) {
-    toast('📷 এই ডিভাইসে সরাসরি QR স্ক্যান সমর্থিত নয় — দোকান নম্বর টাইপ করে খুঁজুন');
-    return;
-  }
-  var overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;background:#000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center';
-  var video = document.createElement('video');
-  video.style.cssText = 'width:100%;max-width:420px;border-radius:10px';
-  video.setAttribute('playsinline', 'true');
-  var closeBtn = document.createElement('button');
-  closeBtn.textContent = '✕ বন্ধ করুন';
-  closeBtn.style.cssText = 'margin-top:16px;padding:10px 20px;border-radius:8px;border:none;background:#fff;font-weight:700;font-size:13px';
-  var hint = document.createElement('div');
-  hint.textContent = '📷 QR কোডের দিকে ক্যামেরা ধরুন';
-  hint.style.cssText = 'color:#fff;font-size:13px;margin-bottom:10px';
-  overlay.appendChild(hint); overlay.appendChild(video); overlay.appendChild(closeBtn);
-  document.body.appendChild(overlay);
-
-  function cleanup() {
-    if (_qrStream) { _qrStream.getTracks().forEach(function(t){ t.stop(); }); _qrStream = null; }
-    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-  }
-  closeBtn.onclick = cleanup;
-
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(function(stream) {
-    _qrStream = stream;
-    video.srcObject = stream;
-    video.play();
-    var detector = new BarcodeDetector({ formats: ['qr_code'] });
-    var scanning = true;
-    (function tick() {
-      if (!scanning) return;
-      detector.detect(video).then(function(codes) {
-        if (codes && codes.length) {
-          scanning = false;
-          var value = codes[0].rawValue;
-          cleanup();
-          onFound(value);
-        } else {
-          requestAnimationFrame(tick);
-        }
-      }).catch(function(){ requestAnimationFrame(tick); });
-    })();
-  }).catch(function() {
-    toast('📷 ক্যামেরা চালু করা যায়নি — পারমিশন দিন অথবা নম্বর টাইপ করুন');
-    cleanup();
-  });
-}
-
-
-function _shopsMapHtml(id) {
-  return '<div class="gmap-wrap">'
-       +   '<div class="gmap-box" id="'+id+'"></div>'
-       +   '<button class="gmap-layer-btn" id="'+id+'-layerbtn" onclick="toggleMapLayer(\''+id+'\')">🛰️ স্যাটেলাইট</button>'
-       + '</div>';
-}
-
-function _plotShopsOnMap(containerId, shops, myCoords, visitsByShop) {
-  var box = document.getElementById(containerId); if (!box || typeof L === 'undefined') return;
-  if (_leafletMaps[containerId] && _leafletMaps[containerId].map.getContainer() !== box) {
-    try { _leafletMaps[containerId].map.remove(); } catch(e) {}
-    delete _leafletMaps[containerId];
-  }
-  if (!_leafletMaps[containerId]) {
-    var map = L.map(containerId, { zoomControl:true, attributionControl:false });
-    var tileLayer = L.tileLayer(TILE_STREET.url, TILE_STREET.opts).addTo(map);
-    _leafletMaps[containerId] = { map: map, tileLayer: tileLayer, satMode:false, markers:[], markerByKey:{}, meMarker:null };
-  }
-  var mm = _leafletMaps[containerId];
-  mm.markers.forEach(function(m){ mm.map.removeLayer(m); });
-  mm.markers = [];
-  var pts = [];
-  (shops||[]).forEach(function(s) {
-    if (s.lat == null || s.lng == null) return;
-    var due = num(s.totalDue);
-    var color = due > 0 ? '#C62828' : '#2E7D32';
-    // Update #26 — same-day visit ticks: a small badge for each role that
-    // has already visited this shop TODAY. Auto-resets on its own at
-    // midnight since the visitsByShop map is always built from a
-    // today-only server query — nothing to clear client-side.
-    var v = (visitsByShop && visitsByShop[s.id]) || null;
-    var badges = '';
-    if (v && v.so)  badges += '<div style="position:absolute;top:-6px;left:-6px;width:15px;height:15px;border-radius:50%;background:#1565C0;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff">S</div>';
-    if (v && v.dsr) badges += '<div style="position:absolute;top:-6px;right:-6px;width:15px;height:15px;border-radius:50%;background:#2E7D32;border:1.5px solid #fff;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff">D</div>';
-    var icon = L.divIcon({
-      className:'', iconSize:[0,0],
-      html:'<div style="position:relative;width:28px;height:28px;border-radius:50%;background:'+color+';border:2.5px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:14px;transform:translate(-50%,-50%)">🏪'+badges+'</div>'
-    });
-    // 🧭 নেভিগেট — Google Maps turn-by-turn directions straight to this
-    // shop's saved GPS pin, opened in a new tab (works with or without
-    // the Google Maps app installed — falls back to maps.google.com).
-    var navUrl = 'https://www.google.com/maps/dir/?api=1&destination=' + s.lat + ',' + s.lng;
-    var visitNote = '';
-    if (v && (v.so || v.dsr)) {
-      visitNote = '<br><span style="color:#1565C0;font-size:11px">✓ আজ ভিজিট: '+(v.so?'SO ':'')+(v.dsr?'DSR':'')+'</span>';
-    }
-    var mk = L.marker([s.lat, s.lng], { icon: icon }).addTo(mm.map)
-      .bindTooltip(esc(s.name), { permanent:true, direction:'top', offset:[0,-16], className:'gmap-name-label' })
-      .bindPopup('<div class="gmap-pin-pop"><b>'+esc(s.name)+'</b><br>'+esc(s.shopNo)+'<br>🚚 '+esc(s.assignedDsrName||'—')+(due>0?'<br><span style="color:#C62828">বাকি: ৳'+fm(due)+'</span>':'<br><span style="color:#2E7D32">বাকি নেই</span>')+visitNote+'<br><a href="'+navUrl+'" target="_blank" rel="noopener" style="display:inline-block;margin-top:6px;font-size:12px;font-weight:700;color:#1565C0;text-decoration:none">🧭 নেভিগেট করুন</a></div>');
-    mm.markers.push(mk);
-    pts.push([s.lat, s.lng]);
-  });
-  // Own live position (Update #27 — every map viewer sees their own GPS
-  // position too, not just the DSR map tab) — a distinct blue dot,
-  // separate from the shop markers array so re-plotting shops on a GPS
-  // tick doesn't need to touch it, and vice versa (see _setMyPositionMarker).
-  if (myCoords && myCoords.lat != null && myCoords.lng != null) {
-    _setMyPositionMarker(containerId, myCoords);
-    pts.push([myCoords.lat, myCoords.lng]);
-  }
-  if (pts.length > 1) mm.map.fitBounds(pts, { padding:[40,40], maxZoom:15 });
-  else if (pts.length === 1) mm.map.setView(pts[0], 15);
-  else mm.map.setView([23.8103, 90.4125], 12);
-  setTimeout(function(){ mm.map.invalidateSize(); }, 80);
-}
-
-// ── My own live GPS position on a shops map (DSR "ম্যাপ" tab, V33) — a
-// pulsing blue dot, kept separate from the shop marker layer so it can
-// be updated on every geolocation tick without re-plotting every shop. ──
-function _setMyPositionMarker(containerId, coords) {
-  var mm = _leafletMaps[containerId]; if (!mm) return;
-  var icon = L.divIcon({
-    className:'', iconSize:[0,0],
-    html:'<div style="width:20px;height:20px;border-radius:50%;background:#1565C0;border:3px solid #fff;box-shadow:0 0 0 4px rgba(21,101,192,.35),0 1px 5px rgba(0,0,0,.4);transform:translate(-50%,-50%)"></div>'
-  });
-  if (mm.meMarker) {
-    mm.meMarker.setLatLng([coords.lat, coords.lng]);
-  } else {
-    mm.meMarker = L.marker([coords.lat, coords.lng], { icon: icon, zIndexOffset: 1000 }).addTo(mm.map)
-      .bindTooltip('📍 আপনি এখানে', { permanent:false, direction:'top', offset:[0,-12] });
-  }
-}
-
 
 async function _loadDsrShopView() {
   if (!S.dsrShopMode) S.dsrShopMode = 'list';
@@ -4326,11 +4016,6 @@ async function _loadDsrShopView() {
   _paintDsrShopList();
 }
 function dsrShopSearch() { S.dsrShopQ = v('dsr-shop-q'); _loadDsrShopView(); }
-function dsrToggleShopMap() {
-  S.dsrShopMapOpen = !S.dsrShopMapOpen;
-  _paintDsrShopList();
-  if (S.dsrShopMapOpen) setTimeout(function(){ _plotShopsOnMap('dsr-shop-map', S.dsrShopList || []); }, 60);
-}
 // ── V29 — GPS auto-detection radius: shops within this distance of the
 //    DSR's current position count as "nearby" for the auto-select /
 //    chooser flow below. One named constant so it's easy to tune. ──
@@ -4386,12 +4071,9 @@ function _paintDsrShopList() {
 
   h += '<div class="card">';
   h += '<div class="fg" style="margin-bottom:6px"><input id="dsr-shop-q" placeholder="🔍 দোকান নং, নাম বা এলাকা লিখুন" value="' + esc(S.dsrShopQ || '') + '" onkeydown="if(event.key===\'Enter\')dsrShopSearch()"></div>';
-  h += '<button class="btn btn-gh btn-w btn-sm" style="margin-bottom:6px" onclick="scanShopQr(function(id){dsrOpenShop(id)})">📷 QR স্ক্যান করুন</button>';
-  h += '<button class="btn btn-gh btn-w btn-sm" style="margin-bottom:6px" onclick="dsrToggleShopMap()">🗺️ ' + (S.dsrShopMapOpen ? 'ম্যাপ লুকান' : 'ম্যাপে দেখুন') + '</button>';
   h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mt);margin-bottom:8px"><input type="checkbox" style="width:auto" ' + (S.dsrShopAll ? 'checked' : '') + ' onchange="S.dsrShopAll=this.checked;dsrShopSearch()"> সব দোকানে খুঁজুন (শুধু আমার নয়)</label>';
   h += '<button class="btn btn-bl btn-w btn-sm" onclick="dsrShopSearch()">🔍 খুঁজুন</button>';
   h += '</div>';
-  if (S.dsrShopMapOpen) h += _shopsMapHtml('dsr-shop-map');
 
   // ── কেবল স্পষ্টভাবে সার্চ করলেই শপ তালিকা দেখানো হয় — GPS
   //    অটো-ডিটেকশনের বদলে ডিফল্ট হিসেবে সম্পূর্ণ শপ তালিকা আর
@@ -4416,7 +4098,6 @@ function _paintDsrShopList() {
 
   el.innerHTML = h;
   setTimeout(_tickerStart, 50);
-  if (S.dsrShopMapOpen) setTimeout(function(){ _plotShopsOnMap('dsr-shop-map', S.dsrShopList || []); }, 80);
 }
 
 function _renderDsrDueCollectionSection() {
@@ -4464,7 +4145,6 @@ function _loadDsrRegisterView() {
   h += '<div id="dqr-locstatus" style="font-size:11px;color:var(--mt2);margin:6px 0">📍 বর্তমান লোকেশন খোঁজা হচ্ছে...</div>';
   h += '<button class="btn btn-bl btn-w" onclick="_dsrRegisterSubmit()">✅ নিবন্ধন করুন</button>';
   h += '</div>';
-  h += '<div id="dqr-qr-wrap"></div>';
   el.innerHTML = h;
   S.dsrRegCoords = null;
   _getCoords(10000).then(function(c){
@@ -4488,88 +4168,8 @@ async function _dsrRegisterSubmit() {
   hideOvl();
   if (!r || !r.ok) return toast((r&&r.error)||'নিবন্ধন ব্যর্থ');
   toast('✅ শপ নিবন্ধিত হয়েছে: ' + r.shop.shopNo);
-  var wrap = document.getElementById('dqr-qr-wrap');
-  if (wrap && typeof QRCode !== 'undefined') {
-    wrap.innerHTML = '<div class="card" style="text-align:center;padding:16px;margin-top:10px"><div id="dqr-qr-box" style="display:inline-block;background:#fff;padding:8px;border-radius:8px"></div><div style="font-weight:700;margin-top:6px">'+esc(r.shop.shopNo)+'</div><div style="font-size:11px;color:var(--mt2)">অফিসে ফিরে প্রিন্ট করে দোকানে লাগিয়ে দিন</div></div>';
-    setTimeout(function(){ new QRCode(document.getElementById('dqr-qr-box'), { text: r.shop.id, width:150, height:150 }); }, 30);
-  }
   setTimeout(function(){ S.dsrTab='shop'; S.dsrShopMode='list'; loadDsrDash(); }, 1800);
 }
-// ── DSR live Map tab (V33) — every registered shop (or just this DSR's
-// own, toggle-able) plotted with 🏪 pins, plus the DSR's own live GPS
-// position as a blue dot that keeps updating while this tab is open, and
-// a one-tap 🧭 নেভিগেট link on every shop's popup that opens Google Maps
-// turn-by-turn directions straight from wherever the DSR is standing. ──
-async function _loadDsrMapView() {
-  var el = document.getElementById('pg-dash'); if (!el) return;
-  showOvl('ম্যাপ লোড হচ্ছে...');
-  var url = '/api/shops?action=search&q=';
-  if (!S.dsrMapAll) url += '&dsrId=' + encodeURIComponent(S.userId);
-  var coords = await _getCoords(8000).catch(function(){ return null; });
-  S.dsrMapCoords = coords;
-  var results = await Promise.all([apiGet(url), apiGet('/api/shops?action=visit-log-list')]);
-  var r = results[0], vr = results[1];
-  hideOvl();
-  S.dsrMapShops = (r && r.ok) ? (r.shops || []) : [];
-  S.dsrMapVisits = {};
-  if (vr && vr.ok) {
-    (vr.visits || []).forEach(function(vis) {
-      if (!S.dsrMapVisits[vis.shopId]) S.dsrMapVisits[vis.shopId] = { so:false, dsr:false };
-      S.dsrMapVisits[vis.shopId][vis.visitRole] = true;
-    });
-  }
-  _paintDsrMapView();
-}
-function dsrMapToggleScope() { S.dsrMapAll = !S.dsrMapAll; _loadDsrMapView(); }
-function _paintDsrMapView() {
-  var el = document.getElementById('pg-dash'); if (!el) return;
-  var shops = S.dsrMapShops || [];
-  var h = _dsrTabBar() + '<div class="ct">🗺️ শপ ম্যাপ ও আমার অবস্থান</div>';
-  if (!S.dsrMapCoords) {
-    h += '<div class="card" style="background:#FFF3E0;border:1px solid var(--am);margin-bottom:10px"><div style="font-size:12px;color:#E65100">⚠️ আপনার লোকেশন পাওয়া যায়নি — GPS/লোকেশন পারমিশন চালু আছে কিনা দেখুন</div></div>';
-  }
-  h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mt);margin-bottom:8px"><input type="checkbox" style="width:auto" '+(S.dsrMapAll?'checked':'')+' onchange="dsrMapToggleScope()"> সব নিবন্ধিত শপ দেখুন (শুধু আমার নয়)</label>';
-  h += _shopsMapHtml('dsr-live-map');
-  h += '<div class="ct" style="margin-top:10px">📋 শপ তালিকা <span style="font-size:11px;font-weight:400;color:var(--mt2)">('+shops.length+'টি)</span></div>';
-  if (!shops.length) {
-    h += '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">কোনো শপ পাওয়া যায়নি</div>';
-  } else {
-    h += '<div class="card" style="padding:0;overflow:hidden">';
-    shops.forEach(function(s, i) {
-      h += '<div class="sku-row" style="cursor:pointer" onclick="_dsrMapFocusShop('+i+')">';
-      h += '<div class="sku-i">🏪</div>';
-      h += '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">'+esc(s.name)+' <span style="font-size:10px;color:var(--mt2)">('+esc(s.shopNo)+')</span></div>';
-      h += '<div style="font-size:11px;color:var(--mt2)">'+esc(s.address||s.assignedDsrName||'—')+'</div>';
-      h += '</div>';
-      if (s.lat != null && s.lng != null) {
-        h += '<a href="https://www.google.com/maps/dir/?api=1&destination='+s.lat+','+s.lng+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="btn btn-bl btn-sm" style="text-decoration:none;flex-shrink:0">🧭 নেভিগেট</a>';
-      }
-      h += '</div>';
-    });
-    h += '</div>';
-  }
-  el.innerHTML = h;
-  setTimeout(function(){ _plotShopsOnMap('dsr-live-map', shops, S.dsrMapCoords, S.dsrMapVisits||{}); }, 60);
-  _dsrMapStartWatch();
-}
-function _dsrMapFocusShop(i) {
-  var s = (S.dsrMapShops||[])[i]; if (!s || s.lat == null || s.lng == null) return;
-  var mm = _leafletMaps['dsr-live-map']; if (!mm) return;
-  mm.map.setView([s.lat, s.lng], 17);
-  var mk = mm.markers[i]; if (mk) mk.openPopup();
-}
-// Keep the "me" dot live while the DSR stays on this tab — cleared
-// automatically (see loadDsrDash) the moment they switch to any other tab.
-function _dsrMapStartWatch() {
-  if (!navigator.geolocation) return;
-  if (S.dsrMapWatchId != null) { try { navigator.geolocation.clearWatch(S.dsrMapWatchId); } catch(e){} }
-  S.dsrMapWatchId = navigator.geolocation.watchPosition(function(pos) {
-    var c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    S.dsrMapCoords = c;
-    _setMyPositionMarker('dsr-live-map', c);
-  }, function(){ /* silent — keep last-known position on screen */ }, { enableHighAccuracy:true, maximumAge:10000, timeout:15000 });
-}
-
 async function dsrOpenShop(id) {
   showOvl('লোড হচ্ছে...');
   var r = await apiGet('/api/shops?action=detail&shopId=' + encodeURIComponent(id));
@@ -7325,19 +6925,8 @@ function openSlipWin(slip) {
     +'.sig-line{border-top:1.5px solid #000;padding-top:3px;margin-top:28px}'
     +'.ftr{text-align:center;font-size:8px;color:#888;margin-top:8px;border-top:1px dotted #bbb;padding-top:4px}'
     +'</style></head><body>'
-    // Header block matching letterhead
-    +'<div class="hdr">'
-    +'<div class="hdr-top">'
-    +'<div class="logo-circle">ME</div>'
-    +'<div class="co-name">মিরন ইলেকট্রনিক্স</div>'
-    +'</div>'
-    +'<div class="hdr-dist">পরিবেশক ঃ আকিজ ফুড এন্ড বেভারেজ লিঃ</div>'
-    +'<div class="hdr-addr">বিসিক রোড, প্রগতি স্কুলের উত্তর পার্শ্বে, শাহজাদপুর, সিরাজগঞ্জ।</div>'
-    +'<div class="hdr-bot">'
-    +'<div class="hdr-dist-box">আকিজ ফুড এন্ড বেভারেজ লিমিটেড</div>'
-    +'<div class="hdr-mobile">মোবাইল ঃ ০১৭৪৭-২০২০৫৫</div>'
-    +'</div>'
-    +'</div>'
+    // Header block matching letterhead — dynamic, from Settings
+    +_letterheadHtml()
     +'<div class="slip-t">'+slipTitle+'</div>'
     +pendingBanner
     +'<table class="meta">'
@@ -7776,12 +7365,7 @@ function buildDailyReportDocHtml(row) {
     + '.page-break{page-break-before:always;border-top:2px dashed #999;margin:16px 0 12px}'
     + '@media print{.page-break{border-top:none;margin-top:0}}'
     + '</style></head><body>'
-    + '<div class="hdr">'
-    + '<div class="hdr-top"><div class="logo-circle">ME</div><div class="co-name">মিরন ইলেকট্রনিক্স</div></div>'
-    + '<div class="hdr-dist">পরিবেশক ঃ আকিজ ফুড এন্ড বেভারেজ লিঃ</div>'
-    + '<div class="hdr-addr">বিসিক রোড, প্রগতি স্কুলের উত্তর পার্শ্বে, শাহজাদপুর, সিরাজগঞ্জ।</div>'
-    + '<div class="hdr-bot"><div class="hdr-dist-box">আকিজ ফুড এন্ড বেভারেজ লিমিটেড</div><div class="hdr-mobile">মোবাইল ঃ ০১৭৪৭-২০২০৫৫</div></div>'
-    + '</div>'
+    + _letterheadHtml()
     + '<div class="slip-t">— দৈনিক SO ডেলিভারি রিপোর্ট —</div>'
     + '<table class="meta">'
     + '<tr><td class="mk">SO-এর নাম</td><td class="mv">' + esc(row.soName) + (rd.soArea ? ' | ' + esc(rd.soArea) : '') + '</td></tr>'
@@ -8380,6 +7964,46 @@ function fmtCasePcs(units, caseSize) {
 }
 function fm(n){var v=Number(n)||0;return v.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ══════════════════════════════════════════════════
+//  V59 — Dynamic document letterhead
+//  Every printed challan/report/slip used to hard-code one specific
+//  shop's name, address, distributor line and phone number. This
+//  builds that same header block from the owner-editable values in
+//  S (S.shopName / S.shopAddress / S.shopPhone / S.distributorName /
+//  S.logoText — set from /api/due-calendar?action=settings-update,
+//  see the "দোকান/ব্যবসার তথ্য" Settings page). Any field left blank
+//  by the owner simply doesn't print that line, so the letterhead
+//  degrades gracefully before it's been configured.
+// ══════════════════════════════════════════════════
+function _logoInitials() {
+  var t = String(S.logoText || '').trim();
+  if (t) return t.substring(0, 4);
+  var name = String(S.shopName || '').trim();
+  if (!name) return 'AX';
+  var parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+}
+function _letterheadHtml() {
+  var name = esc(S.shopName || 'AXIION DMS');
+  var addr = String(S.shopAddress || '').trim();
+  var phone = String(S.shopPhone || '').trim();
+  var dist = String(S.distributorName || '').trim();
+  var h = '<div class="hdr"><div class="hdr-top">'
+    + '<div class="logo-circle">' + esc(_logoInitials()) + '</div>'
+    + '<div class="co-name">' + name + '</div></div>';
+  if (dist) h += '<div class="hdr-dist">পরিবেশক ঃ ' + esc(dist) + '</div>';
+  if (addr) h += '<div class="hdr-addr">' + esc(addr) + '</div>';
+  if (dist || phone) {
+    h += '<div class="hdr-bot">';
+    h += dist ? '<div class="hdr-dist-box">' + esc(dist) + '</div>' : '<div></div>';
+    if (phone) h += '<div class="hdr-mobile">মোবাইল ঃ ' + esc(phone) + '</div>';
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
 function iso(d){if(d instanceof Date){var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}return String(d).slice(0,10);}
 function fmtBn(d){if(!d)return'';try{var p=String(d).slice(0,10).split('-');if(p.length!==3)return String(d).slice(0,10);return p[2]+'/'+p[1]+'/'+p[0];}catch(e){return String(d).slice(0,10);}}
 function prodUnit(pid){var p=(S.products||[]).find(function(x){return x.id===pid;});return p?p.unitType||'কেস':'কেস';}
@@ -8982,6 +8606,9 @@ async function _downloadDepositSlip(period) {
     +'.co-name{font-size:26px;font-weight:900;line-height:1;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif}'
     +'.hdr-dist{font-size:10.5px;font-weight:600;color:#000;margin-top:2px}'
     +'.hdr-addr{font-size:9.5px;color:#333;margin-top:1px;line-height:1.5}'
+    +'.hdr-bot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;border-top:1px solid #000;padding-top:4px}'
+    +'.hdr-dist-box{background:#000;color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:2px}'
+    +'.hdr-mobile{font-size:9.5px;font-weight:700}'
     +'.slip-t{text-align:center;font-size:12px;font-weight:700;letter-spacing:2px;border:1.5px dashed #555;padding:5px 0;margin-bottom:8px}'
     +'.meta{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px}.meta td{padding:4px 7px;border:1px solid #999}'
     +'.mk{background:#e8e8e8;font-weight:700;width:80px;font-size:10px}.mv{font-weight:600}'
@@ -8991,11 +8618,7 @@ async function _downloadDepositSlip(period) {
     +'.stbl tfoot td{border:1.5px solid #333;background:#e0e0e0;font-weight:700;font-size:12px;padding:6px 7px}'
     +'.ftr{text-align:center;font-size:8px;color:#888;margin-top:8px;border-top:1px dotted #bbb;padding-top:4px}'
     +'</style></head><body>'
-    +'<div class="hdr">'
-    +'<div class="hdr-top"><div class="logo-circle">ME</div><div class="co-name">মিরন ইলেকট্রনিক্স</div></div>'
-    +'<div class="hdr-dist">পরিবেশক ঃ আকিজ ফুড এন্ড বেভারেজ লিঃ</div>'
-    +'<div class="hdr-addr">বিসিক রোড, প্রগতি স্কুলের উত্তর পার্শ্বে, শাহজাদপুর, সিরাজগঞ্জ।</div>'
-    +'</div>'
+    +_letterheadHtml()
     +'<div class="slip-t">— অনলাইন জমার স্লিপ —</div>'
     +'<table class="meta"><tr><td class="mk">মাস</td><td class="mv">'+_depositPeriodLabel(period).replace(/<[^>]+>/g,'')+'</td></tr></table>'
     +'<table class="stbl"><thead><tr><th style="width:34%">তারিখ</th><th style="text-align:center;width:33%">ধরন</th><th style="text-align:right;width:33%">পরিমাণ</th></tr></thead>'

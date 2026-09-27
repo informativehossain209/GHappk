@@ -323,10 +323,18 @@ CREATE POLICY "anon_deny_important_contacts" ON important_contacts FOR ALL TO an
 DROP TABLE IF EXISTS office_location CASCADE;
 
 CREATE TABLE app_settings (
-  id         INTEGER     PRIMARY KEY DEFAULT 1,
-  shop_name  TEXT        NOT NULL DEFAULT '',
-  set_by     TEXT        DEFAULT '',
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  id                INTEGER     PRIMARY KEY DEFAULT 1,
+  shop_name         TEXT        NOT NULL DEFAULT '',
+  -- V59 — printed-document identity fields (challan/report/slip letterhead).
+  -- All owner-editable from the app's Settings page; every value defaults
+  -- to '' so a fresh install still prints (the letterhead lines just stay
+  -- blank/hidden until the owner fills them in).
+  shop_address      TEXT        DEFAULT '',
+  shop_phone        TEXT        DEFAULT '',
+  distributor_name  TEXT        DEFAULT '',
+  logo_text         TEXT        DEFAULT '',
+  set_by            TEXT        DEFAULT '',
+  updated_at        TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT app_settings_single_row CHECK (id = 1)
 );
 

@@ -29,15 +29,20 @@ module.exports = async (req, res) => {
         supabase.from('products').select('*').order('sort_order').order('created_at'),
         supabase.from('srs').select('*').order('created_at'),
         supabase.from('roads').select('*').order('created_at'),
-        // V58 — the owner's own business name for printed documents,
+        // V58/V59 — the owner's own business identity (name, address,
+        // phone, distributor line, logo initials) for printed documents,
         // fetched once at boot alongside everything else so every screen
-        // that prints something already has it cached in S.shopName.
-        supabase.from('app_settings').select('shop_name').eq('id', 1).maybeSingle()
+        // that prints something already has it cached in S.shopName etc.
+        supabase.from('app_settings').select('shop_name, shop_address, shop_phone, distributor_name, logo_text').eq('id', 1).maybeSingle()
       ]);
       const products = (pRes.data || []).map(mapProduct);
       const srsAll   = (sRes.data || []).map(mapSR);
       const roads    = (rRes.data || []).map(mapRoad);
-      const shopName = (setRes.data && setRes.data.shop_name) || '';
+      const shopName        = (setRes.data && setRes.data.shop_name)        || '';
+      const shopAddress     = (setRes.data && setRes.data.shop_address)     || '';
+      const shopPhone       = (setRes.data && setRes.data.shop_phone)       || '';
+      const distributorName = (setRes.data && setRes.data.distributor_name) || '';
+      const logoText        = (setRes.data && setRes.data.logo_text)        || '';
       // V40: stock comes straight from products.current_stock (kept in
       // sync by a DB trigger on every transaction insert) instead of
       // re-fetching + re-summing the ENTIRE lifetime transactions table
@@ -46,7 +51,7 @@ module.exports = async (req, res) => {
       // migration_v40_stock_balance.sql.
       const stockMap = {};
       products.forEach(p => { stockMap[p.id] = p.currentStock; });
-      return res.json({ ok: true, products, srs: srsAll, roads, stockMap, shopName });
+      return res.json({ ok: true, products, srs: srsAll, roads, stockMap, shopName, shopAddress, shopPhone, distributorName, logoText });
     }
 
     // ══════════════════════════════════════════════════════

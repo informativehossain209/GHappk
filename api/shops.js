@@ -1,9 +1,9 @@
 // shops.js — AXIION Blueprint §3 (new file, 11/12 slot) + §11 route surface
 //
-// Backend surface for the Shop Registry / QR / Point-of-Sale module. This
+// Backend surface for the Shop Registry / Point-of-Sale module. This
 // file wires up every action listed in §3's API map so the 12-file
-// structure is complete and testable; the dedicated §11 UI screens (QR
-// scan, nearest-shop picker, visit workflow) are a separate front-end
+// structure is complete and testable; the dedicated §11 UI screens
+// (nearest-shop picker, visit workflow) are a separate front-end
 // phase that will call straight into these same endpoints.
 const { randomUUID } = require('crypto');
 const {
