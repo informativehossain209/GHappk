@@ -1742,6 +1742,7 @@ function oaTypeLabel(inputType, d) {
   var txMap = {give:'স্টক সরবরাহ',return:'ফেরত',damage:'ড্যামেজ',buy:'কেনা',return_company:'কোম্পানিতে ফেরত',point_sale:'পয়েন্ট সেল',point_damage_return:'পয়েন্ট ফেরত',dsr_sale:'দোকানে বিক্রয় (DSR)'};
   if (inputType==='transaction') return txMap[d.type]||d.type||'লেনদেন';
   if (inputType==='payment') return 'পেমেন্ট';
+  if (inputType==='settlement') return 'দিনশেষ হিসাব';
   if (inputType==='expense') return 'খরচ';
   return inputType;
 }
@@ -1756,6 +1757,9 @@ function oaSummary(inputType, d) {
   if (inputType==='payment') {
     var tot=(num(d.cashAmount)+num(d.commissionAmt)+num(d.discountAmt)+num(d.damageAmt))||num(d.amount);
     return (d.srName?d.srName+' · ':'')+' ৳'+fm(tot)+' · '+fmtBn(d.date);
+  }
+  if (inputType==='settlement') {
+    return (d.dsrName?d.dsrName+' · ':'')+'নগদ ৳'+fm(d.cashReceived)+' · '+fmtBn(d.date);
   }
   if (inputType==='expense') {
     var ent=d.entries||[];
@@ -1854,6 +1858,13 @@ function _oaViewBody(a, d) {
     h += '<div class="sc-modal-row"><span class="sc-modal-label">🏷️ ছাড়</span><span class="sc-modal-val">৳'+fm(d.discountAmt)+'</span></div>';
     h += '<div class="sc-modal-row"><span class="sc-modal-label">💥 ড্যামেজ</span><span class="sc-modal-val">৳'+fm(d.damageAmt)+'</span></div>';
     if (d.note) h += '<div style="font-size:11px;color:var(--mt2);margin-top:6px">📝 '+esc(d.note)+'</div>';
+  } else if (a.inputType === 'settlement') {
+    h += '<div style="font-size:12px;margin-bottom:6px"><b>DSR:</b> '+esc(d.dsrName||'—')+' · <b>তারিখ:</b> '+fmtBn(d.date||'')+'</div>';
+    h += '<div class="sc-modal-row"><span class="sc-modal-label">💵 নগদ গ্রহণ</span><span class="sc-modal-val">৳'+fm(d.cashReceived)+'</span></div>';
+    var _ap = d.apply||{};
+    h += '<div style="font-size:11px;color:var(--mt2);margin-top:6px">স্বয়ংক্রিয় হিসাব (অনুমোদনের সময় ডেটাবেস থেকে নতুন করে গণনা হবে): '
+      + (_ap.return!==false?'↩️ ফেরত ':'') + (_ap.damage!==false?'⚠️ ড্যামেজ ':'') + (_ap.commission!==false?'🤝 কমিশন ':'') + (_ap.discount!==false?'🏷️ ছাড়':'') + '</div>';
+    if (d.note) h += '<div style="font-size:11px;color:var(--mt2);margin-top:6px">📝 '+esc(d.note)+'</div>';
   } else if (a.inputType === 'expense') {
     h += '<div style="font-size:12px;margin-bottom:6px"><b>তারিখ:</b> '+fmtBn(d.date||'')+'</div>';
     (d.entries||[]).forEach(function(e) {
@@ -1886,6 +1897,9 @@ function _oaEditBody(a, d) {
     h += '<div class="fg"><label class="fl">💥 ড্যামেজ</label><input id="oae-dmg" type="number" value="'+num(d.damageAmt)+'" min="0" step="0.01"></div>';
     h += '</div>';
     h += '<div class="fg"><label class="fl">📝 নোট</label><input id="oae-note" value="'+esc(d.note||'')+'"></div>';
+  } else if (a.inputType === 'settlement') {
+    h += '<div class="fg"><label class="fl">💵 নগদ গ্রহণ</label><input id="oae-cash" type="number" value="'+num(d.cashReceived)+'" min="0" step="0.01"></div>';
+    h += '<div class="fg"><label class="fl">📝 নোট</label><input id="oae-note" value="'+esc(d.note||'')+'"></div>';
   } else if (a.inputType === 'expense') {
     (d.entries||[]).forEach(function(e, i) {
       h += '<div class="fg"><label class="fl">'+esc(e.categoryName||'')+'</label><input id="oae-ex-'+i+'" type="number" value="'+num(e.amount)+'" min="0" step="0.01"></div>';
@@ -1914,6 +1928,8 @@ async function saveApprovalEdit() {
     d.discountAmt = num(v('oae-disc')); d.damageAmt = num(v('oae-dmg'));
     d.amount = d.cashAmount + d.commissionAmt + d.discountAmt + d.damageAmt;
     d.note = v('oae-note');
+  } else if (a.inputType === 'settlement') {
+    d.cashReceived = num(v('oae-cash')); d.note = v('oae-note');
   } else if (a.inputType === 'expense') {
     (d.entries||[]).forEach(function(e, i) { e.amount = num(v('oae-ex-'+i)); });
     d.note = v('oae-note');
@@ -4103,6 +4119,10 @@ async function loadDsrDash() {
     _loadDsrShopView();
   } else if (tab === 'register') {
     _loadDsrRegisterView();
+  } else if (tab === 'duecol') {
+    _loadDsrDueColView();
+  } else if (tab === 'dmgcol') {
+    _loadDsrDmgColView();
   }
 }
 
@@ -4121,6 +4141,8 @@ var DSR_TABS = [
   {id:'tx',       lbl:'📝 লেনদেন'},
   {id:'dues',     lbl:'💰 বাকি/পেমেন্ট'},
   {id:'shop',     lbl:'🚚 শপ ডেলিভারি'},
+  {id:'duecol',   lbl:'📥 বাকি আদায়'},
+  {id:'dmgcol',   lbl:'⚠️ ড্যামেজ কালেকশন'},
   {id:'register', lbl:'➕ শপ নিবন্ধন'},
   {id:'products', lbl:'📦 পণ্য ক্যাটালগ'}
 ];
@@ -4748,10 +4770,17 @@ function _loadDsrRegisterView() {
   h += '<div class="fg"><label class="fl">দোকান মালিকের নাম (ঐচ্ছিক)</label><input id="dqr-keeper" placeholder="যেমন: করিম মিয়া" maxlength="200"></div>';
   h += '<div class="fg"><label class="fl">ফোন নম্বর (ঐচ্ছিক)</label><input id="dqr-phone" type="tel" placeholder="01XXXXXXXXX" maxlength="30"></div>';
   h += '<div class="fg"><label class="fl">ঠিকানা (ঐচ্ছিক)</label><input id="dqr-addr" placeholder="এলাকার নাম" maxlength="300"></div>';
+  h += '<div class="fg"><label class="fl">রোড (Road) *</label><select id="dqr-road"><option value="">লোড হচ্ছে...</option></select><div id="dqr-roadnote" style="font-size:10px;color:var(--mt2);margin-top:4px">দোকানটি কোন রোডের অধীনে — শুধু আপনার রোড দেখানো হচ্ছে।</div></div>';
   h += '<div id="dqr-locstatus" style="font-size:11px;color:var(--mt2);margin:6px 0">📍 বর্তমান লোকেশন খোঁজা হচ্ছে...</div>';
   h += '<button class="btn btn-bl btn-w" onclick="_dsrRegisterSubmit()">✅ নিবন্ধন করুন</button>';
   h += '</div>';
   el.innerHTML = h;
+  apiGet('/api/srs?action=roads').then(function(rr) {
+    var sel = document.getElementById('dqr-road'); if (!sel) return;
+    var mine = ((rr && rr.ok) ? (rr.roads || []) : []).filter(function(rd) { return rd.dsrId === S.userId; });
+    if (!mine.length) { sel.innerHTML = '<option value="">কোনো রোড নেই</option>'; var n = document.getElementById('dqr-roadnote'); if (n) { n.style.color = 'var(--re)'; n.textContent = '⚠️ আপনার নামে কোনো রোড নির্ধারিত নেই — আগে Owner/Manager-কে দিয়ে রোড ও SO নিয়োগ করান।'; } return; }
+    sel.innerHTML = (mine.length > 1 ? '<option value="">রোড বাছুন</option>' : '') + mine.map(function(rd) { return '<option value="' + rd.id + '">' + esc(rd.name) + '</option>'; }).join('');
+  }).catch(function() { var sel = document.getElementById('dqr-road'); if (sel) sel.innerHTML = '<option value="">লোড ব্যর্থ</option>'; });
   S.dsrRegCoords = null;
   _getCoords(10000).then(function(c){
     S.dsrRegCoords = c;
@@ -4765,10 +4794,12 @@ async function _dsrRegisterSubmit() {
   var keeperName = (document.getElementById('dqr-keeper')||{}).value.trim();
   var phone = (document.getElementById('dqr-phone')||{}).value.trim();
   var addr = (document.getElementById('dqr-addr')||{}).value.trim();
+  var dqRoad = (document.getElementById('dqr-road')||{}).value;
   if (!name) return toast('দোকানের নাম লিখুন');
+  if (!dqRoad) return toast('রোড নির্বাচন করুন');
   showOvl('নিবন্ধন হচ্ছে...');
   var r = await apiPost('/api/shops', {
-    action: 'register', name: name, keeperName: keeperName, phone: phone, address: addr, assignedDsrId: S.userId,
+    action: 'register', name: name, keeperName: keeperName, phone: phone, address: addr, roadId: dqRoad, assignedDsrId: S.userId,
     lat: S.dsrRegCoords ? S.dsrRegCoords.lat : null, lng: S.dsrRegCoords ? S.dsrRegCoords.lng : null
   });
   hideOvl();
@@ -4791,7 +4822,7 @@ async function dsrCollectShopDue(dueId, rem) {
   if (val <= 0) return toast('সঠিক পরিমাণ দিন');
   if (val > rem) val = rem;
   showOvl('আদায় হচ্ছে...');
-  var r = await apiPut('/api/due-calendar', { id: dueId, payAmount: val });
+  var r = await apiPut('/api/due-calendar', { id: dueId, payAmount: val, collectorId: S.userId, collectorName: S.userName });
   hideOvl();
   if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
   toast(r.status === 'cleared' ? '✅ সম্পূর্ণ পরিশোধিত হয়েছে' : '✅ আংশিক আদায় রেকর্ড হয়েছে');
@@ -4971,9 +5002,10 @@ function _dsrSaleRowsHtml() {
     if (sel) {
       h += '<div style="width:100%;padding:8px 10px 10px 34px;background:'+'var(--grl)'+'" onclick="event.stopPropagation()">';
       h += '<div style="display:flex;gap:6px;margin-bottom:6px">';
-      h += '<div style="flex:1"><label class="fl" style="font-size:10px">'+(p.unitType||'কেস')+'</label><input type="number" inputmode="decimal" min="0" placeholder="0" value="' + (q.cases || '') + '" oninput="dsrSaleQtyChange(\'' + p.id + '\',\'cases\',this.value)"></div>';
-      h += '<div style="flex:1"><label class="fl" style="font-size:10px">পিস</label><input type="number" inputmode="decimal" min="0" placeholder="0" value="' + (q.pcs || '') + '" oninput="dsrSaleQtyChange(\'' + p.id + '\',\'pcs\',this.value)"></div>';
+      h += '<div style="flex:1"><label class="fl" style="font-size:10px">'+(p.unitType||'কেস')+'</label><input type="number" inputmode="decimal" min="0" max="' + Math.floor(stk / cs) + '" id="dsr-sale-cs-' + p.id + '" placeholder="0" value="' + (q.cases || '') + '" oninput="dsrSaleQtyChange(\'' + p.id + '\',\'cases\',this.value)"></div>';
+      h += '<div style="flex:1"><label class="fl" style="font-size:10px">পিস</label><input type="number" inputmode="decimal" min="0" max="' + stk + '" id="dsr-sale-pc-' + p.id + '" placeholder="0" value="' + (q.pcs || '') + '" oninput="dsrSaleQtyChange(\'' + p.id + '\',\'pcs\',this.value)"></div>';
       h += '</div>';
+      h += '<div style="font-size:10px;color:var(--mt2);margin:-2px 0 6px">সর্বোচ্চ বিক্রি করা যাবে: <b>' + fmtCasePcs(stk, cs) + '</b> (' + fn(stk) + ' পিস) — এর বেশি লেখা যাবে না</div>';
       if (!commOpen) {
         h += '<button type="button" class="btn btn-gh btn-sm" style="font-size:10px;padding:4px 8px" onclick="S.dsrSaleCommOpen[\''+p.id+'\']=true;_dsrSaleRefreshList()">➕ এই পণ্যে কমিশন/ছাড় যোগ করুন (ঐচ্ছিক)</button>';
       } else {
@@ -5032,7 +5064,33 @@ function _renderDsrShopSale() {
   setTimeout(_tickerStart, 50);
 }
 function dsrSaleTogProd(id) { S.dsrSaleSel[id] = !S.dsrSaleSel[id]; if (!S.dsrSaleQty[id]) S.dsrSaleQty[id] = { cases: '', pcs: '' }; _dsrSaleRefreshList(); _refreshDsrSaleTotal(); }
-function dsrSaleQtyChange(id, field, val) { if (!S.dsrSaleQty[id]) S.dsrSaleQty[id] = { cases: '', pcs: '' }; S.dsrSaleQty[id][field] = val; _refreshDsrSaleTotal(); _dsrSaleUpdateLineTotal(id); }
+// v4.8.0 — the DSR can never enter more than is on his van. Whatever he
+// types is clamped to the remaining van stock right here (the server
+// re-checks the same limit in shops.js visit-sale).
+function dsrSaleQtyChange(id, field, val) {
+  if (!S.dsrSaleQty[id]) S.dsrSaleQty[id] = { cases: '', pcs: '' };
+  var q = S.dsrSaleQty[id];
+  q[field] = val;
+  var p = S.products.find(function(x){return x.id===id;});
+  var cs = p ? (num(p.caseSize) || 1) : 1, max = num((S.dsrVanStock || {})[id]) || 0;
+  var ca = num(q.cases) || 0, pc = num(q.pcs) || 0;
+  if (ca < 0) { ca = 0; q.cases = ''; }
+  if (pc < 0) { pc = 0; q.pcs = ''; }
+  if (ca * cs + pc > max + 0.0001) {
+    if (field === 'cases') {
+      ca = Math.min(ca, Math.floor(max / cs));
+      pc = Math.min(pc, Math.max(0, max - ca * cs));
+    } else {
+      pc = Math.min(pc, max);
+      ca = Math.min(ca, Math.floor((max - pc) / cs));
+    }
+    q.cases = ca ? String(ca) : ''; q.pcs = pc ? String(pc) : '';
+    var ce = document.getElementById('dsr-sale-cs-' + id), pe = document.getElementById('dsr-sale-pc-' + id);
+    if (ce) ce.value = q.cases; if (pe) pe.value = q.pcs;
+    toast('⚠️ গাড়িতে আছে মাত্র ' + fn(max) + ' পিস — এর বেশি বিক্রি করা যাবে না');
+  }
+  _refreshDsrSaleTotal(); _dsrSaleUpdateLineTotal(id);
+}
 function _dsrSaleUpdateLineTotal(id) {
   // Patch just this one row's ৳ badge in place — a full list re-render
   // here would rebuild every <input>, which steals focus mid-keystroke
@@ -5089,6 +5147,11 @@ async function dsrSubmitSale() {
     items.push({ productId: p.id, productName: p.name, sku: p.sku, cases: ca, pcs: pc, totalUnits: u, purchasePrice: num(p.purchasePrice), sellingPrice: num(p.sellingPrice), commission: (num(S.dsrSaleComm[pid]) || 0) * ca, discount: (num(S.dsrSaleDisc[pid]) || 0) * ca });
   });
   if (!items.length) return toast('কমপক্ষে একটি পণ্য ও পরিমাণ দিন');
+  for (var vi = 0; vi < items.length; vi++) {
+    var haveV = num((S.dsrVanStock || {})[items[vi].productId]) || 0;
+    if (items[vi].totalUnits > haveV + 0.0001) return toast(items[vi].productName + ' — গাড়িতে আছে মাত্র ' + fn(haveV) + ' পিস, এর বেশি বিক্রি করা যাবে না');
+  }
+  if (window._dsrSaleBusy) return; // double-tap guard
   var shop = (S.dsrShopSel || {}).shop || {};
   var shopId = shop.id || '';
   var bill = _dsrSaleComputeBill();
@@ -5097,10 +5160,11 @@ async function dsrSubmitSale() {
     action: 'visit-sale', shopId: shopId, dsrId: S.userId, dsrName: S.userName, date: iso(new Date()),
     items: items, discountAmt: bill.discount, commissionAmt: bill.commission, paidAmount: paidNow
   };
+  window._dsrSaleBusy = true;
   showOvl('সংরক্ষণ হচ্ছে...');
   var r = await apiPost('/api/shops', payload);
-  hideOvl();
-  if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
+  hideOvl(); window._dsrSaleBusy = false;
+  if (!r || !r.ok) { if (r && r.error && r.error.indexOf('গাড়িতে আছে') >= 0) _dsrLoadVanStock(); return toast(r && r.error || 'ব্যর্থ'); }
   // Updates #32/#33 — a dsr_sale never touches warehouse stock (it was
   // already moved out to the van at give-time), so the thing that
   // actually needs to shrink here is the DSR's own van-stock cache, not
@@ -5173,11 +5237,427 @@ async function dsrPlatePay(id, rem) {
   if (val <= 0) return toast('সঠিক পরিমাণ দিন');
   if (val > rem) val = rem;
   showOvl('জমা হচ্ছে...');
-  var r = await apiPut('/api/due-calendar', { id: id, payAmount: val });
+  var r = await apiPut('/api/due-calendar', { id: id, payAmount: val, collectorId: S.userId, collectorName: S.userName });
   hideOvl();
   if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
   toast(r.status === 'cleared' ? '✅ সম্পূর্ণ পরিশোধিত — তালিকা থেকে সরানো হলো' : '✅ আংশিক জমা রেকর্ড হয়েছে');
   _loadDsrShopView();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  v4.8.0 — DSR: বাকি আদায় (due collection) · ড্যামেজ কালেকশন · দিনশেষ হিসাব
+// ════════════════════════════════════════════════════════════════════
+function _enc(x) { return encodeURIComponent(x == null ? '' : x); }
+function _row(l, r, style) { return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;' + (style || '') + '"><span>' + l + '</span><span style="font-weight:700">' + r + '</span></div>'; }
+
+// ── DSR • বাকি আদায় ────────────────────────────────────────────────
+async function _loadDsrDueColView() {
+  var el = document.getElementById('pg-dash'); if (!el) return;
+  showOvl('লোড হচ্ছে...');
+  var today = iso(new Date());
+  var res = await Promise.all([
+    apiGet('/api/sr-payments?action=due-shops&dsrId=' + _enc(S.userId)),
+    apiGet('/api/sr-payments?action=collections-list&dsrId=' + _enc(S.userId) + '&from=' + today + '&to=' + today)
+  ]);
+  hideOvl();
+  S.dcData = (res[0] && res[0].ok) ? res[0] : { shops: [], totalDue: 0 };
+  S.dcToday = (res[1] && res[1].ok) ? res[1] : { dues: [], totals: { dueCollected: 0 } };
+  S.dcQ = S.dcQ || ''; S.dcOpen = S.dcOpen || {};
+  _renderDsrDueColView();
+}
+function _renderDsrDueColView() {
+  var el = document.getElementById('pg-dash'); if (!el) return;
+  var d = S.dcData || { shops: [], totalDue: 0 };
+  var h = _dsrTabBar() + '<div class="ct">📥 বাকি আদায়</div>';
+  h += '<div class="g2" style="margin-bottom:10px">';
+  h += '<div class="met" style="border-top:3px solid var(--re)"><div class="ml">মোট বাকি (' + (d.shops || []).length + 'টি দোকান)</div><div class="mv" style="color:var(--re)">৳' + fm(d.totalDue) + '</div></div>';
+  h += '<div class="met" style="border-top:3px solid var(--gr)"><div class="ml">আজ আদায় করেছি</div><div class="mv" style="color:var(--gr)">৳' + fm(((S.dcToday || {}).totals || {}).dueCollected || 0) + '</div></div>';
+  h += '</div>';
+  h += '<div class="card" style="padding:8px 11px;margin-bottom:8px"><input placeholder="🔍 দোকান / মালিক / ফোন / রোড খুঁজুন..." value="' + esc(S.dcQ || '') + '" oninput="S.dcQ=this.value;_dcRefreshList()" style="margin:0"></div>';
+  h += '<div id="dc-list">' + _dcListHtml() + '</div>';
+  h += '<div class="ib" style="margin-top:8px">এখানে আদায় করা টাকা দিনশেষে আপনার হিসাবে (নগদ জমা) নিজে থেকেই যোগ হবে — আলাদা করে লিখতে হবে না।</div>';
+  el.innerHTML = h; setTimeout(_tickerStart, 50);
+}
+function _dcRefreshList() { var e = document.getElementById('dc-list'); if (e) e.innerHTML = _dcListHtml(); }
+function _dcListHtml() {
+  var q = (S.dcQ || '').trim().toLowerCase();
+  var shops = ((S.dcData || {}).shops || []).filter(function(s) {
+    return !q || [s.shopName, s.keeperName, s.phone, s.shopNo, s.roadName, s.address].join(' ').toLowerCase().indexOf(q) >= 0;
+  });
+  if (!shops.length) return '<div class="card" style="text-align:center;color:var(--gr);font-weight:700;padding:18px">' + (q ? 'কিছু পাওয়া যায়নি' : '✅ কোনো দোকানের বাকি নেই') + '</div>';
+  var h = '';
+  shops.forEach(function(s) {
+    var open = !!(S.dcOpen || {})[s.shopId];
+    h += '<div class="card" style="margin-bottom:8px">';
+    h += '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">';
+    h += '<div style="min-width:0"><div style="font-weight:700;font-size:13px">🏪 ' + esc(s.shopName) + (s.shopNo ? ' <span style="font-size:10px;color:var(--mt2);font-weight:400">' + esc(s.shopNo) + '</span>' : '') + '</div>';
+    if (s.keeperName) h += '<div style="font-size:11px;color:var(--mt)">👤 ' + esc(s.keeperName) + '</div>';
+    if (s.phone) h += '<a href="tel:' + esc(s.phone) + '" style="font-size:11px;color:var(--bl);text-decoration:none">📞 ' + esc(s.phone) + '</a>';
+    if (s.roadName || s.address) h += '<div style="font-size:11px;color:var(--mt2)">' + (s.roadName ? '🛣️ ' + esc(s.roadName) : '') + (s.address ? ' · 📍 ' + esc(s.address) : '') + '</div>';
+    h += '</div><div style="text-align:right;flex-shrink:0"><div style="font-size:10px;color:var(--mt)">বাকি</div><div style="font-weight:700;font-size:16px;color:var(--re)">৳' + fm(s.totalDue) + '</div></div></div>';
+    h += '<button class="btn btn-gh btn-sm" style="margin-top:6px;font-size:11px" onclick="S.dcOpen[\'' + s.shopId + '\']=' + (!open) + ';_dcRefreshList()">' + (open ? '▲ বিবরণ লুকান' : '▼ বাকির বিবরণ (' + s.dues.length + 'টি)') + '</button>';
+    if (open) {
+      h += '<div style="margin-top:6px;border-top:1px dashed var(--bd);padding-top:6px">';
+      s.dues.forEach(function(x) {
+        h += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span>' + fmtBn(x.dueDate) + (x.note ? ' · ' + esc(x.note) : '') + '</span><span>৳' + fm(x.amount) + (x.paid > 0 ? ' (জমা ৳' + fm(x.paid) + ')' : '') + ' → <b style="color:var(--re)">৳' + fm(x.remaining) + '</b></span></div>';
+      });
+      h += '</div>';
+    }
+    h += '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">';
+    h += '<input type="number" inputmode="decimal" min="0" id="dc-amt-' + s.shopId + '" placeholder="কত টাকা আদায়?" style="flex:1;margin:0">';
+    h += '<button class="btn btn-gh btn-sm" onclick="document.getElementById(\'dc-amt-' + s.shopId + '\').value=' + s.totalDue + '">সম্পূর্ণ</button>';
+    h += '<button class="btn btn-gr btn-sm" onclick="dsrDueCollect(\'' + s.shopId + '\')">✅ আদায়</button>';
+    h += '</div></div>';
+  });
+  return h;
+}
+var _dcBusy = false;
+async function dsrDueCollect(shopId) {
+  if (_dcBusy) return;
+  var s = ((S.dcData || {}).shops || []).find(function(x) { return x.shopId === shopId; }); if (!s) return;
+  var amt = num(v('dc-amt-' + shopId));
+  if (amt <= 0) return toast('কত টাকা আদায় করলেন লিখুন');
+  if (amt > s.totalDue) { amt = s.totalDue; toast('বাকির চেয়ে বেশি নেওয়া যায় না — ৳' + fm(amt) + ' ধরা হলো'); }
+  _dcBusy = true; showOvl('জমা হচ্ছে...');
+  var r = await apiPost('/api/sr-payments?action=due-collect', { dsrId: S.userId, dsrName: S.userName, shopId: shopId, amount: amt });
+  hideOvl(); _dcBusy = false;
+  if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
+  toast(r.remaining <= 0.005 ? '✅ ৳' + fm(r.collected) + ' আদায় — এই দোকানের সব বাকি পরিশোধিত' : '✅ ৳' + fm(r.collected) + ' আদায় — এখনো বাকি ৳' + fm(r.remaining));
+  _loadDsrDueColView();
+}
+
+// ── DSR • ড্যামেজ কালেকশন ───────────────────────────────────────────
+function _dmgcNewLine() { return { pid: '', cases: '', pcs: '', res: 'money', refund: '', epid: '', ecases: '', epcs: '' }; }
+function _dmgcUnits(pid, cases, pcs) { var p = S.products.find(function(x) { return x.id === pid; }); var cs = p ? (num(p.caseSize) || 1) : 1; return num(cases) * cs + num(pcs); }
+async function _loadDsrDmgColView() {
+  var el = document.getElementById('pg-dash'); if (!el) return;
+  showOvl('লোড হচ্ছে...');
+  if (!S.products.length) { var ar = await apiGet('/api/dashboard?action=load-all'); if (ar && ar.ok) { S.products = ar.products || []; S.stockMap = ar.stockMap || {}; } }
+  var today = iso(new Date());
+  var g = S.dmgc || {};
+  var res = await Promise.all([
+    apiGet('/api/shops?action=search&q=' + (g.all ? '' : '&dsrId=' + _enc(S.userId))),
+    apiGet('/api/sr-payments?action=van-stock&dsrId=' + _enc(S.userId) + '&date=' + today),
+    apiGet('/api/sr-payments?action=collections-list&dsrId=' + _enc(S.userId) + '&from=' + today + '&to=' + today)
+  ]);
+  hideOvl();
+  S.dmgc = { all: !!g.all, q: g.q || '', shop: g.shop || null, lines: (g.lines && g.lines.length) ? g.lines : [_dmgcNewLine()],
+    shops: (res[0] && res[0].ok) ? (res[0].shops || []) : [], van: (res[1] && res[1].ok) ? (res[1].vanStock || {}) : {},
+    today: (res[2] && res[2].ok) ? res[2] : { damages: [], totals: {} }, busy: false };
+  _renderDsrDmgColView();
+}
+function _renderDsrDmgColView() {
+  var el = document.getElementById('pg-dash'); if (!el) return;
+  var g = S.dmgc;
+  var h = _dsrTabBar() + '<div class="ct">⚠️ ড্যামেজ কালেকশন</div>';
+  if (!g.shop) {
+    h += '<div class="ib">দোকান থেকে ড্যামেজ পণ্য ফেরত নিলে — আগে দোকান বাছুন। তারপর দোকানকে <b>টাকা ফেরত</b> দেবেন নাকি গাড়ির পণ্য দিয়ে <b>বদল</b> করবেন, তা বেছে নিন।</div>';
+    h += '<div class="card" style="padding:8px 11px;margin-bottom:8px"><input placeholder="🔍 দোকানের নাম / ফোন খুঁজুন..." value="' + esc(g.q) + '" oninput="S.dmgc.q=this.value;_dmgcRefreshShops()" style="margin:0"></div>';
+    h += '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px"><input type="checkbox" style="width:auto" ' + (g.all ? 'checked' : '') + ' onchange="S.dmgc.all=this.checked;_loadDsrDmgColView()"> অন্য DSR-এর দোকানও দেখান</label>';
+    h += '<div id="dmgc-shops">' + _dmgcShopsHtml() + '</div>';
+  } else {
+    h += '<button class="btn btn-gh btn-sm" style="margin-bottom:8px" onclick="S.dmgc.shop=null;_renderDsrDmgColView()">◀ দোকান বদলান</button>';
+    h += '<div class="card" style="background:linear-gradient(135deg,#F59E0B,#EF4444);color:#fff;margin-bottom:10px"><div style="font-size:15px;font-weight:700">🏪 ' + esc(g.shop.name) + '</div><div style="font-size:11px;opacity:.9">ড্যামেজ পণ্য ফেরত নেওয়া হচ্ছে</div></div>';
+    h += '<div id="dmgc-lines">' + _dmgcLinesHtml() + '</div>';
+    h += '<button class="btn btn-gh btn-w btn-sm" style="margin:6px 0" onclick="S.dmgc.lines.push(_dmgcNewLine());_dmgcRenderLines()">➕ আরেকটি ড্যামেজ পণ্য যোগ করুন</button>';
+    h += '<div id="dmgc-sum"></div>';
+    h += '<button class="btn btn-gr btn-w" id="dmgc-submit" onclick="dsrSubmitDamage()">✅ ড্যামেজ কালেকশন সংরক্ষণ করুন</button>';
+  }
+  var td = (g.today || {}).damages || [];
+  h += '<div class="ct" style="margin-top:14px">আজকের ড্যামেজ কালেকশন</div>';
+  if (!td.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px;font-size:12px">আজ এখনো কিছু নেই</div>';
+  else {
+    h += '<div class="card" style="padding:0;overflow:hidden">';
+    td.forEach(function(x) {
+      h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="font-weight:700">🏪 ' + esc(x.shopName) + ' — ' + esc(x.productName) + ' × ' + fn(x.units) + '</div>'
+        + '<div style="color:var(--mt)">' + (x.resolution === 'money' ? '💵 টাকা ফেরত ৳' + fm(x.refundAmt) : '🔁 বদল: ' + esc(x.exchProductName) + ' × ' + fn(x.exchUnits) + ' (৳' + fm(x.exchValue) + ')') + '</div></div>';
+    });
+    h += '</div>';
+  }
+  el.innerHTML = h; setTimeout(_tickerStart, 50);
+  if (g.shop) _dmgcUpdateSummary();
+}
+function _dmgcRefreshShops() { var e = document.getElementById('dmgc-shops'); if (e) e.innerHTML = _dmgcShopsHtml(); }
+function _dmgcShopsHtml() {
+  var g = S.dmgc, q = (g.q || '').trim().toLowerCase();
+  var list = (g.shops || []).filter(function(s) { return !q || [s.name, s.phone, s.shopNo, s.keeperName, s.roadName].join(' ').toLowerCase().indexOf(q) >= 0; }).slice(0, 40);
+  if (!list.length) return '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">কোনো দোকান পাওয়া যায়নি</div>';
+  var h = '<div class="card" style="padding:0;overflow:hidden">';
+  list.forEach(function(s) {
+    h += '<div class="due-item" style="cursor:pointer" onclick="dmgcPickShop(\'' + s.id + '\')"><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">🏪 ' + esc(s.name) + '</div><div style="font-size:11px;color:var(--mt)">' + esc(s.shopNo || '') + (s.roadName ? ' · 🛣️ ' + esc(s.roadName) : '') + (s.phone ? ' · 📞 ' + esc(s.phone) : '') + '</div></div><div style="color:var(--bl)">›</div></div>';
+  });
+  return h + '</div>';
+}
+function dmgcPickShop(id) {
+  var s = (S.dmgc.shops || []).find(function(x) { return x.id === id; }); if (!s) return;
+  S.dmgc.shop = s; S.dmgc.lines = [_dmgcNewLine()]; _renderDsrDmgColView();
+}
+function _dmgcRenderLines() { var e = document.getElementById('dmgc-lines'); if (e) e.innerHTML = _dmgcLinesHtml(); _dmgcUpdateSummary(); }
+function _dmgcProductOptions(sel, onlyVan) {
+  var g = S.dmgc, h = '<option value="">— পণ্য বাছুন —</option>';
+  (S.products || []).forEach(function(p) {
+    var vs = num((g.van || {})[p.id]);
+    if (onlyVan && vs <= 0) return;
+    h += '<option value="' + p.id + '"' + (sel === p.id ? ' selected' : '') + '>' + esc(p.name) + (onlyVan ? ' (গাড়িতে ' + fn(vs) + ' পিস)' : '') + '</option>';
+  });
+  return h;
+}
+function _dmgcLinesHtml() {
+  var g = S.dmgc, h = '';
+  g.lines.forEach(function(l, i) {
+    var p = S.products.find(function(x) { return x.id === l.pid; });
+    var ut = p ? (p.unitType || 'কেস') : 'কেস';
+    h += '<div class="card" style="margin-bottom:8px;border-left:4px solid var(--am)">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:12px">ড্যামেজ পণ্য #' + (i + 1) + '</div>' + (g.lines.length > 1 ? '<button class="btn btn-sm" style="background:var(--rel);color:var(--re);padding:3px 8px" onclick="S.dmgc.lines.splice(' + i + ',1);_dmgcRenderLines()">✕</button>' : '') + '</div>';
+    h += '<div class="fg"><label class="fl">ড্যামেজ হওয়া পণ্য</label><select onchange="S.dmgc.lines[' + i + '].pid=this.value;_dmgcRenderLines()">' + _dmgcProductOptions(l.pid, false) + '</select></div>';
+    h += '<div class="g2"><div class="fg"><label class="fl">' + esc(ut) + '</label><input type="number" inputmode="decimal" min="0" value="' + esc(l.cases) + '" oninput="S.dmgc.lines[' + i + '].cases=this.value;_dmgcUpdateInfo(' + i + ')"></div>';
+    h += '<div class="fg"><label class="fl">পিস</label><input type="number" inputmode="decimal" min="0" value="' + esc(l.pcs) + '" oninput="S.dmgc.lines[' + i + '].pcs=this.value;_dmgcUpdateInfo(' + i + ')"></div></div>';
+    h += '<div id="dmgc-dv-' + i + '" style="font-size:11px;color:var(--mt);margin-bottom:6px"></div>';
+    h += '<div class="seg" style="margin-bottom:8px"><button class="sbt ' + (l.res === 'money' ? 'active' : '') + '" onclick="S.dmgc.lines[' + i + '].res=\'money\';_dmgcRenderLines()">💵 টাকা ফেরত</button><button class="sbt ' + (l.res === 'exchange' ? 'active' : '') + '" onclick="S.dmgc.lines[' + i + '].res=\'exchange\';_dmgcRenderLines()">🔁 পণ্য বদল</button></div>';
+    if (l.res === 'money') {
+      h += '<div class="fg"><label class="fl">দোকানকে কত টাকা দিলেন? (ফাঁকা = পুরো ড্যামেজ মূল্য)</label><input type="number" inputmode="decimal" min="0" value="' + esc(l.refund) + '" oninput="S.dmgc.lines[' + i + '].refund=this.value;_dmgcUpdateInfo(' + i + ')"></div>';
+    } else {
+      h += '<div class="fg"><label class="fl">বদলে কোন পণ্য দিলেন? (শুধু গাড়িতে থাকা পণ্য)</label><select onchange="S.dmgc.lines[' + i + '].epid=this.value;_dmgcRenderLines()">' + _dmgcProductOptions(l.epid, true) + '</select></div>';
+      var ep = S.products.find(function(x) { return x.id === l.epid; });
+      h += '<div class="g2"><div class="fg"><label class="fl">' + esc(ep ? (ep.unitType || 'কেস') : 'কেস') + '</label><input type="number" inputmode="decimal" min="0" value="' + esc(l.ecases) + '" oninput="S.dmgc.lines[' + i + '].ecases=this.value;_dmgcUpdateInfo(' + i + ')"></div>';
+      h += '<div class="fg"><label class="fl">পিস</label><input type="number" inputmode="decimal" min="0" value="' + esc(l.epcs) + '" oninput="S.dmgc.lines[' + i + '].epcs=this.value;_dmgcUpdateInfo(' + i + ')"></div></div>';
+    }
+    h += '<div id="dmgc-ev-' + i + '" style="font-size:11px;margin-top:2px"></div>';
+    h += '</div>';
+  });
+  setTimeout(function() { g.lines.forEach(function(_, i) { _dmgcUpdateInfo(i, true); }); _dmgcUpdateSummary(); }, 0);
+  return h;
+}
+function _dmgcLineCalc(l) {
+  var p = S.products.find(function(x) { return x.id === l.pid; });
+  var units = p ? _dmgcUnits(l.pid, l.cases, l.pcs) : 0;
+  var dv = p ? units * num(p.sellingPrice) : 0;
+  var refund = l.refund === '' ? dv : num(l.refund);
+  var ep = S.products.find(function(x) { return x.id === l.epid; });
+  var eu = ep ? _dmgcUnits(l.epid, l.ecases, l.epcs) : 0;
+  var ev = ep ? eu * num(ep.sellingPrice) : 0;
+  return { p: p, units: units, dv: dv, refund: refund, ep: ep, eu: eu, ev: ev };
+}
+function _dmgcUpdateInfo(i, noSummary) {
+  var l = S.dmgc.lines[i]; if (!l) return; var c = _dmgcLineCalc(l);
+  var a = document.getElementById('dmgc-dv-' + i), b = document.getElementById('dmgc-ev-' + i);
+  if (a) a.textContent = c.p ? ('ড্যামেজ পণ্য: ' + fn(c.units) + ' পিস × ৳' + fm(c.p.sellingPrice) + ' = ৳' + fm(c.dv)) : '';
+  if (b) {
+    if (l.res === 'money') { b.style.color = c.refund > c.dv + 0.0001 ? 'var(--re)' : 'var(--mt)'; b.textContent = c.refund > c.dv + 0.0001 ? '⚠️ ড্যামেজ মূল্যের বেশি টাকা দেওয়া যাবে না' : (c.p ? 'দোকানকে দেবেন: ৳' + fm(c.refund) : ''); }
+    else {
+      var vs = c.ep ? num((S.dmgc.van || {})[c.ep.id]) : 0;
+      var over = c.ep && c.eu > vs + 0.0001;
+      b.style.color = over ? 'var(--re)' : 'var(--mt)';
+      b.textContent = !c.ep ? '' : over ? ('⚠️ গাড়িতে আছে মাত্র ' + fn(vs) + ' পিস') : ('বদলে যাচ্ছে: ' + fn(c.eu) + ' পিস = ৳' + fm(c.ev) + (c.ev > c.dv + 0.0001 && c.dv > 0 ? ' — বেশি মূল্যের ৳' + fm(c.ev - c.dv) + ' আপনার বকেয়ায় থাকবে' : ''));
+    }
+  }
+  if (!noSummary) _dmgcUpdateSummary();
+}
+function _dmgcUpdateSummary() {
+  var g = S.dmgc, e = document.getElementById('dmgc-sum'); if (!e || !g) return;
+  var dv = 0, refund = 0, ev = 0;
+  g.lines.forEach(function(l) { var c = _dmgcLineCalc(l); dv += c.dv; if (l.res === 'money') refund += Math.min(c.refund, c.dv); else ev += Math.min(c.ev, c.dv); });
+  e.innerHTML = dv > 0 ? '<div class="card" style="background:var(--aml);margin-bottom:8px">' + _row('মোট ড্যামেজ মূল্য', '৳' + fm(dv)) + _row('💵 দোকানকে টাকা দেবেন', '৳' + fm(refund)) + _row('🔁 বদলে পণ্য যাবে', '৳' + fm(ev)) + '</div>' : '';
+}
+async function dsrSubmitDamage() {
+  var g = S.dmgc; if (g.busy) return;
+  var lines = [], needVan = {};
+  for (var i = 0; i < g.lines.length; i++) {
+    var l = g.lines[i], c = _dmgcLineCalc(l);
+    if (!l.pid && !l.cases && !l.pcs) continue;
+    if (!c.p) return toast('পণ্য #' + (i + 1) + ' — ড্যামেজ পণ্য বাছুন');
+    if (c.units <= 0) return toast(c.p.name + ' — পরিমাণ দিন');
+    var line = { productId: l.pid, units: c.units, resolution: l.res };
+    if (l.res === 'money') {
+      if (c.refund > c.dv + 0.0001) return toast(c.p.name + ' — ড্যামেজ মূল্যের বেশি টাকা দেওয়া যাবে না');
+      if (l.refund !== '') line.refundAmt = num(l.refund);
+    } else {
+      if (!c.ep) return toast(c.p.name + ' — বদলে কোন পণ্য দিলেন বাছুন');
+      if (c.eu <= 0) return toast(c.ep.name + ' — বদলের পরিমাণ দিন');
+      needVan[c.ep.id] = (needVan[c.ep.id] || 0) + c.eu;
+      line.exchProductId = l.epid; line.exchUnits = c.eu;
+    }
+    lines.push(line);
+  }
+  if (!lines.length) return toast('কমপক্ষে একটি ড্যামেজ পণ্য দিন');
+  for (var pid in needVan) { var have = num((g.van || {})[pid]); if (needVan[pid] > have + 0.0001) { var pp = S.products.find(function(x) { return x.id === pid; }); return toast((pp ? pp.name : 'পণ্য') + ' — গাড়িতে আছে মাত্র ' + fn(have) + ' পিস'); } }
+  if (!confirm('ড্যামেজ কালেকশন সংরক্ষণ করবেন?')) return;
+  g.busy = true; var btn = document.getElementById('dmgc-submit'); if (btn) btn.disabled = true;
+  showOvl('সংরক্ষণ হচ্ছে...');
+  var r = await apiPost('/api/sr-payments?action=damage-collect', { dsrId: S.userId, dsrName: S.userName, shopId: g.shop.id, date: iso(new Date()), lines: lines });
+  hideOvl(); g.busy = false; if (btn) btn.disabled = false;
+  if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
+  toast('✅ সংরক্ষিত — দোকানকে টাকা ৳' + fm(r.refundTotal) + ' · বদল ৳' + fm(r.exchTotal));
+  S.dmgc = { all: g.all, q: '', shop: null, lines: [_dmgcNewLine()] };
+  _loadDsrDmgColView();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  v4.8.0 — Owner / Manager: দিনশেষ হিসাব (আগের "পেমেন্ট" ফর্মের জায়গায়)
+//  DSR + তারিখ বাছলেই সবকিছু নিজে থেকে হিসাব হয়ে আসে — ফেরত, ড্যামেজ,
+//  কমিশন, ছাড়, নগদ। একই তারিখের হিসাব দুইবার চাপলে দ্বিগুণ হয় না।
+// ════════════════════════════════════════════════════════════════════
+var _settle = { dsrId: '', date: '', data: null, token: '', apply: { return: true, commission: true, discount: true, damage: true }, cash: '', busy: false, submitted: false };
+function _newToken() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('t' + Date.now() + Math.random().toString(36).slice(2, 12)); }
+
+function buildPayForm() {
+  var opts = S.srs.filter(function(s) { return s.role !== 'driver'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === _settle.dsrId ? ' selected' : '') + '>' + (s.role === 'so' ? '📊 ' : '🚚 ') + esc(s.name) + (s.area ? ' (' + esc(s.area) + ')' : '') + '</option>'; }).join('');
+  setTimeout(function() { if (_settle.dsrId) loadSettlement(); }, 0);
+  return '<div class="card">'
+    + '<div class="ib">🧮 <b>দিনশেষ হিসাব:</b> DSR ও তারিখ বাছুন — ফেরত, ড্যামেজ, কমিশন, ছাড় ও নগদ সবকিছু নিজে থেকেই হিসাব হয়ে আসবে। হাতে কিছু লিখতে হবে না।</div>'
+    + '<div class="fg"><label class="fl">DSR / SO *</label><select id="pf-sr" onchange="loadSettlement()"><option value="">-- বাছাই করুন --</option>' + opts + '</select></div>'
+    + '<div class="fg"><label class="fl">তারিখ</label><input type="date" id="pf-dt" value="' + (_settle.date || iso(new Date())) + '" onchange="loadSettlement()"></div>'
+    + '</div>'
+    + '<div id="settle-box"></div>'
+    + '<div class="card" style="margin-top:12px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">💵 শুধু নগদ জমা (বাকি পরিশোধ)</div>'
+    + '<div style="font-size:11px;color:var(--mt2);margin-bottom:8px">হিসাবের পর কারো কাছে বাকি থাকলে, সে পরে টাকা দিলে এখান থেকে জমা নিন। উপরে বাছা DSR/SO-এর নামে জমা হবে।</div>'
+    + '<div class="g2"><div class="fg"><label class="fl">নগদ (৳)</label><input type="number" id="qc-cash" min="0" step="0.01" placeholder="০"></div>'
+    + '<div class="fg"><label class="fl">নোট (ঐচ্ছিক)</label><input id="qc-note" placeholder="ঐচ্ছিক"></div></div>'
+    + '<button class="btn btn-gr btn-w" onclick="saveQuickCash()">💰 নগদ জমা রেকর্ড করুন</button></div>';
+}
+
+async function loadSettlement() {
+  var box = document.getElementById('settle-box'); if (!box) return;
+  var srId = v('pf-sr'), dt = v('pf-dt') || iso(new Date());
+  if (!srId) { _settle.dsrId = ''; box.innerHTML = ''; return; }
+  _settle.dsrId = srId; _settle.date = dt;
+  box.innerHTML = '<div style="font-size:12px;color:var(--mt2);padding:12px;text-align:center">হিসাব লোড হচ্ছে...</div>';
+  var r = await apiGet('/api/sr-payments?action=settle-preview&dsrId=' + _enc(srId) + '&date=' + _enc(dt));
+  if (v('pf-sr') !== srId || (v('pf-dt') || iso(new Date())) !== dt) return; // a newer pick superseded this one
+  if (!r || !r.ok) { box.innerHTML = '<div class="card" style="color:var(--re);text-align:center">' + esc((r && r.error) || 'লোড ব্যর্থ') + '</div>'; return; }
+  _settle = { dsrId: srId, date: dt, data: r, token: _newToken(), apply: { return: true, commission: true, discount: true, damage: true }, cash: String(r.pending.cashExpected), busy: false, submitted: false };
+  _renderSettlement();
+}
+
+function _settleTotals() {
+  var d = _settle.data, a = _settle.apply, p = d.pending;
+  var cash = _settle.cash === '' ? p.cashExpected : num(_settle.cash);
+  var reduce = cash + (a.commission ? p.commission : 0) + (a.discount ? p.discount : 0) + (a.damage ? p.damage : 0) + (a.return ? d.returnValue : 0);
+  return { cash: cash, reduce: reduce, after: d.lifetimeDue - reduce, short: Math.max(0, p.cashExpected - cash) };
+}
+
+function _renderSettlement() {
+  var box = document.getElementById('settle-box'); if (!box) return;
+  var d = _settle.data, p = d.pending, sm = d.summary;
+  var h = '<div class="card" style="margin-top:10px;background:var(--bll)">';
+  h += '<div style="font-weight:700;font-size:13px;color:var(--bl);margin-bottom:6px">📊 ' + esc(d.dsrName || 'DSR') + ' — ' + fmtBn(d.date) + '</div>';
+  h += _row('সেদিন গাড়িতে দেওয়া হয়েছে', '৳' + fm(sm.givenToday));
+  h += _row('দোকানে বিক্রি (বিল)', '৳' + fm(sm.soldValue));
+  h += _row('বিক্রির সময় নগদ পেয়েছে', '৳' + fm(sm.cashAtSale));
+  h += _row('দোকানে বাকি দিয়েছে', '৳' + fm(sm.creditToday), 'color:var(--re)');
+  h += '<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0 0;margin-top:4px;border-top:1px solid rgba(0,0,0,.08);color:var(--re)"><span style="font-weight:700">সর্বমোট বকেয়া (এখন)</span><span style="font-weight:700">৳' + fm(d.lifetimeDue) + '</span></div>';
+  if (d.alreadySettledTimes > 0) h += '<div style="font-size:11px;color:var(--gr);margin-top:6px">✔ এই তারিখের হিসাব ' + d.alreadySettledTimes + ' বার সংরক্ষিত হয়েছে (নগদ ধরা হয়েছে ৳' + fm(d.alreadySettledCash) + ')</div>';
+  h += '</div>';
+
+  if (!d.hasPending) {
+    h += '<div class="card" style="text-align:center;color:var(--gr);font-weight:700;padding:18px">✅ এই তারিখের সব হিসাব সংরক্ষিত — নতুন কিছু বাকি নেই</div>';
+    box.innerHTML = h; return;
+  }
+  if (_settle.submitted) {
+    h += '<div class="card" style="text-align:center;color:var(--am);font-weight:700;padding:16px">⏳ হিসাব অনুমোদনের জন্য Owner-এর কাছে জমা হয়েছে — আবার চাপার দরকার নেই</div>';
+    box.innerHTML = h; return;
+  }
+
+  // ── নগদ ──
+  h += '<div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:6px">💵 নগদ টাকা (DSR-এর পকেটে যা থাকার কথা)</div>';
+  h += _row('দোকান থেকে সরাসরি নগদ', '৳' + fm(sm.cashAtSale));
+  h += _row('➕ বাকি আদায় করেছে', '৳' + fm(d.dueCollected), 'color:var(--gr)');
+  if (d.dueCollections.length) { h += '<div style="font-size:10px;color:var(--mt2);padding:0 0 3px 10px">' + d.dueCollections.map(function(x) { return esc(x.shopName || 'দোকান') + ' ৳' + fm(x.amount); }).join(' · ') + '</div>'; }
+  h += _row('➖ ড্যামেজে দোকানকে টাকা দিয়েছে', '৳' + fm(d.damage.moneyRefunded), 'color:var(--re)');
+  if (sm.cashAtSale + d.dueCollected - d.damage.moneyRefunded !== p.cashExpectedRaw && d.alreadySettledCash > 0) h += _row('➖ আগের হিসাবে ধরা হয়েছে', '৳' + fm(d.alreadySettledCash));
+  h += '<div style="display:flex;justify-content:space-between;font-size:14px;padding:5px 0;margin-top:4px;border-top:1px solid rgba(0,0,0,.08);color:var(--gr)"><span style="font-weight:700">এখন নেওয়ার কথা</span><span style="font-weight:700">৳' + fm(p.cashExpected) + '</span></div>';
+  if (d.ownPocketShortfall > 0) h += '<div style="font-size:11px;color:var(--am);background:var(--aml);padding:6px 8px;border-radius:7px;margin:4px 0">⚠️ DSR নিজের পকেট থেকে ৳' + fm(d.ownPocketShortfall) + ' বেশি ড্যামেজ-ফেরত দিয়েছে — তাকে সেই টাকা ফেরত দিতে হবে।</div>';
+  h += '<div class="fg" style="margin-top:6px"><label class="fl">💵 আসলে কত নগদ পেলেন?</label><input type="number" id="st-cash" min="0" step="0.01" inputmode="decimal" value="' + esc(_settle.cash) + '" oninput="_settle.cash=this.value;_settleRefreshTotals()"></div>';
+  h += '<div id="st-short" style="font-size:11px"></div></div>';
+
+  // ── স্বয়ংক্রিয় হিসাব (checkbox) ──
+  h += '<div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:2px">🧾 স্বয়ংক্রিয় হিসাব</div><div style="font-size:10px;color:var(--mt2);margin-bottom:6px">সব টিক দেওয়া থাকলে নিজে থেকে যোগ হবে। কিছু বাদ রাখতে চাইলে টিক তুলে দিন — সেটি পরের বার বাকি থাকবে।</div>';
+  var chk = function(key, label, amt, detail, disabled) {
+    return '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid #E6ECE8;' + (disabled ? 'opacity:.5' : '') + '"><input type="checkbox" style="width:auto;margin-top:3px" ' + (_settle.apply[key] && !disabled ? 'checked' : '') + (disabled ? ' disabled' : '') + ' onchange="_settleToggle(\'' + key + '\',this.checked)"><div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="font-weight:700">' + label + '</span><span style="font-weight:700">' + amt + '</span></div>' + (detail ? '<div style="font-size:10px;color:var(--mt2);margin-top:2px">' + detail + '</div>' : '') + '</div></label>';
+  };
+  var retDetail = d.returnItems.map(function(i) { return esc(i.productName) + ' × ' + fn(i.totalUnits); }).join(' · ');
+  h += chk('return', '↩️ অবিক্রিত মাল ফেরত (গাড়িতে যা আছে)', '৳' + fm(d.returnValue), d.returnItems.length ? retDetail + '<br>গুদামে স্টক ফিরবে, বকেয়া কমবে' : 'গাড়িতে কিছু অবশিষ্ট নেই', !d.returnItems.length);
+  h += chk('damage', '⚠️ ড্যামেজ', '৳' + fm(p.damage), 'শপ থেকে টাকা-ফেরত ৳' + fm(d.damage.moneyRefunded) + ' · বদল ৳' + fm(d.damage.exchanged) + ' · গাড়ির ড্যামেজ ৳' + fm(d.damage.vanDamage), p.damage <= 0);
+  h += chk('commission', '🤝 কমিশন (দোকানকে দেওয়া)', '৳' + fm(p.commission), '', p.commission <= 0);
+  h += chk('discount', '🏷️ ছাড় (দোকানকে দেওয়া)', '৳' + fm(p.discount), '', p.discount <= 0);
+  if (d.damage.lines.length) {
+    h += '<div style="border-top:1px solid #E6ECE8;padding-top:6px;margin-top:2px;font-size:10px;color:var(--mt2)">ড্যামেজ বিবরণ: ' + d.damage.lines.map(function(x) { return esc(x.shopName) + ' — ' + esc(x.productName) + ' × ' + fn(x.units) + (x.resolution === 'money' ? ' (টাকা ৳' + fm(x.refundAmt) + ')' : ' (বদল ' + esc(x.exchProductName) + ')'); }).join(' · ') + '</div>';
+  }
+  h += '</div>';
+
+  h += '<div class="card" id="st-total" style="background:var(--grl)"></div>';
+  h += '<div class="fg"><label class="fl">নোট (ঐচ্ছিক)</label><input id="st-note" placeholder="ঐচ্ছিক"></div>';
+  h += '<button class="btn btn-gr btn-w" id="st-btn" onclick="settleConfirm()">✅ হিসাব সম্পন্ন করুন</button>';
+  box.innerHTML = h;
+  _settleRefreshTotals();
+}
+function _settleToggle(k, on) { _settle.apply[k] = !!on; _settleRefreshTotals(); }
+function _settleRefreshTotals() {
+  var t = _settleTotals(), d = _settle.data;
+  var e = document.getElementById('st-total');
+  if (e) e.innerHTML = _row('মোট বকেয়া কমবে', '৳' + fm(t.reduce), 'font-size:13px') + _row('হিসাবের পর সম্ভাব্য বকেয়া', '৳' + fm(t.after), 'font-size:14px;color:' + (t.after > 0.005 ? 'var(--re)' : 'var(--gr)'));
+  var s = document.getElementById('st-short');
+  if (s) { s.style.color = t.short > 0.005 ? 'var(--re)' : 'var(--gr)'; s.textContent = t.short > 0.005 ? ('⚠️ ৳' + fm(t.short) + ' কম — এটি DSR-এর বকেয়া থাকবে, পরে জমা নেওয়া যাবে') : (t.cash > d.pending.cashExpected + 0.005 ? 'ℹ️ প্রত্যাশার চেয়ে ৳' + fm(t.cash - d.pending.cashExpected) + ' বেশি নিচ্ছেন' : '✅ নগদ মিলেছে'); }
+}
+async function settleConfirm() {
+  if (_settle.busy || _settle.submitted || !_settle.data) return;
+  var d = _settle.data, t = _settleTotals();
+  if (!confirm('হিসাব সম্পন্ন করবেন?\n\nনগদ: ৳' + fm(t.cash) + '\nমোট বকেয়া কমবে: ৳' + fm(t.reduce) + '\nহিসাবের পর বকেয়া: ৳' + fm(t.after))) return;
+  _settle.busy = true;
+  var btn = document.getElementById('st-btn'); if (btn) { btn.disabled = true; btn.textContent = '⏳ হচ্ছে...'; }
+  var payload = { dsrId: d.dsrId, dsrName: d.dsrName, date: d.date, token: _settle.token, cashReceived: t.cash, apply: _settle.apply, note: v('st-note'), byName: S.userName };
+  showOvl('হিসাব সংরক্ষণ হচ্ছে...');
+  var r = await mgrPost('settlement', '/api/sr-payments?action=settle-confirm', payload);
+  hideOvl(); _settle.busy = false;
+  if (r && r._mgr) { _settle.submitted = true; toast('⏳ অনুমোদনের জন্য জমা হয়েছে'); _renderSettlement(); return; }
+  if (!r || !r.ok) {
+    toast((r && r.error) || 'ব্যর্থ');
+    if (r && r.duplicate) return loadSettlement();
+    if (btn) { btn.disabled = false; btn.textContent = '✅ হিসাব সম্পন্ন করুন'; }
+    return;
+  }
+  var a = r.applied || {};
+  toast('✅ হিসাব সম্পন্ন — নগদ ৳' + fm(a.cash) + (a.returnLines ? ' · ফেরত ৳' + fm(a.returnValue) : '') + ' · বকেয়া এখন ৳' + fm(r.lifetimeDue) + (r.cashShort > 0 ? ' (৳' + fm(r.cashShort) + ' কম নেওয়া হয়েছে)' : ''));
+  loadSettlement();
+}
+async function saveQuickCash() {
+  var srId = v('pf-sr'); if (!srId) return toast('উপরে DSR/SO বাছাই করুন');
+  var cash = vn('qc-cash'); if (cash <= 0) return toast('নগদের পরিমাণ দিন');
+  var sr = S.srs.find(function(s) { return s.id === srId; });
+  showOvl('...');
+  var r = await mgrPost('payment', '/api/sr-payments', { srId: srId, srName: sr ? sr.name : '', date: iso(new Date()), cashAmount: cash, commissionAmt: 0, discountAmt: 0, damageAmt: 0, amount: cash, note: v('qc-note') || 'নগদ জমা (বাকি পরিশোধ)' });
+  hideOvl();
+  if (r && r._mgr) { toast('⏳ অনুমোদনের জন্য জমা হয়েছে!'); sv('qc-cash', ''); sv('qc-note', ''); return; }
+  if (r && r.ok) { toast('✅ নগদ জমা রেকর্ড হয়েছে'); sv('qc-cash', ''); sv('qc-note', ''); if (_settle.dsrId) loadSettlement(); }
+  else toast((r && r.error) || 'ব্যর্থ');
+}
+
+// ── Owner / Manager • আদায় (DSR-রা যা বাকি ও ড্যামেজ কালেকশন করেছে) ──
+async function _loadCollectionsTab() {
+  var el = document.getElementById('pg-sr'); if (!el) return;
+  var tabs = document.querySelector('#pg-sr .seg');
+  var f = S.colFrom || iso(new Date()), t = S.colTo || f, dsr = S.colDsr || '';
+  var r = await apiGet('/api/sr-payments?action=collections-list&from=' + f + '&to=' + t + (dsr ? '&dsrId=' + _enc(dsr) : ''));
+  var opts = '<option value="">সব DSR</option>' + S.srs.filter(function(s) { return s.role === 'dsr'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === dsr ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('');
+  var h = '<div class="card" style="margin-top:10px"><div class="g2"><div class="fg"><label class="fl">শুরু</label><input type="date" value="' + f + '" onchange="S.colFrom=this.value;if(S.colTo<S.colFrom)S.colTo=S.colFrom;_loadCollectionsTab()"></div>'
+    + '<div class="fg"><label class="fl">শেষ</label><input type="date" value="' + t + '" onchange="S.colTo=this.value;_loadCollectionsTab()"></div></div>'
+    + '<div class="fg"><label class="fl">DSR</label><select onchange="S.colDsr=this.value;_loadCollectionsTab()">' + opts + '</select></div></div>';
+  if (!r || !r.ok) { el.innerHTML = (tabs ? tabs.outerHTML : '') + h + '<div class="card" style="color:var(--re);text-align:center">লোড ব্যর্থ</div>'; return; }
+  var tt = r.totals;
+  h += '<div class="g2" style="margin:10px 0"><div class="met" style="border-top:3px solid var(--gr)"><div class="ml">📥 বাকি আদায়</div><div class="mv" style="color:var(--gr)">৳' + fm(tt.dueCollected) + '</div></div>'
+    + '<div class="met" style="border-top:3px solid var(--am)"><div class="ml">⚠️ ড্যামেজ মূল্য</div><div class="mv">৳' + fm(tt.damageValue) + '</div><div style="font-size:10px;color:var(--mt2)">টাকা ৳' + fm(tt.refundPaid) + ' · বদল ৳' + fm(tt.exchangeValue) + '</div></div></div>';
+  if (r.byDsr.length) {
+    h += '<div class="ct">DSR অনুযায়ী</div><div class="card" style="padding:0;overflow:hidden">';
+    r.byDsr.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="font-weight:700">🚚 ' + esc(x.dsrName) + '</div>' + _row('বাকি আদায়', '৳' + fm(x.dueCollected)) + _row('ড্যামেজ (টাকা ফেরত / বদল)', '৳' + fm(x.refundPaid) + ' / ৳' + fm(x.exchangeValue)) + '</div>'; });
+    h += '</div>';
+  }
+  h += '<div class="ct" style="margin-top:12px">📥 বাকি আদায়ের তালিকা</div>';
+  if (!r.dues.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px">এই সময়ে কোনো বাকি আদায় নেই</div>';
+  else { h += '<div class="card" style="padding:0;overflow:hidden">'; r.dues.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="display:flex;justify-content:space-between"><b>🏪 ' + esc(x.shopName) + (x.shopNo ? ' <span style="font-weight:400;color:var(--mt2)">' + esc(x.shopNo) + '</span>' : '') + '</b><b style="color:var(--gr)">৳' + fm(x.amount) + '</b></div><div style="color:var(--mt);font-size:11px">🚚 ' + esc(x.dsrName) + ' · ' + fmtBn(x.date) + (x.keeperName ? ' · 👤 ' + esc(x.keeperName) : '') + (x.phone ? ' · 📞 ' + esc(x.phone) : '') + (x.roadName ? ' · 🛣️ ' + esc(x.roadName) : '') + '</div></div>'; }); h += '</div>'; }
+  h += '<div class="ct" style="margin-top:12px">⚠️ ড্যামেজ কালেকশনের তালিকা</div>';
+  if (!r.damages.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px">এই সময়ে কোনো ড্যামেজ কালেকশন নেই</div>';
+  else { h += '<div class="card" style="padding:0;overflow:hidden">'; r.damages.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="display:flex;justify-content:space-between"><b>🏪 ' + esc(x.shopName) + ' — ' + esc(x.productName) + ' × ' + fn(x.units) + '</b><b>৳' + fm(x.damagedValue) + '</b></div><div style="color:var(--mt);font-size:11px">🚚 ' + esc(x.dsrName) + ' · ' + fmtBn(x.date) + ' · ' + (x.resolution === 'money' ? '💵 টাকা ফেরত ৳' + fm(x.refundAmt) : '🔁 বদল: ' + esc(x.exchProductName) + ' × ' + fn(x.exchUnits)) + '</div></div>'; }); h += '</div>'; }
+  el.innerHTML = (tabs ? tabs.outerHTML : '') + h;
 }
 
 // ════════════════════════════════════════════════════
@@ -6500,10 +6980,12 @@ function renderSR() {
   var tabs='<div class="seg">'
     +'<button class="sbt '+(S.srTab==='list'?'active':'')+'\" onclick="S.srTab=\'list\';renderSR()">👥 তালিকা</button>';
   if (canEdit) tabs+='<button class="sbt '+(S.srTab==='add'?'active':'')+'\" onclick="S.srTab=\'add\';renderSR()">➕ যোগ করুন</button>';
-  tabs+='<button class="sbt '+(S.srTab==='pay'?'active':'')+'\" onclick="S.srTab=\'pay\';renderSR()">💰 পেমেন্ট</button>';
+  tabs+='<button class="sbt '+(S.srTab==='pay'?'active':'')+'\" onclick="S.srTab=\'pay\';renderSR()">🧮 হিসাব/পেমেন্ট</button>';
+  tabs+='<button class="sbt '+(S.srTab==='coll'?'active':'')+'\" onclick="S.srTab=\'coll\';renderSR()">📥 আদায়</button>';
   if (canEdit) tabs+='<button class="sbt '+(S.srTab==='road'?'active':'')+'\" onclick="S.srTab=\'road\';renderSR()">🛣️ রোড</button>';
   tabs+='</div>';
   if (S.srTab === 'road') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadAndRenderRoads(); }
+  if (S.srTab === 'coll') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadCollectionsTab(); }
   el.innerHTML = tabs + (S.srTab==='list'?buildSRList(canEdit):S.srTab==='add'?buildSRForm():buildPayForm());
   if (S.srTab==='add') {
     var sr2=S.editSRId?S.srs.find(function(x){return x.id===S.editSRId;}):null;
@@ -6559,64 +7041,6 @@ function buildSRForm() {
     +'<button class="btn btn-bl" style="flex:1" onclick="saveSR()">'+(S.editSRId?'✏️ আপডেট':'➕ DSR/SO যোগ করুন')+'</button>'
     +(S.editSRId?'<button class="btn btn-gh" onclick="S.editSRId=null;IMG.sr={full:\'\',name:\'\',thumb:\'\',previewUrl:\'\'};S.srTab=\'list\';renderSR()">বাতিল</button>':'')
     +'</div></div>';
-}
-
-// ── Payment Form — 4-type breakdown ─────────────────
-function buildPayForm() {
-  var opts=S.srs.filter(function(s){return s.role!=='driver'}).map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+(s.area?' ('+esc(s.area)+')':'')+'</option>';}).join('');
-  return '<div class="card">'
-    +'<div class="ib">DSR/SO থেকে পেমেন্ট পেলে রেকর্ড করুন। মোট = নগদ + কমিশন + ছাড় + ড্যামেজ</div>'
-    +'<div class="fg"><label class="fl">DSR/SO *</label><select id="pf-sr" onchange="loadPayReconcile()"><option value="">-- DSR/SO বাছাই করুন --</option>'+opts+'</select></div>'
-    +'<div class="fg"><label class="fl">তারিখ</label><input type="date" id="pf-dt" value="'+iso(new Date())+'" onchange="loadPayReconcile()"></div>'
-    +'<div id="pay-reconcile-box"></div>'
-    +'<div class="g2">'
-    +'<div class="fg"><label class="fl">💵 নগদ (Cash)</label><input type="number" id="pf-cash" min="0" step="0.001" placeholder="০" oninput="updPayTotal()"></div>'
-    +'<div class="fg"><label class="fl">📊 কমিশন</label><input type="number" id="pf-comm" min="0" step="0.001" placeholder="০" oninput="updPayTotal()"></div>'
-    +'<div class="fg"><label class="fl">🏷️ ছাড় (Discount)</label><input type="number" id="pf-disc" min="0" step="0.001" placeholder="০" oninput="updPayTotal()"></div>'
-    +'<div class="fg"><label class="fl">⚠️ ড্যামেজ</label><input type="number" id="pf-dmg" min="0" step="0.001" placeholder="০" oninput="updPayTotal()"></div>'
-    +'</div>'
-    +'<div id="pay-total-box" style="background:var(--bll);border-radius:7px;padding:9px 12px;margin-bottom:10px;font-weight:700;font-size:14px;color:var(--bl);display:flex;justify-content:space-between"><span>মোট পেমেন্ট</span><span id="pay-total-val">৳০</span></div>'
-    +'<div class="fg"><label class="fl">নোট (ঐচ্ছিক)</label><input id="pf-nt" placeholder="ঐচ্ছিক"></div>'
-    +'<button class="btn btn-gr btn-w" onclick="savePay()">💰 পেমেন্ট রেকর্ড করুন</button>'
-    +'</div>';
-}
-function updPayTotal() {
-  var t=vn('pf-cash')+vn('pf-comm')+vn('pf-disc')+vn('pf-dmg');
-  var el=document.getElementById('pay-total-val'); if(el) el.textContent='৳'+fm(t);
-}
-// V31 — "কত টাকা এখন পাওয়া যাবে, কত বাকি থাকবে" reconciliation, shown the
-// moment a DSR/SO + তারিখ is picked on the পেমেন্ট entry screen.
-async function loadPayReconcile() {
-  var box=document.getElementById('pay-reconcile-box'); if(!box) return;
-  var srId=v('pf-sr'); var dt=v('pf-dt')||iso(new Date());
-  if (!srId) { box.innerHTML=''; return; }
-  box.innerHTML='<div style="font-size:11px;color:var(--mt2);padding:6px 0">হিসাব লোড হচ্ছে...</div>';
-  var r=await apiGet('/api/sr-payments?action=dsr-reconcile&dsrId='+encodeURIComponent(srId)+'&date='+encodeURIComponent(dt));
-  if (!r||!r.ok) { box.innerHTML=''; return; }
-  var t=r.today||{};
-  var givenTodayV=t.givenToday||t.givenTodayRev||0, returnedTodayV=t.returnedToday||t.returnTodayRev||0;
-  var commV=t.commissionToday||0, discV=t.discountToday||0, dmgV=t.damageToday||0;
-  box.innerHTML='<div class="card" style="background:var(--bll);margin-bottom:10px;padding:10px 12px">'
-    +'<div style="font-weight:700;font-size:12px;color:var(--bl);margin-bottom:6px">📊 আজকের হিসাব ('+fmtBn(dt)+')</div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>আজ দেওয়া হয়েছে</span><span style="font-weight:700">৳'+fm(givenTodayV)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>দোকানে বিক্রি হয়েছে</span><span style="font-weight:700">৳'+fm(t.soldToShopsToday||0)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>ফেরত এসেছে</span><span style="font-weight:700">৳'+fm(returnedTodayV)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>এখনো ভ্যানে/অবিক্রিত</span><span style="font-weight:700">৳'+fm(t.stillWithDsrToday||0)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;color:var(--gr)"><span>নগদ সংগ্রহ হয়েছে (জমা দিতে হবে)</span><span style="font-weight:700">৳'+fm(t.cashCollectedToday||0)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>📊 আজকের মোট কমিশন</span><span style="font-weight:700">৳'+fm(commV)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>🏷️ আজকের মোট ছাড়</span><span style="font-weight:700">৳'+fm(discV)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>⚠️ আজকের মোট ড্যামেজ</span><span style="font-weight:700">৳'+fm(dmgV)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>আজকের নতুন দোকান বাকি</span><span style="font-weight:700">৳'+fm(t.shopDueCreatedToday||0)+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0 0;border-top:1px solid rgba(0,0,0,.08);margin-top:4px;color:var(--re)"><span style="font-weight:700">সর্বমোট বকেয়া (এই DSR/SO)</span><span style="font-weight:700">৳'+fm(r.lifetimeDue||0)+'</span></div>'
-    +'</div>';
-  // Pre-fill the payment fields with today's computed commission/discount/
-  // damage so the payment total is correct by default — the manager can
-  // still overwrite any of them before saving, and cash collection always
-  // stays a manual entry (it depends on what was physically handed over).
-  if (!v('pf-comm')) sv('pf-comm', commV || '');
-  if (!v('pf-disc')) sv('pf-disc', discV || '');
-  if (!v('pf-dmg'))  sv('pf-dmg',  dmgV  || '');
-  updPayTotal();
 }
 
 async function saveSR() {
@@ -6777,21 +7201,6 @@ async function toggleRoadWeekday(roadId, weekday, turnOn) {
   toast(turnOn ? '✅ দিন চালু হয়েছে — প্রতি সপ্তাহে চলবে' : 'বন্ধ করা হয়েছে');
   _loadAndRenderRoads();
 }
-async function savePay() {
-  var srId=v('pf-sr'); if(!srId) return toast('DSR/SO বাছাই করুন');
-  var cash=vn('pf-cash'),comm=vn('pf-comm'),disc=vn('pf-disc'),dmgAmt=vn('pf-dmg');
-  var total=cash+comm+disc+dmgAmt;
-  if(!total) return toast('কমপক্ষে একটি পরিমাণ দিন');
-  var sr=S.srs.find(function(s){return s.id===srId;});
-  showOvl('...');
-  var payPayload={srId:srId,srName:sr?sr.name:'',date:v('pf-dt')||iso(new Date()),cashAmount:cash,commissionAmt:comm,discountAmt:disc,damageAmt:dmgAmt,amount:total,note:v('pf-nt')};
-  var r=await mgrPost('payment','/api/sr-payments',payPayload);
-  hideOvl();
-  if(r&&r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');sv('pf-cash','');sv('pf-comm','');sv('pf-disc','');sv('pf-dmg','');sv('pf-nt','');updPayTotal();return;}
-  if(r&&r.ok){toast('পেমেন্ট রেকর্ড হয়েছে');sv('pf-cash','');sv('pf-comm','');sv('pf-disc','');sv('pf-dmg','');sv('pf-nt','');updPayTotal();}
-  else toast(r&&r.error||'ব্যর্থ');
-}
-
 // ════════════════════════════════════════════════════
 //  TRANSACTION — keyboard fix: no re-render on input
 // ════════════════════════════════════════════════════

@@ -57,3 +57,26 @@ columns, and the 35 default products). Nothing else to run.
 - Orders tab and Approvals page show every order read-only (who, what, ordered vs loaded, times).
 - Transactions -> "কোম্পানিতে ফেরত": removes stock only (blocked if it exceeds current stock).
 - Still 12 API files.
+
+## 8. What's new in 4.8.0 — ⚠️ existing deployments must run one SQL file
+**Upgrading:** open the Supabase SQL editor and run `migration_v4_8_settlement.sql` once (safe to re-run).
+It adds 3 tables (`due_collections`, `damage_collections`, `dsr_settlements`) and allows manager
+settlements in the approval queue. **Fresh installs:** `schema.sql` already contains everything.
+Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-calendar.js`, `_lib/db.js`).
+
+- **Van-stock cap.** A DSR can never sell more than is on his van. The quantity boxes clamp to the
+  remaining van stock and the server (`shops.js` visit-sale) rejects any over-sale.
+- **হিসাব/পেমেন্ট (owner/manager) — end-of-day settlement.** Pick DSR + date: cash, unsold return, damage,
+  commission and discount are calculated automatically. One press applies it; pressing again cannot
+  double-count (unique token + only "not yet settled" amounts are ever shown). Cash short of the expected
+  amount simply stays in the DSR's due; collect it later with "শুধু নগদ জমা". Manager settlements go to
+  the Owner's approval queue.
+- **Unsold van stock** is returned to the warehouse automatically as a normal "ফেরত" transaction.
+- **DSR menu: 📥 বাকি আদায়** — every shop with due (details, phone, road), collect any amount.
+  Collected cash is added to that day's settlement automatically.
+- **DSR menu: ⚠️ ড্যামেজ কালেকশন** — take damaged goods back from a shop and either pay the shop money
+  or swap for a product from the van. Money paid out is deducted from the DSR's expected cash; both
+  options count as damage in the settlement and open a pending claim in the Damage Report.
+- **Owner/Manager tab 📥 আদায়** — see what each DSR collected (dues + damage) with shop details.
+- **Road on shop registration** — the DSR's own registration form now has the Road field too, and the
+  server refuses a shop without a road.

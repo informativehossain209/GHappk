@@ -1,4 +1,4 @@
-const { supabase, cors, num, str, now_, mapDue, safeErr } = require('./_lib/db');
+const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 
 // Merged with the former api/settings.js (app-wide shop-name setting) to
@@ -98,26 +98,13 @@ module.exports = async (req, res) => {
         const pay = num(d.payAmount);
         if (pay <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
 
-        const { data: cur, error: fetchErr } = await supabase
-          .from('due_calendar').select('amount,paid_amount,status').eq('id', d.id).single();
-        if (fetchErr) throw fetchErr;
-
-        const total       = num(cur.amount);
-        const alreadyPaid = num(cur.paid_amount);
-        const newPaid     = Math.min(alreadyPaid + pay, total);
-        const remaining   = total - newPaid;
-        const newStatus   = remaining <= 0 ? 'cleared' : 'partial';
-        const clearedDate = newStatus === 'cleared'
-          ? new Date().toISOString().slice(0, 10) : null;
-
-        const { error: updErr } = await supabase.from('due_calendar').update({
-          paid_amount:  newPaid,
-          status:       newStatus,
-          cleared_date: clearedDate
-        }).eq('id', d.id);
-        if (updErr) throw updErr;
-
-        return res.json({ ok: true, paidAmount: newPaid, remaining, status: newStatus });
+        // v4.8.0 — goes through the shared helper so a shop-due payment is
+        // also logged in due_collections (the end-of-day settlement reads
+        // that log to know how much cash the DSR collected today).
+        const r1 = await applyDuePayment(d.id, pay, { dsrId: d.collectorId || '', dsrName: d.collectorName || '' });
+        if (r1.conflict) return res.json({ ok: false, error: 'অন্য একটি আপডেট চলছিল — আবার চেষ্টা করুন' });
+        if (r1.applied <= 0) return res.json({ ok: false, error: 'এই বাকি আগেই পরিশোধিত' });
+        return res.json({ ok: true, paidAmount: r1.paidAmount, remaining: r1.remaining, status: r1.status });
       }
 
       // V44 update #11: the "take back to previous" control (reverting a

@@ -8,7 +8,7 @@
 const { randomUUID } = require('crypto');
 const {
   supabase, cors, num, now_, str, safeErr,
-  mapShop, mapDue, mapTx, fetchAll, mapShopVisit, mapPosCustomer, bdtToday
+  mapShop, mapDue, mapTx, fetchAll, mapShopVisit, mapPosCustomer, bdtToday, computeVanStock
 } = require('./_lib/db');
 
 // V48 update #37/#38 — re-verifies an Owner PIN server-side (never trust
@@ -72,9 +72,9 @@ module.exports = async (req, res) => {
         roadId = String(road.id); roadName = road.name || '';
         assignedDsrId = road.dsr_id; assignedDsrName = road.dsr_name || '';
       } else {
-        if (!assignedDsrId) return res.json({ ok: false, error: 'রোড অথবা DSR নির্বাচন আবশ্যক' });
-        const { data: dsr } = await supabase.from('srs').select('name').eq('id', assignedDsrId).single();
-        assignedDsrName = dsr ? dsr.name : '';
+        // v4.8.0 — every shop must belong to a road so shops can be
+        // filtered/planned by road. (A DSR id alone is no longer enough.)
+        return res.json({ ok: false, error: 'রোড নির্বাচন আবশ্যক — দোকানটি কোন রোডের অধীনে তা বেছে নিন' });
       }
 
       const { data: seq, error: seqErr } = await supabase.rpc('next_shop_no');
@@ -275,6 +275,27 @@ module.exports = async (req, res) => {
 
       const txId = randomUUID();
       const date = d.date || now_().slice(0, 10);
+
+      // v4.8.0 — a DSR can never sell more than is on his van. The screen
+      // also caps the inputs, but THIS is the real guard (a hand-edited
+      // request, a stale screen or a double-tap cannot get past it).
+      // Same numbers as the on-screen "গাড়িতে আছে" figure.
+      {
+        const want = {}, names = {};
+        items.forEach(it => {
+          const pid = String(it.productId || ''); if (!pid) return;
+          const u = num(it.totalUnits);
+          if (u < 0) return;
+          want[pid] = (want[pid] || 0) + u; names[pid] = String(it.productName || 'পণ্য');
+        });
+        const van = await computeVanStock(String(d.dsrId), /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : bdtToday(), { damage: 'cleared' });
+        for (const pid of Object.keys(want)) {
+          const have = num(van[pid]);
+          if (want[pid] > have + 0.0001)
+            return res.json({ ok: false, error: names[pid] + ' — গাড়িতে আছে মাত্র ' + have + ' পিস, কিন্তু ' + want[pid] + ' পিস বিক্রি করতে চাইছেন। গাড়ির স্টকের বেশি বিক্রি করা যাবে না।' });
+        }
+      }
+
       const rows = items.map(item => {
         const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
         return {

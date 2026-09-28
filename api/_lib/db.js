@@ -521,6 +521,78 @@ async function computeBonusRangeSummary(from, to) {
   });
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+//  v4.8.0 — VAN STOCK (single source of truth) + DUE PAYMENT HELPER
+// ══════════════════════════════════════════════════════════════════════
+// What is physically left on ONE DSR's van for ONE date (nothing carries
+// over from other days):
+//   given − returned − sold-to-shops − damage-exchange replacements
+//         − damage claims (see `damage` option)
+// Damage claims created by "damage collection" (tx_id starts with 'dc:')
+// are goods taken back FROM a shop, never from the van, so they are
+// always ignored here.
+//   opts.damage = 'cleared' (default) — only Owner-cleared van damage is
+//                 subtracted (the selling screen: units not yet cleared
+//                 are still "in hand");
+//   opts.damage = 'all' — every van-damage claim is subtracted (the
+//                 end-of-day settlement: damaged units are NOT returned
+//                 to the warehouse as good stock).
+async function computeVanStock(dsrId, date, opts) {
+  const mode = (opts && opts.damage) || 'cleared';
+  const [dayTx, dmg, exch] = await Promise.all([
+    fetchAll(() => supabase.from('transactions').select('type,product_id,total_units')
+      .eq('sr_id', String(dsrId)).eq('date', date).in('type', ['give', 'return', 'dsr_sale'])),
+    fetchAll(() => {
+      let q = supabase.from('dmg_claims').select('product_id,total_units,status,tx_id')
+        .eq('sr_id', String(dsrId)).eq('date', date);
+      if (mode !== 'all') q = q.eq('status', 'cleared');
+      return q;
+    }),
+    fetchAll(() => supabase.from('damage_collections').select('exch_product_id,exch_units')
+      .eq('dsr_id', String(dsrId)).eq('date', date).eq('resolution', 'exchange'))
+  ]);
+  const stock = {};
+  const add = (pid, delta) => { pid = String(pid || ''); if (!pid) return; stock[pid] = (stock[pid] || 0) + delta; };
+  (dayTx || []).forEach(r => add(r.product_id, r.type === 'give' ? num(r.total_units) : -num(r.total_units)));
+  (dmg || []).forEach(r => { if (String(r.tx_id || '').startsWith('dc:')) return; add(r.product_id, -num(r.total_units)); });
+  (exch || []).forEach(r => add(r.exch_product_id, -num(r.exch_units)));
+  Object.keys(stock).forEach(k => { stock[k] = Math.max(0, +stock[k].toFixed(4)); });
+  return stock;
+}
+
+// Applies a payment to ONE due_calendar row: caps at what is still owed,
+// guards against a concurrent double-write (optimistic check on
+// paid_amount) and — for shop dues — logs a due_collections row so the
+// end-of-day settlement knows exactly how much cash the DSR collected
+// today. Returns { applied, paidAmount, remaining, status, conflict? }.
+async function applyDuePayment(dueId, pay, meta) {
+  meta = meta || {};
+  const { data: cur, error } = await supabase.from('due_calendar').select('*').eq('id', dueId).single();
+  if (error) throw error;
+  const total = num(cur.amount), already = num(cur.paid_amount);
+  const applied = Math.min(num(pay), Math.max(0, total - already));
+  if (applied <= 0) return { applied: 0, paidAmount: already, remaining: Math.max(0, total - already), status: cur.status };
+  const newPaid = +(already + applied).toFixed(4);
+  const remaining = +(total - newPaid).toFixed(4);
+  const status = remaining <= 0 ? 'cleared' : 'partial';
+  const date = meta.date || bdtToday();
+  const { data: upd, error: uErr } = await supabase.from('due_calendar').update({
+    paid_amount: newPaid, status, cleared_date: status === 'cleared' ? date : null
+  }).eq('id', dueId).eq('paid_amount', cur.paid_amount).select('id');
+  if (uErr) throw uErr;
+  if (!upd || !upd.length) return { applied: 0, conflict: true, paidAmount: already, remaining: Math.max(0, total - already), status: cur.status };
+  if (cur.client_type === 'shop') {
+    const { error: lErr } = await supabase.from('due_collections').insert({
+      due_id: String(dueId), shop_id: String(cur.shop_id || ''), shop_name: cur.shop_name || '',
+      dsr_id: String(meta.dsrId || cur.dsr_id || ''), dsr_name: meta.dsrName || cur.dsr_name || '',
+      date, amount: applied, created_at: now_()
+    });
+    if (lErr) throw lErr;
+  }
+  return { applied, paidAmount: newPaid, remaining: Math.max(0, remaining), status };
+}
+
 module.exports = {
   supabase, cors, num, ds, today, now_, str, safeErr, fetchAll,
   mapProduct, mapSR, mapTx, mapDmg, mapBonus, mapPayment,
@@ -528,5 +600,6 @@ module.exports = {
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, mapShopVisit, mapPosCustomer,
   calcStock, computeBonusSummary, computeBonusRangeSummary,
   bdtDateStr, bdtToday, addDaysStr, bdtYesterday, weekdayOf,
-  cyclePeriodBounds, cyclePeriodForDate, cyclePeriodToday, cyclePeriodDates
+  cyclePeriodBounds, cyclePeriodForDate, cyclePeriodToday, cyclePeriodDates,
+  computeVanStock, applyDuePayment
 };

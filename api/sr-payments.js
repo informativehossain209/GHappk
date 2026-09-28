@@ -1,4 +1,4 @@
-const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll, bdtToday } = require('./_lib/db');
+const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll, bdtToday, computeVanStock, applyDuePayment } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -49,7 +49,14 @@ module.exports = async (req, res) => {
       if (fetchErr) throw fetchErr;
       if (!row || row.status !== 'pending')
         return res.json({ ok: false, error: 'এন্ট্রি পাওয়া যায়নি বা ইতিমধ্যে প্রক্রিয়া হয়েছে' });
-      await _doApprove(row);
+      const _ar = await _doApprove(row);
+      if (_ar && _ar.ok === false) {
+        // A duplicate settlement means it was already applied — close the request; any other failure stays pending.
+        if (_ar.duplicate) {
+          await supabase.from('manager_pending_approvals').update({ status: 'approved', approved_at: now_(), approved_by: 'owner' }).eq('id', id);
+        }
+        return res.json({ ok: false, error: _ar.error || 'অনুমোদন ব্যর্থ' });
+      }
       const { error: updErr } = await supabase.from('manager_pending_approvals')
         .update({ status: 'approved', approved_at: now_(), approved_by: 'owner' })
         .eq('id', id);
@@ -63,13 +70,19 @@ module.exports = async (req, res) => {
         .from('manager_pending_approvals').select('*').eq('status', 'pending');
       if (fetchErr) throw fetchErr;
       if (!rows || !rows.length) return res.json({ ok: true, count: 0 });
-      for (const row of rows) { await _doApprove(row); }
-      const ids = rows.map(r => r.id);
-      const { error: updErr } = await supabase.from('manager_pending_approvals')
-        .update({ status: 'approved', approved_at: now_(), approved_by: 'owner' })
-        .in('id', ids);
-      if (updErr) throw updErr;
-      return res.json({ ok: true, count: rows.length });
+      const okIds = []; let failed = 0;
+      for (const row of rows) {
+        const _ar = await _doApprove(row);
+        if (_ar && _ar.ok === false && !_ar.duplicate) { failed++; continue; }
+        okIds.push(row.id);
+      }
+      if (okIds.length) {
+        const { error: updErr } = await supabase.from('manager_pending_approvals')
+          .update({ status: 'approved', approved_at: now_(), approved_by: 'owner' })
+          .in('id', okIds);
+        if (updErr) throw updErr;
+      }
+      return res.json({ ok: true, count: okIds.length, failed });
     }
 
     // POST — Owner rejects a single entry
@@ -430,31 +443,226 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'van-stock') {
       const { dsrId, date } = req.query;
       if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
-      const d = (date && DATE_RE.test(date)) ? date : new Date().toISOString().slice(0, 10);
-
-      const { data: dayTx, error: txErr } = await supabase.from('transactions')
-        .select('type,product_id,total_units').eq('sr_id', dsrId).eq('date', d)
-        .in('type', ['give', 'return', 'dsr_sale']);
-      if (txErr) throw txErr;
-
-      const { data: dmg, error: dmgErr } = await supabase.from('dmg_claims')
-        .select('product_id,total_units').eq('sr_id', dsrId).eq('date', d).eq('status', 'cleared');
-      if (dmgErr) throw dmgErr;
-
-      const stock = {};
-      (dayTx || []).forEach(r => {
-        const pid = String(r.product_id || ''); if (!pid) return;
-        if (stock[pid] == null) stock[pid] = 0;
-        stock[pid] += (r.type === 'give' ? num(r.total_units) : -num(r.total_units));
-      });
-      (dmg || []).forEach(r => {
-        const pid = String(r.product_id || ''); if (!pid) return;
-        if (stock[pid] == null) stock[pid] = 0;
-        stock[pid] -= num(r.total_units);
-      });
-      Object.keys(stock).forEach(k => { if (stock[k] < 0) stock[k] = 0; });
-
+      const d = (date && DATE_RE.test(date)) ? date : bdtToday();
+      // v4.8.0 — shared helper (api/_lib/db.js computeVanStock): the very
+      // same numbers the server uses to REJECT an over-sale in
+      // shops.js visit-sale, so the screen and the check can never disagree.
+      const stock = await computeVanStock(dsrId, d, { damage: 'cleared' });
       return res.json({ ok: true, dsrId: String(dsrId), date: d, vanStock: stock });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  v4.8.0 — DSR DUE COLLECTION (বাকি আদায়)
+    //  due-shops    GET  dsrId            → every shop with an unpaid due
+    //  due-collect  POST shopId, amount   → oldest due first, logged
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'due-shops') {
+      const { dsrId } = req.query;
+      if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
+      const { data: mine, error: mErr } = await supabase.from('shops').select('id').eq('assigned_dsr_id', String(dsrId));
+      if (mErr) throw mErr;
+      const myShopIds = (mine || []).map(x => String(x.id));
+      const [a, b] = await Promise.all([
+        supabase.from('due_calendar').select('*').eq('client_type', 'shop').eq('dsr_id', String(dsrId)).in('status', ['pending', 'partial']),
+        myShopIds.length
+          ? supabase.from('due_calendar').select('*').eq('client_type', 'shop').in('shop_id', myShopIds).in('status', ['pending', 'partial'])
+          : Promise.resolve({ data: [] })
+      ]);
+      if (a.error) throw a.error; if (b.error) throw b.error;
+      const seen = {}; const rows = [];
+      [...(a.data || []), ...(b.data || [])].forEach(r => { if (!seen[r.id]) { seen[r.id] = 1; rows.push(r); } });
+      const shopIds = [...new Set(rows.map(r => String(r.shop_id || '')).filter(Boolean))];
+      const shopMap = {};
+      if (shopIds.length) {
+        const { data: sh, error: sErr } = await supabase.from('shops').select('id,shop_no,name,keeper_name,phone,address,road_name').in('id', shopIds);
+        if (sErr) throw sErr;
+        (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
+      }
+      const grouped = {};
+      rows.forEach(r => {
+        const sid = String(r.shop_id || '');
+        const rem = num(r.amount) - num(r.paid_amount);
+        if (rem <= 0.0001) return;
+        if (!grouped[sid]) {
+          const sh = shopMap[sid] || {};
+          grouped[sid] = {
+            shopId: sid, shopNo: sh.shop_no || '', shopName: sh.name || r.shop_name || 'অজানা দোকান',
+            keeperName: sh.keeper_name || '', phone: sh.phone || '', address: sh.address || '', roadName: sh.road_name || '',
+            totalDue: 0, dues: []
+          };
+        }
+        grouped[sid].totalDue += rem;
+        grouped[sid].dues.push({ id: String(r.id), dueDate: String(r.due_date || '').slice(0, 10), amount: num(r.amount), paid: num(r.paid_amount), remaining: rem, note: r.note || '' });
+      });
+      const shops = Object.values(grouped).sort((x, y) => y.totalDue - x.totalDue);
+      shops.forEach(x => x.dues.sort((p, q) => p.dueDate.localeCompare(q.dueDate)));
+      return res.json({ ok: true, shops, totalDue: shops.reduce((t, x) => t + x.totalDue, 0) });
+    }
+
+    if (req.method === 'POST' && action === 'due-collect') {
+      const d = req.body || {};
+      const amount = num(d.amount);
+      if (!d.dsrId || !d.shopId) return res.json({ ok: false, error: 'dsrId ও shopId প্রয়োজন' });
+      if (amount <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
+      const { data: dues, error: dErr } = await supabase.from('due_calendar').select('*')
+        .eq('client_type', 'shop').eq('shop_id', String(d.shopId)).in('status', ['pending', 'partial'])
+        .order('due_date').order('created_at');
+      if (dErr) throw dErr;
+      const owed = (dues || []).reduce((t, r) => t + Math.max(0, num(r.amount) - num(r.paid_amount)), 0);
+      if (owed <= 0) return res.json({ ok: false, error: 'এই দোকানের কোনো বাকি নেই' });
+      if (amount > owed + 0.0001) return res.json({ ok: false, error: 'বাকি আছে মাত্র ৳' + owed.toFixed(2) + ' — এর বেশি নেওয়া যাবে না' });
+      let left = amount, collected = 0;
+      const meta = { dsrId: String(d.dsrId), dsrName: d.dsrName || '', date: bdtToday() };
+      for (const r of dues) {
+        if (left <= 0.0001) break;
+        const rem = Math.max(0, num(r.amount) - num(r.paid_amount));
+        const r1 = await applyDuePayment(r.id, Math.min(left, rem), meta);
+        if (r1.conflict) return res.json({ ok: false, error: 'অন্য একটি আপডেট চলছিল — আবার চেষ্টা করুন' });
+        collected += r1.applied; left -= r1.applied;
+      }
+      return res.json({ ok: true, collected, remaining: Math.max(0, owed - collected) });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  v4.8.0 — DSR DAMAGE COLLECTION (ড্যামেজ কালেকশন)
+    //  A shop hands back damaged goods; the DSR either pays the shop
+    //  cash ('money') or swaps it for any product on his van ('exchange').
+    //  Damaged goods never re-enter warehouse stock. Every line also
+    //  opens a pending dmg_claims row (tx_id 'dc:<id>') so the Owner's
+    //  Damage Report keeps counting the company's purchase-price loss.
+    // ══════════════════════════════════════════════════
+    if (req.method === 'POST' && action === 'damage-collect') {
+      const d = req.body || {};
+      const lines = Array.isArray(d.lines) ? d.lines : [];
+      if (!d.dsrId || !d.shopId) return res.json({ ok: false, error: 'dsrId ও shopId প্রয়োজন' });
+      if (!lines.length) return res.json({ ok: false, error: 'কমপক্ষে একটি ড্যামেজ পণ্য দিন' });
+      if (lines.length > 60) return res.json({ ok: false, error: 'একসাথে সর্বোচ্চ ৬০টি লাইন' });
+      const date = (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday();
+
+      const { data: shop, error: shErr } = await supabase.from('shops').select('id,name').eq('id', String(d.shopId)).maybeSingle();
+      if (shErr) throw shErr;
+      if (!shop) return res.json({ ok: false, error: 'দোকান পাওয়া যায়নি' });
+
+      const pids = new Set();
+      lines.forEach(l => { if (l.productId) pids.add(String(l.productId)); if (l.exchProductId) pids.add(String(l.exchProductId)); });
+      const { data: prods, error: pErr } = await supabase.from('products').select('id,name,sku,selling_price,purchase_price').in('id', [...pids]);
+      if (pErr) throw pErr;
+      const pm = {}; (prods || []).forEach(x => { pm[String(x.id)] = x; });
+
+      const van = await computeVanStock(d.dsrId, date, { damage: 'cleared' });
+      const needVan = {};
+      const colId = randomUUID();
+      const ts = now_();
+      const colRows = [], claimRows = [];
+      for (const l of lines) {
+        const p = pm[String(l.productId || '')];
+        const units = num(l.units);
+        if (!p) return res.json({ ok: false, error: 'পণ্য পাওয়া যায়নি' });
+        if (units <= 0) return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — ড্যামেজের পরিমাণ দিন' });
+        if (l.resolution !== 'money' && l.resolution !== 'exchange') return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — টাকা ফেরত নাকি বদল, বেছে নিন' });
+        const sp = num(p.selling_price), pp = num(p.purchase_price);
+        const damagedValue = +(units * sp).toFixed(4);
+        const row = {
+          col_id: colId, dsr_id: String(d.dsrId), dsr_name: d.dsrName || '',
+          shop_id: String(shop.id), shop_name: shop.name || '', date,
+          product_id: String(p.id), product_name: p.name || '', sku: p.sku || '',
+          units, selling_price: sp, purchase_price: pp, damaged_value: damagedValue,
+          resolution: l.resolution, refund_amt: 0, exch_product_id: '', exch_product_name: '', exch_units: 0, exch_value: 0,
+          note: String(d.note || '').slice(0, 200), created_at: ts
+        };
+        if (l.resolution === 'money') {
+          const refund = l.refundAmt === undefined || l.refundAmt === '' ? damagedValue : num(l.refundAmt);
+          if (refund < 0) return res.json({ ok: false, error: 'টাকার পরিমাণ ঋণাত্মক হতে পারে না' });
+          if (refund > damagedValue + 0.0001) return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — ফেরত টাকা (৳' + refund.toFixed(2) + ') ড্যামেজ মূল্যের (৳' + damagedValue.toFixed(2) + ') বেশি হতে পারে না' });
+          row.refund_amt = +refund.toFixed(4);
+        } else {
+          const ep = pm[String(l.exchProductId || '')];
+          const eu = num(l.exchUnits);
+          if (!ep) return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — বদলে কোন পণ্য দিচ্ছেন তা বাছুন' });
+          if (eu <= 0) return res.json({ ok: false, error: (ep.name || 'পণ্য') + ' — বদলের পরিমাণ দিন' });
+          needVan[String(ep.id)] = (needVan[String(ep.id)] || 0) + eu;
+          row.exch_product_id = String(ep.id); row.exch_product_name = ep.name || '';
+          row.exch_units = eu; row.exch_value = +(eu * num(ep.selling_price)).toFixed(4);
+        }
+        colRows.push(row);
+        claimRows.push({
+          tx_id: 'dc:' + colId, product_id: String(p.id), product_name: p.name || '', sku: p.sku || '',
+          total_units: units, purchase_price: pp, total_cost: +(units * pp).toFixed(4),
+          date, sr_id: String(d.dsrId), sr_name: d.dsrName || '', status: 'pending', cleared_date: null, created_at: ts
+        });
+      }
+      for (const pid of Object.keys(needVan)) {
+        const have = num(van[pid]);
+        if (needVan[pid] > have + 0.0001) {
+          const nm = (pm[pid] && pm[pid].name) || 'পণ্য';
+          return res.json({ ok: false, error: nm + ' — গাড়িতে আছে মাত্র ' + have + ' পিস, বদলে দিতে চাইছেন ' + needVan[pid] + ' পিস' });
+        }
+      }
+      const { error: iErr } = await supabase.from('damage_collections').insert(colRows);
+      if (iErr) throw iErr;
+      const { error: cErr } = await supabase.from('dmg_claims').insert(claimRows);
+      if (cErr) {
+        await supabase.from('damage_collections').delete().eq('col_id', colId);
+        throw cErr;
+      }
+      const refundTotal = colRows.reduce((t, r) => t + num(r.refund_amt), 0);
+      const exchTotal = colRows.reduce((t, r) => t + num(r.exch_value), 0);
+      return res.json({ ok: true, colId, refundTotal, exchTotal, lines: colRows.length });
+    }
+
+    // Owner / Manager view (and the DSR's own list): what DSRs collected.
+    if (req.method === 'GET' && action === 'collections-list') {
+      const { dsrId, from, to } = req.query;
+      const f = DATE_RE.test(from || '') ? from : bdtToday();
+      const t = DATE_RE.test(to || '') ? to : f;
+      const [dc, gc] = await Promise.all([
+        fetchAll(() => { let q = supabase.from('due_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; }),
+        fetchAll(() => { let q = supabase.from('damage_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; })
+      ]);
+      const shopIds = [...new Set([...(dc || []), ...(gc || [])].map(r => String(r.shop_id || '')).filter(Boolean))];
+      const shopMap = {};
+      if (shopIds.length) {
+        const { data: sh } = await supabase.from('shops').select('id,shop_no,keeper_name,phone,address,road_name').in('id', shopIds);
+        (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
+      }
+      const shopInfo = id => { const x = shopMap[String(id || '')] || {}; return { shopNo: x.shop_no || '', keeperName: x.keeper_name || '', phone: x.phone || '', address: x.address || '', roadName: x.road_name || '' }; };
+      const dues = (dc || []).map(r => ({ id: String(r.id), date: String(r.date).slice(0, 10), dsrId: r.dsr_id, dsrName: r.dsr_name || '', shopId: r.shop_id || '', shopName: r.shop_name || '', amount: num(r.amount), createdAt: r.created_at, ...shopInfo(r.shop_id) }));
+      const damages = (gc || []).map(r => ({
+        id: String(r.id), colId: r.col_id, date: String(r.date).slice(0, 10), dsrId: r.dsr_id, dsrName: r.dsr_name || '',
+        shopId: r.shop_id || '', shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units),
+        damagedValue: num(r.damaged_value), resolution: r.resolution, refundAmt: num(r.refund_amt),
+        exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exchValue: num(r.exch_value),
+        createdAt: r.created_at, ...shopInfo(r.shop_id)
+      }));
+      const byDsr = {};
+      const slot = (id, name) => (byDsr[id] = byDsr[id] || { dsrId: id, dsrName: name || '', dueCollected: 0, damageValue: 0, refundPaid: 0, exchangeValue: 0 });
+      dues.forEach(r => { slot(r.dsrId, r.dsrName).dueCollected += r.amount; });
+      damages.forEach(r => { const x = slot(r.dsrId, r.dsrName); x.damageValue += r.damagedValue; x.refundPaid += r.refundAmt; x.exchangeValue += r.exchValue; });
+      return res.json({
+        ok: true, from: f, to: t, dues, damages, byDsr: Object.values(byDsr),
+        totals: {
+          dueCollected: dues.reduce((a, r) => a + r.amount, 0), damageValue: damages.reduce((a, r) => a + r.damagedValue, 0),
+          refundPaid: damages.reduce((a, r) => a + r.refundAmt, 0), exchangeValue: damages.reduce((a, r) => a + r.exchValue, 0)
+        }
+      });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  v4.8.0 — END-OF-DAY SETTLEMENT (হিসাব / পেমেন্ট)
+    //  settle-preview GET  dsrId, date  → everything still to be settled
+    //  settle-confirm POST              → applies it ONCE (see below)
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'settle-preview') {
+      const { dsrId, date } = req.query;
+      if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
+      const d = (date && DATE_RE.test(date)) ? date : bdtToday();
+      const c = await _computeSettlement(String(dsrId), d);
+      return res.json({ ok: true, ...c });
+    }
+
+    if (req.method === 'POST' && action === 'settle-confirm') {
+      const r = await _performSettlement(req.body || {}, (req.body && req.body.byName) || '');
+      return res.json(r);
     }
 
     // ══════════════════════════════════════════════════
@@ -616,6 +824,12 @@ async function _doApprove(row) {
     if (error) throw error;
   }
 
+  if (row.input_type === 'settlement') {
+    // Manager's end-of-day settlement — recalculated from the database at
+    // the moment the Owner approves (never trusts stale numbers).
+    return await _performSettlement(d, 'owner-approval');
+  }
+
   if (row.input_type === 'expense') {
     const entries = d.entries || [];
     if (entries.length) {
@@ -678,4 +892,209 @@ async function _loadAndDeduct(id, allowedLoadStatuses) {
     throw txErr;
   }
   return { ok: true, txId };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v4.8.0 — END-OF-DAY SETTLEMENT ENGINE
+//
+//  Everything the DSR's day produced is calculated FROM THE DATABASE, so
+//  nobody has to type damage / return / commission numbers any more:
+//
+//    cash expected = cash shops paid at the counter (P)
+//                  + old dues he collected today (Q)
+//                  − cash he paid shops for damaged goods (M)
+//    due reduction = cash received + commission + discount + damage
+//                    + value of unsold stock returned to the warehouse
+//
+//  DELTA-BASED, so pressing twice can never double-count: each confirmed
+//  settlement stores what it consumed (dsr_settlements); the next preview
+//  only shows what is NOT yet settled for that date. Unsold van stock is
+//  read live from the van, so once returned it is simply gone.
+//  Whatever cash is short simply stays in the DSR's due (due = given −
+//  returned − payments) and can be collected later.
+// ══════════════════════════════════════════════════════════════════════
+const _r2 = n => Math.round((num(n) + Number.EPSILON) * 100) / 100;
+
+async function _computeSettlement(dsrId, date) {
+  const [dayTx, dueRows, dueColsToday, dmgCols, settled, van, dsrRow, allTxForDue, allPay] = await Promise.all([
+    fetchAll(() => supabase.from('transactions').select('type,product_id,total_units,total_revenue,commission_amt,discount_amt')
+      .eq('sr_id', dsrId).eq('date', date).in('type', ['give', 'return', 'damage', 'dsr_sale'])),
+    fetchAll(() => supabase.from('due_calendar').select('id,amount,paid_amount').eq('client_type', 'shop').eq('dsr_id', dsrId).eq('due_date', date)),
+    fetchAll(() => supabase.from('due_collections').select('shop_name,amount').eq('dsr_id', dsrId).eq('date', date)),
+    fetchAll(() => supabase.from('damage_collections').select('*').eq('dsr_id', dsrId).eq('date', date).order('created_at')),
+    fetchAll(() => supabase.from('dsr_settlements').select('*').eq('dsr_id', dsrId).eq('date', date).order('created_at')),
+    computeVanStock(dsrId, date, { damage: 'all' }),
+    supabase.from('srs').select('name').eq('id', dsrId).maybeSingle(),
+    fetchAll(() => supabase.from('transactions').select('type,total_revenue').eq('sr_id', dsrId).in('type', ['give', 'return'])),
+    fetchAll(() => supabase.from('sr_payments').select('amount').eq('sr_id', dsrId))
+  ]);
+
+  const sum = (t, f) => (dayTx || []).filter(r => r.type === t).reduce((a, r) => a + num(r[f]), 0);
+  const givenToday = sum('give', 'total_revenue'), returnedToday = sum('return', 'total_revenue');
+  const soldValue = sum('dsr_sale', 'total_revenue');
+  const commission = sum('dsr_sale', 'commission_amt'), discount = sum('dsr_sale', 'discount_amt');
+  const vanDamageTx = sum('damage', 'total_revenue');
+
+  // P — cash shops handed over AT the sale. paid_amount on a due row also
+  // grows when the shop pays later, so subtract every logged later collection.
+  let cashAtSale = 0, creditToday = 0;
+  if ((dueRows || []).length) {
+    const ids = dueRows.map(r => String(r.id));
+    const logged = await fetchAll(() => supabase.from('due_collections').select('due_id,amount').in('due_id', ids));
+    const lm = {}; (logged || []).forEach(r => { lm[String(r.due_id)] = (lm[String(r.due_id)] || 0) + num(r.amount); });
+    dueRows.forEach(r => {
+      const initial = Math.max(0, num(r.paid_amount) - (lm[String(r.id)] || 0));
+      cashAtSale += initial;
+      creditToday += Math.max(0, num(r.amount) - initial);
+    });
+  }
+  const dueCollected = (dueColsToday || []).reduce((a, r) => a + num(r.amount), 0);
+
+  const damageMoney = (dmgCols || []).filter(r => r.resolution === 'money').reduce((a, r) => a + num(r.refund_amt), 0);
+  const damageExchange = (dmgCols || []).filter(r => r.resolution === 'exchange').reduce((a, r) => a + Math.min(num(r.exch_value), num(r.damaged_value)), 0);
+  const damageTotal = vanDamageTx + damageMoney + damageExchange;
+
+  const done = { comm: 0, disc: 0, dmg: 0, cash: 0 };
+  (settled || []).forEach(r => { done.comm += num(r.comm_amt); done.disc += num(r.disc_amt); done.dmg += num(r.dmg_amt); done.cash += num(r.cash_expected); });
+
+  const cashExpectedRaw = _r2(cashAtSale + dueCollected - damageMoney - done.cash);
+  const pend = {
+    commission: Math.max(0, _r2(commission - done.comm)),
+    discount:   Math.max(0, _r2(discount - done.disc)),
+    damage:     Math.max(0, _r2(damageTotal - done.dmg))
+  };
+
+  // Unsold stock still on the van → goes back to the warehouse.
+  const pids = Object.keys(van).filter(k => num(van[k]) > 0);
+  const returnItems = [];
+  if (pids.length) {
+    const { data: prods, error: pErr } = await supabase.from('products').select('id,name,sku,case_size,selling_price,purchase_price').in('id', pids);
+    if (pErr) throw pErr;
+    const gives = {}; // price the DSR was actually charged today
+    (await fetchAll(() => supabase.from('transactions').select('product_id,total_units,total_revenue,selling_price').eq('sr_id', dsrId).eq('date', date).eq('type', 'give')))
+      .forEach(r => { const k = String(r.product_id); gives[k] = gives[k] || { u: 0, v: 0 }; gives[k].u += num(r.total_units); gives[k].v += num(r.total_revenue); });
+    (prods || []).forEach(p => {
+      const units = num(van[String(p.id)]);
+      const g = gives[String(p.id)];
+      const sp = g && g.u > 0 ? g.v / g.u : num(p.selling_price);
+      const cs = num(p.case_size) || 1;
+      returnItems.push({
+        productId: String(p.id), productName: p.name || '', sku: p.sku || '', totalUnits: units,
+        cases: Math.floor(units / cs), pcs: +(units - Math.floor(units / cs) * cs).toFixed(4),
+        sellingPrice: sp, purchasePrice: num(p.purchase_price), value: _r2(units * sp)
+      });
+    });
+  }
+  const returnValue = _r2(returnItems.reduce((a, i) => a + i.value, 0));
+
+  const lifetimeDue = _r2(
+    (allTxForDue || []).filter(r => r.type === 'give').reduce((a, r) => a + num(r.total_revenue), 0)
+    - (allTxForDue || []).filter(r => r.type === 'return').reduce((a, r) => a + num(r.total_revenue), 0)
+    - (allPay || []).reduce((a, r) => a + num(r.amount), 0)
+  );
+
+  const pendingCash = Math.max(0, cashExpectedRaw);
+  const hasPending = returnItems.length > 0 || pend.commission > 0 || pend.discount > 0 || pend.damage > 0 || Math.abs(cashExpectedRaw) > 0.005;
+  return {
+    dsrId, dsrName: (dsrRow && dsrRow.data && dsrRow.data.name) || '', date,
+    summary: { givenToday: _r2(givenToday), returnedToday: _r2(returnedToday), soldValue: _r2(soldValue), cashAtSale: _r2(cashAtSale), creditToday: _r2(creditToday) },
+    dueCollected: _r2(dueCollected),
+    dueCollections: (dueColsToday || []).map(r => ({ shopName: r.shop_name || '', amount: num(r.amount) })),
+    damage: {
+      total: _r2(damageTotal), vanDamage: _r2(vanDamageTx), moneyRefunded: _r2(damageMoney), exchanged: _r2(damageExchange),
+      lines: (dmgCols || []).map(r => ({
+        shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units), damagedValue: num(r.damaged_value),
+        resolution: r.resolution, refundAmt: num(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exchValue: num(r.exch_value)
+      }))
+    },
+    returnItems, returnValue,
+    pending: { commission: pend.commission, discount: pend.discount, damage: pend.damage, cashExpected: pendingCash, cashExpectedRaw },
+    ownPocketShortfall: cashExpectedRaw < -0.005 ? _r2(-cashExpectedRaw) : 0,
+    alreadySettledTimes: (settled || []).length,
+    alreadySettledCash: _r2(done.cash),
+    hasPending, lifetimeDue
+  };
+}
+
+async function _performSettlement(d, byName) {
+  const dsrId = String(d.dsrId || '');
+  const token = String(d.token || '').trim();
+  const date = (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday();
+  if (!dsrId) return { ok: false, error: 'DSR বাছাই করুন' };
+  if (token.length < 8) return { ok: false, error: 'অনুরোধ যাচাই করা যায়নি — পেজ রিফ্রেশ করে আবার হিসাব দেখুন' };
+
+  // Fast duplicate guard (double tap / retry) before any calculation.
+  const dupe = await supabase.from('dsr_settlements').select('id').eq('token', token).maybeSingle();
+  if (dupe.data) return { ok: false, duplicate: true, error: 'এই হিসাব আগেই সংরক্ষিত হয়েছে — দ্বিতীয়বার চাপলে হিসাব দ্বিগুণ হয় না।' };
+
+  const c = await _computeSettlement(dsrId, date);
+  const ap = d.apply || {};
+  const doReturn = ap.return !== false && c.returnItems.length > 0;
+  const comm = ap.commission !== false ? c.pending.commission : 0;
+  const disc = ap.discount   !== false ? c.pending.discount   : 0;
+  const dmg  = ap.damage     !== false ? c.pending.damage     : 0;
+  const cashRecv = Math.max(0, _r2(d.cashReceived === undefined || d.cashReceived === '' ? c.pending.cashExpected : d.cashReceived));
+
+  if (!c.hasPending) return { ok: false, duplicate: true, error: 'নতুন কোনো হিসাব বাকি নেই — আগের হিসাব ইতিমধ্যে সংরক্ষিত আছে।' };
+  if (!doReturn && comm + disc + dmg + cashRecv <= 0 && Math.abs(c.pending.cashExpectedRaw) <= 0.005)
+    return { ok: false, error: 'কিছুই বাছাই করা হয়নি' };
+
+  const returnAmt = doReturn ? c.returnValue : 0;
+  const payTotal = _r2(cashRecv + comm + disc + dmg);
+  const ts = now_();
+
+  // 1) Claim — UNIQUE(token) makes a concurrent second press fail right here.
+  const { error: claimErr } = await supabase.from('dsr_settlements').insert({
+    token, dsr_id: dsrId, dsr_name: c.dsrName || d.dsrName || '', date,
+    comm_amt: comm, disc_amt: disc, dmg_amt: dmg, return_amt: returnAmt,
+    cash_expected: c.pending.cashExpectedRaw, cash_received: cashRecv,
+    note: String(d.note || '').slice(0, 200), created_by: byName || '', created_at: ts
+  });
+  if (claimErr) {
+    if (String(claimErr.code) === '23505' || /duplicate|unique/i.test(String(claimErr.message)))
+      return { ok: false, duplicate: true, error: 'এই হিসাব আগেই সংরক্ষিত হয়েছে — দ্বিতীয়বার চাপলে হিসাব দ্বিগুণ হয় না।' };
+    throw claimErr;
+  }
+  const release = async () => { try { await supabase.from('dsr_settlements').delete().eq('token', token); } catch (_) {} };
+
+  // 2) Payment (cash + commission + discount + damage).
+  let payId = null;
+  try {
+    if (payTotal > 0) {
+      payId = randomUUID();
+      const { error: payErr } = await supabase.from('sr_payments').insert({
+        id: payId, sr_id: dsrId, sr_name: c.dsrName || '', date, amount: payTotal,
+        cash_amount: cashRecv, commission_amt: comm, discount_amt: disc, damage_amt: dmg,
+        note: ('দিনশেষ হিসাব' + (d.note ? ' — ' + String(d.note).slice(0, 100) : '')), created_at: ts
+      });
+      if (payErr) throw payErr;
+    }
+    // 3) Unsold van stock → 'return' rows (same as the ফেরত entry; DB
+    //    trigger puts the stock back in the warehouse, due drops by value).
+    if (doReturn) {
+      const txId = randomUUID();
+      const rows = c.returnItems.map(i => ({
+        tx_id: txId, type: 'return', sr_id: dsrId, sr_name: c.dsrName || '', date, slip_no: '',
+        product_id: i.productId, product_name: i.productName, sku: i.sku,
+        cases: i.cases, pcs: i.pcs, total_units: i.totalUnits,
+        purchase_price: i.purchasePrice, selling_price: i.sellingPrice,
+        total_cost: i.totalUnits * i.purchasePrice, total_revenue: i.totalUnits * i.sellingPrice,
+        note: 'দিনশেষ হিসাব — অবিক্রিত মাল ফেরত', created_at: ts
+      }));
+      const { error: retErr } = await supabase.from('transactions').insert(rows);
+      if (retErr) throw retErr;
+    }
+  } catch (e) {
+    if (payId) { try { await supabase.from('sr_payments').delete().eq('id', payId); } catch (_) {} }
+    await release();
+    throw e;
+  }
+
+  const c2 = await _computeSettlement(dsrId, date);
+  return {
+    ok: true,
+    applied: { cash: cashRecv, commission: comm, discount: disc, damage: dmg, returnValue: returnAmt, returnLines: doReturn ? c.returnItems.length : 0, paymentTotal: payTotal },
+    cashShort: Math.max(0, _r2(c.pending.cashExpected - cashRecv)),
+    lifetimeDue: c2.lifetimeDue
+  };
 }
