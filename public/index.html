@@ -990,7 +990,7 @@ async function _submitForcedPwSetup(r, tempPin, modal) {
 var MENU_ITEMS = [
   { id:'dash',          ic:'🏠', lb:'হোম' },
   { id:'prod',          ic:'📦', lb:'পণ্য' },
-  { id:'settle',        ic:'🧮', lb:'বাকি পেমেন্ট' },
+  { id:'settle',        ic:'🧮', lb:'দিনশেষ হিসাব' },
   { id:'sr',            ic:'🧑\u200d🤝\u200d🧑', lb:'DSR/SO' },
   { id:'tx',            ic:'🧾', lb:'লেনদেন' },
   { id:'pwmgr',         ic:'🔐', lb:'পাসওয়ার্ড ম্যানেজার' },
@@ -1050,7 +1050,7 @@ function applyRole() {
 // wiring above — no tab, id, or permission logic changes here.
 var MENU_GROUPS = [
   { lb: '',                        ids: ['dash'] },
-  { lb: 'বাকি পেমেন্ট',             ids: ['settle'] },
+  { lb: 'দিনশেষ হিসাব',             ids: ['settle'] },
   { lb: 'পণ্য ও বিক্রয়',           ids: ['prod', 'tx', 'target', 'orders'] },
   { lb: 'টিম ও উপস্থিতি',          ids: ['sr', 'attendance', 'chat', 'ownerapproval'] },
   { lb: 'দোকান ও এলাকা',           ids: ['shopsmap', 'cal'] },
@@ -1069,7 +1069,7 @@ var MENU_GROUPS = [
 // ════════════════════════════════════════════════════
 var TOPNAV_GROUPS = [
   { id:'g-dash',  ic:'📊', lb:'ড্যাশবোর্ড ওভারভিউ',      ids:['dash'] },
-  { id:'g-settle',ic:'🧮', lb:'বাকি পেমেন্ট',             ids:['settle'] },
+  { id:'g-settle',ic:'🧮', lb:'দিনশেষ হিসাব',             ids:['settle'] },
   { id:'g-audit', ic:'🥧', lb:'অডিট ও পাই গ্রাফ',         ids:['rep','sr','ownerapproval'] },
   { id:'g-cat',   ic:'📦', lb:'পণ্য ও স্টক ক্যাটালগ',      ids:['prod'] },
   { id:'g-tx',    ic:'🧾', lb:'চালান ও ডিজিটাল মেমো',      ids:['tx','orders'] },
@@ -6982,7 +6982,7 @@ async function delProd(id){
 function renderSR() {
   var canEdit = S.role==='owner';
   var el=document.getElementById('pg-sr');
-  // হিসাব/পেমেন্ট ও আদায় এখন আলাদা মেনু ("বাকি পেমেন্ট") — এখানে শুধু তালিকা, যোগ ও রোড।
+  // হিসাব/পেমেন্ট ও আদায় এখন আলাদা মেনু ("দিনশেষ হিসাব") — এখানে শুধু তালিকা, যোগ ও রোড।
   var okTabs = canEdit ? ['list','add','road'] : ['list'];
   if (okTabs.indexOf(S.srTab) < 0) S.srTab = 'list';
   var tabDefs = [{id:'list', lbl:'👥 তালিকা'}];
@@ -7002,12 +7002,12 @@ function renderSR() {
   }
 }
 // ════════════════════════════════════════════════════
-//  বাকি পেমেন্ট — Owner/Manager-এর নিজস্ব মেনু (দিনশেষে লাগে, তাই DSR/SO থেকে আলাদা)
+//  দিনশেষ হিসাব — Owner/Manager-এর নিজস্ব মেনু (দিনশেষে লাগে, তাই DSR/SO থেকে আলাদা)
 // ════════════════════════════════════════════════════
 function renderSettle() {
   var el = document.getElementById('pg-settle'); if (!el) return;
   if (S.settleTab !== 'pay' && S.settleTab !== 'coll') S.settleTab = 'pay';
-  var tabs = _navBoxBar([{id:'pay', lbl:'🧮 হিসাব/পেমেন্ট'}, {id:'coll', lbl:'📥 আদায়'}], S.settleTab, function(id){ return "S.settleTab='"+id+"';renderSettle()"; });
+  var tabs = _navBoxBar([{id:'pay', lbl:'🧮 হিসাব/পেমেন্ট'}, {id:'coll', lbl:'📥 বাকি পেমেন্ট'}], S.settleTab, function(id){ return "S.settleTab='"+id+"';renderSettle()"; });
   if (S.settleTab === 'coll') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadCollectionsTab(); }
   el.innerHTML = tabs + buildPayForm();
 }
@@ -10289,7 +10289,7 @@ new MutationObserver(function(){ if(busy)return; busy=true; try{conv(document.ge
 /* ── Regrouped navigation: each shortcut holds only related pages ── */
 window.MENU_GROUPS=[
  {lb:'',ids:['dash']},
- {lb:'বাকি পেমেন্ট',ids:['settle']},
+ {lb:'দিনশেষ হিসাব',ids:['settle']},
  {lb:'পণ্য ও বিক্রয়',ids:['prod','tx','orders','target']},
  {lb:'ডিএসআর / এসও',ids:['sr','ownerapproval']},
  {lb:'উপস্থিতি ও যোগাযোগ',ids:['attendance','chat','numbers']},
@@ -10298,7 +10298,7 @@ window.MENU_GROUPS=[
  {lb:'সিস্টেম',ids:['settings','pwmgr','notice','reset']}];
 window.TOPNAV_GROUPS=[
  {id:'g-dash',ic:'',lb:'হোম',ids:['dash']},
- {id:'g-settle',ic:'',lb:'বাকি পেমেন্ট',ids:['settle']},
+ {id:'g-settle',ic:'',lb:'দিনশেষ হিসাব',ids:['settle']},
  {id:'g-sales',ic:'',lb:'পণ্য ও লেনদেন',ids:['prod','tx','orders','target']},
  {id:'g-team',ic:'',lb:'ডিএসআর / এসও',ids:['sr','ownerapproval']},
  {id:'g-att',ic:'',lb:'উপস্থিতি',ids:['attendance','chat','numbers']},

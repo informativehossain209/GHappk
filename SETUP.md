@@ -82,6 +82,6 @@ Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-ca
   server refuses a shop without a road.
 
 ## 9. What's new in 4.8.1 — menu layout only (no SQL, no API change)
-- New main-menu item **🧮 বাকি পেমেন্ট** (Owner + Manager, right under the Home tab). It holds
-  **হিসাব/পেমেন্ট** (end-of-day settlement) and **আদায়** (what DSRs collected) as icon tiles.
+- New main-menu item **🧮 দিনশেষ হিসাব** (Owner + Manager, right under the Home tab). It holds
+  **হিসাব/পেমেন্ট** (end-of-day settlement) and **বাকি পেমেন্ট** (due & damage collected by DSRs) as icon tiles.
 - The **DSR/SO** page now has only icon tiles: 👥 তালিকা, ➕ যোগ করুন, 🛣️ রোড (add/delete/assign road stay here).
