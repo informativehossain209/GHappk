@@ -669,6 +669,44 @@ input,select,textarea{border-radius:14px!important}
 .smi-ic{width:38px!important;height:38px!important;border-radius:14px!important;background:rgba(255,255,255,.18)!important;color:#fff}
 .smi-ic .ai{width:20px;height:20px}
 .smi-danger{background:rgba(239,68,68,.28)!important;border-color:rgba(252,165,165,.5)!important}
+/* ═══ v4.1 — whitish frosted glass + colorful icons ═══ */
+.side-menu{background:linear-gradient(150deg,rgba(255,255,255,.78),rgba(244,247,249,.64))!important;-webkit-backdrop-filter:blur(34px) saturate(1.3);backdrop-filter:blur(34px) saturate(1.3)}
+.side-menu::before{background:#BFDBFE;opacity:.45}
+.side-menu::after{background:#FDE0C8;opacity:.45}
+body.dark .side-menu{background:linear-gradient(150deg,rgba(40,44,52,.72),rgba(18,20,26,.62))!important}
+.side-menu-hdr{color:#111827!important}
+.side-menu-hdr .sm-name{color:#111827}.side-menu-hdr .sm-role{color:#4B5563;opacity:1}
+.side-menu-close{background:rgba(255,255,255,.75)!important;border:1px solid rgba(255,255,255,.95)!important;color:#111827!important;box-shadow:0 6px 16px -8px rgba(0,0,0,.3)}
+.side-menu-grouphdr{color:#4B5563!important;font-weight:800;font-size:10.5px}
+.side-menu-sep{background:rgba(17,24,39,.10)}
+.smi{background:rgba(255,255,255,.58)!important;border:1px solid rgba(255,255,255,.95)!important;color:#111827!important;font-weight:700;font-size:11.5px!important;
+  box-shadow:0 12px 26px -16px rgba(30,41,59,.35),inset 0 1px 0 rgba(255,255,255,.9)}
+body.dark .smi{background:rgba(255,255,255,.10)!important;border-color:rgba(255,255,255,.22)!important;color:#F3F4F6!important}
+body.dark .side-menu-hdr,body.dark .side-menu-hdr .sm-name,body.dark .side-menu-grouphdr{color:#F3F4F6!important}
+body.dark .side-menu-hdr .sm-role{color:#CBD5E1}
+body.dark .side-menu-close{background:rgba(255,255,255,.14)!important;color:#fff!important}
+.smi.active{background:rgba(255,255,255,.92)!important;border:2px solid var(--ic1,#10B981)!important;box-shadow:0 12px 28px -12px var(--ic1,#10B981)}
+body.dark .smi.active{background:rgba(255,255,255,.2)!important}
+.smi-ic{width:46px!important;height:46px!important;border-radius:16px!important;color:#fff!important;
+  background:linear-gradient(135deg,var(--ic1,#10B981),var(--ic2,#047857))!important;box-shadow:0 8px 16px -6px var(--ic1,#10B981),inset 0 1px 0 rgba(255,255,255,.4)}
+.smi.active .smi-ic{background:linear-gradient(135deg,var(--ic1,#10B981),var(--ic2,#047857))!important}
+.smi-ic .ai{width:25px;height:25px}.smi-ic .ai svg{stroke-width:2.2}
+#smi-dash{--ic1:#10B981;--ic2:#059669}#smi-prod{--ic1:#F59E0B;--ic2:#D97706}#smi-tx{--ic1:#3B82F6;--ic2:#1D4ED8}
+#smi-orders{--ic1:#06B6D4;--ic2:#0E7490}#smi-target{--ic1:#EF4444;--ic2:#B91C1C}#smi-sr{--ic1:#8B5CF6;--ic2:#6D28D9}
+#smi-ownerapproval{--ic1:#22C55E;--ic2:#15803D}#smi-attendance{--ic1:#F43F5E;--ic2:#BE123C}#smi-chat{--ic1:#0EA5E9;--ic2:#0369A1}
+#smi-numbers{--ic1:#14B8A6;--ic2:#0F766E}#smi-shopsmap{--ic1:#F97316;--ic2:#C2410C}#smi-cal{--ic1:#EC4899;--ic2:#BE185D}
+#smi-rep{--ic1:#6366F1;--ic2:#4338CA}#smi-exp{--ic1:#EAB308;--ic2:#A16207}#smi-settings{--ic1:#64748B;--ic2:#334155}
+#smi-pwmgr{--ic1:#A855F7;--ic2:#7E22CE}#smi-notice{--ic1:#FB923C;--ic2:#EA580C}#smi-reset{--ic1:#F87171;--ic2:#DC2626}
+#smi-theme{--ic1:#475569;--ic2:#1E293B}#smi-logout{--ic1:#EF4444;--ic2:#B91C1C}
+.smi-danger{background:rgba(254,226,226,.75)!important;border-color:rgba(252,165,165,.9)!important;color:#B91C1C!important}
+/* colorful shortcut-bar icons too */
+.topnav-btn .ai{width:18px;height:18px;padding:4px;border-radius:8px;color:#fff;background:linear-gradient(135deg,#10B981,#059669);box-sizing:content-box}
+.topnav-btn.active .ai{background:rgba(255,255,255,.25)}
+.topnav-btn:nth-child(2) .ai{background:linear-gradient(135deg,#3B82F6,#1D4ED8)}.topnav-btn:nth-child(3) .ai{background:linear-gradient(135deg,#8B5CF6,#6D28D9)}
+.topnav-btn:nth-child(4) .ai{background:linear-gradient(135deg,#F43F5E,#BE123C)}.topnav-btn:nth-child(5) .ai{background:linear-gradient(135deg,#F97316,#C2410C)}
+.topnav-btn:nth-child(6) .ai{background:linear-gradient(135deg,#6366F1,#4338CA)}.topnav-btn:nth-child(7) .ai{background:linear-gradient(135deg,#64748B,#334155)}
+.topnav-btn.active .ai{background:rgba(255,255,255,.28)!important}
+.hdr2-section .ai{color:var(--bl)}
 </style>
 
 </head>
