@@ -1,9 +1,11 @@
 # AXIION DMS — Setup
 
 ## 1. Supabase — database
-Create a project, open the SQL editor, and run `schema.sql` once.
+Create a project, open the SQL editor, and run `schema.sql` once. It is the complete schema for a fresh deployment: all tables, indexes, functions, triggers, security policies, seed data and the photo bucket.
 
 ## 2. Supabase — Storage (product/staff photos)
+**Update (Glass Frosted Animation Beta 1):** `schema.sql` now creates the public `thumbs` bucket automatically. The manual steps below are only needed if that statement fails on your project.
+
 The app uploads product and staff profile photos to Supabase Storage, not
 the database. Create the bucket manually — `schema.sql` can't do this part:
 

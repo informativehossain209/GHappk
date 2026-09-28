@@ -771,3 +771,12 @@ CREATE INDEX idx_shop_visits_shop_date ON shop_visits(shop_id, visit_date);
 ALTER TABLE shop_visits ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "srv_shop_visits"       ON shop_visits FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "anon_deny_shop_visits" ON shop_visits FOR ALL TO anon          USING (false);
+
+
+-- ═════════════════════════════════════════════════════════════════
+-- Storage bucket for product / staff photos (public, name must be "thumbs")
+-- Created here so a brand-new deployment needs no manual dashboard step.
+-- ═════════════════════════════════════════════════════════════════
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('thumbs', 'thumbs', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
