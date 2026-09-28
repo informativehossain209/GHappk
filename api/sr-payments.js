@@ -1,4 +1,4 @@
-const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll } = require('./_lib/db');
+const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll, bdtToday } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -130,39 +130,48 @@ module.exports = async (req, res) => {
         .select('id').eq('so_id', String(d.soId)).eq('role', 'dsr').limit(1);
       if (pairedDsr && pairedDsr.length) autoDsrId = String(pairedDsr[0].id);
 
+      // v60 — SIMPLIFIED FLOW: an SO's order goes STRAIGHT to the paired
+      // DSR's van-load list (status 'approved' = ready to load). No
+      // manager/owner approval step. Stock only moves when the DSR
+      // presses OK after loading (van_load_complete). Owner/manager can
+      // still watch everything in the Orders monitor. Only if the SO has
+      // no paired DSR yet does the order wait ('pending') for someone to
+      // assign one.
+      const ts0 = now_();
       const { data, error } = await supabase.from('orders').insert({
         id: randomUUID(), so_id: String(d.soId), so_name: d.soName || '',
-        items, requested_amount: requestedAmount,
-        status: 'pending', assigned_dsr_id: autoDsrId, load_status: 'not_started', load_ticks: {},
-        created_at: now_()
+        items, original_items: items, requested_amount: requestedAmount,
+        status: autoDsrId ? 'approved' : 'pending',
+        assigned_dsr_id: autoDsrId, load_status: 'not_started', load_ticks: {},
+        approved_by: autoDsrId ? 'auto' : '', approved_at: autoDsrId ? ts0 : null,
+        created_at: ts0
       }).select().single();
       if (error) throw error;
-      return res.json({ ok: true, order: mapOrder(data) });
+      return res.json({ ok: true, order: mapOrder(data), autoAssigned: !!autoDsrId });
     }
 
-    // POST — Modify an order.
-    //  requestedBy = 'manager'|'owner': applies directly, no extra approval.
-    //  requestedBy = 'dsr': stored as a proposal, needs order_approve.
+    // POST — Modify an order's quantities (v60: no approval loop).
+    //  Applies immediately for everyone (manager / owner / the DSR who is
+    //  about to load it). The first time an order is edited, the original
+    //  quantities are kept in original_items so the owner can always see
+    //  "ordered X → loaded Y" in the Orders monitor.
     if (req.method === 'POST' && action === 'order_modify') {
       const d = req.body || {};
       if (!d.id || !Array.isArray(d.items)) return res.json({ ok: false, error: 'id ও items প্রয়োজন' });
+      const { data: cur, error: curErr } = await supabase.from('orders').select('status,load_status,items,original_items').eq('id', d.id).single();
+      if (curErr) throw curErr;
+      if (!cur) return res.json({ ok: false, error: 'অর্ডার পাওয়া যায়নি' });
+      if (cur.load_status === 'loaded' || cur.status === 'rejected')
+        return res.json({ ok: false, error: 'এই অর্ডার আর পরিবর্তন করা যাবে না' });
       const modifiedAmount = d.items.reduce((s, it) => s + num(it.totalUnits) * num(it.sellingPrice), 0);
-
-      if (d.requestedBy === 'manager' || d.requestedBy === 'owner') {
-        const { error } = await supabase.from('orders').update({
-          items: d.items, modified_by: d.requestedBy, modified_amount: modifiedAmount,
-          proposed_items: null
-        }).eq('id', d.id);
-        if (error) throw error;
-        return res.json({ ok: true, appliedDirectly: true });
-      }
-
-      // DSR-requested change — held as a proposal until Manager/Owner approves
+      const who = ['manager', 'owner', 'dsr'].includes(d.requestedBy) ? d.requestedBy : 'manager';
       const { error } = await supabase.from('orders').update({
-        status: 'modified_pending', proposed_items: d.items, modified_amount: modifiedAmount, modified_by: 'dsr'
+        items: d.items, modified_by: who, modified_amount: modifiedAmount, proposed_items: null,
+        original_items: cur.original_items || cur.items,
+        status: cur.status === 'modified_pending' ? 'pending' : cur.status
       }).eq('id', d.id);
       if (error) throw error;
-      return res.json({ ok: true, appliedDirectly: false });
+      return res.json({ ok: true, appliedDirectly: true });
     }
 
     // POST — Manager/Owner finalises an order (accepts any DSR proposal
@@ -185,7 +194,7 @@ module.exports = async (req, res) => {
 
       const finalItems = row.status === 'modified_pending' && row.proposed_items ? row.proposed_items : row.items;
       const { error } = await supabase.from('orders').update({
-        items: finalItems, proposed_items: null,
+        items: finalItems, proposed_items: null, original_items: row.original_items || row.items,
         status: 'approved', assigned_dsr_id: finalDsrId, load_status: 'not_started', load_ticks: {},
         approved_by: approvedBy || '', approved_at: now_()
       }).eq('id', id);
@@ -224,7 +233,7 @@ module.exports = async (req, res) => {
       const label = 'দেওয়া (' + who + (d.requestedByName ? ' — ' + d.requestedByName : '') + ')';
       const { data, error } = await supabase.from('orders').insert({
         id: randomUUID(), so_id: '', so_name: label,
-        items, requested_amount: requestedAmount,
+        items, original_items: items, requested_amount: requestedAmount,
         status: 'approved', assigned_dsr_id: String(d.dsrId), load_status: 'not_started', load_ticks: {},
         approved_by: d.requestedBy || 'owner', approved_at: now_(), created_at: now_()
       }).select().single();
@@ -290,17 +299,15 @@ module.exports = async (req, res) => {
     //  app, which all go through an approval gate before touching stock).
     // ══════════════════════════════════════════════════
 
-    // POST — DSR: single-button "load complete" — no per-item ticks needed
+    // POST — DSR presses OK after loading the van (v60).
+    // THIS is the moment stock leaves the warehouse: the `give`
+    // transactions are written right here (DB trigger deducts stock).
+    // No manager/owner confirmation any more.
     if (req.method === 'POST' && action === 'van_load_complete') {
       const { id } = req.body || {};
       if (!id) return res.json({ ok: false, error: 'id প্রয়োজন' });
-      const { data: row, error: fetchErr } = await supabase.from('orders').select('status,load_status').eq('id', id).single();
-      if (fetchErr) throw fetchErr;
-      if (!row || row.status !== 'approved') return res.json({ ok: false, error: 'অর্ডার পাওয়া যায়নি' });
-      if (row.load_status === 'loaded') return res.json({ ok: false, error: 'এই লোড ইতিমধ্যে সম্পন্ন হয়ে গেছে' });
-      const { error } = await supabase.from('orders').update({ load_status: 'load_complete' }).eq('id', id);
-      if (error) throw error;
-      return res.json({ ok: true });
+      const r = await _loadAndDeduct(id, ['not_started', 'loading', 'load_complete']);
+      return res.json(r);
     }
 
     // GET — Manager/Owner: queue of DSR-completed loads awaiting confirmation
@@ -313,72 +320,13 @@ module.exports = async (req, res) => {
       return res.json({ ok: true, orders: (data || []).map(mapOrder) });
     }
 
-    // POST — Manager/Owner confirms a DSR-completed load → THIS is where
-    // the real `give` transactions get written and stock actually leaves
-    // the warehouse (identical write logic to the old van_load_finish).
-    if (req.method === 'POST' && action === 'van_load_confirm') {
+    // POST — legacy: loads the old flow had left waiting for confirmation.
+    // Kept so any order already in 'load_complete' can still be finished.
+    if (req.method === 'POST' && (action === 'van_load_confirm' || action === 'van_load_finish')) {
       const { id } = req.body || {};
       if (!id) return res.json({ ok: false, error: 'id প্রয়োজন' });
-      const { data: row, error: fetchErr } = await supabase.from('orders').select('*').eq('id', id).single();
-      if (fetchErr) throw fetchErr;
-      if (!row || row.status !== 'approved') return res.json({ ok: false, error: 'অর্ডার পাওয়া যায়নি' });
-      if (row.load_status !== 'load_complete')
-        return res.json({ ok: false, error: 'DSR এখনো লোড "সম্পন্ন" চিহ্নিত করেনি' });
-
-      const items = row.items || [];
-      const txId = randomUUID();
-      const date = new Date().toISOString().slice(0, 10);
-      const rows = items.map(item => {
-        const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
-        return {
-          tx_id: txId, type: 'give', sr_id: row.assigned_dsr_id, sr_name: '',
-          date, slip_no: '', product_id: String(item.productId || ''), product_name: String(item.productName || ''),
-          sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
-          total_units: u, purchase_price: pp, selling_price: sp,
-          total_cost: u * pp, total_revenue: u * sp,
-          note: 'ভ্যান-লোড অর্ডার #' + String(row.id).slice(0, 8), created_at: now_()
-        };
-      });
-      const { error: txErr } = await supabase.from('transactions').insert(rows);
-      if (txErr) throw txErr;
-
-      const { error } = await supabase.from('orders').update({ load_status: 'loaded' }).eq('id', id);
-      if (error) throw error;
-      return res.json({ ok: true });
-    }
-
-    // POST — legacy alias, kept so any older cached client still works:
-    // now simply requires load_status to already be 'load_complete'
-    // (set by van_load_complete) instead of requiring per-item ticks.
-    if (req.method === 'POST' && action === 'van_load_finish') {
-      const { id } = req.body || {};
-      if (!id) return res.json({ ok: false, error: 'id প্রয়োজন' });
-      const { data: row, error: fetchErr } = await supabase.from('orders').select('*').eq('id', id).single();
-      if (fetchErr) throw fetchErr;
-      if (!row || row.status !== 'approved') return res.json({ ok: false, error: 'অর্ডার পাওয়া যায়নি' });
-      if (row.load_status !== 'load_complete')
-        return res.json({ ok: false, error: 'সব পণ্য "সম্পন্ন" হিসেবে চিহ্নিত হয়নি' });
-
-      const items = row.items || [];
-      const txId = randomUUID();
-      const date = new Date().toISOString().slice(0, 10);
-      const rows = items.map(item => {
-        const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
-        return {
-          tx_id: txId, type: 'give', sr_id: row.assigned_dsr_id, sr_name: '',
-          date, slip_no: '', product_id: String(item.productId || ''), product_name: String(item.productName || ''),
-          sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
-          total_units: u, purchase_price: pp, selling_price: sp,
-          total_cost: u * pp, total_revenue: u * sp,
-          note: 'ভ্যান-লোড অর্ডার #' + String(row.id).slice(0, 8), created_at: now_()
-        };
-      });
-      const { error: txErr } = await supabase.from('transactions').insert(rows);
-      if (txErr) throw txErr;
-
-      const { error } = await supabase.from('orders').update({ load_status: 'loaded' }).eq('id', id);
-      if (error) throw error;
-      return res.json({ ok: true });
+      const r = await _loadAndDeduct(id, ['load_complete']);
+      return res.json(r);
     }
 
     // ══════════════════════════════════════════════════
@@ -683,4 +631,51 @@ async function _doApprove(row) {
       if (error) throw error;
     }
   }
+}
+
+// ── v60 — write the `give` rows for an order and mark it loaded ─────
+// Claims the order first with a conditional UPDATE so a double-tap or two
+// devices can never deduct stock twice; releases the claim if the insert fails.
+async function _loadAndDeduct(id, allowedLoadStatuses) {
+  const { data: row, error: fetchErr } = await supabase.from('orders').select('*').eq('id', id).single();
+  if (fetchErr) throw fetchErr;
+  if (!row || row.status !== 'approved') return { ok: false, error: 'অর্ডার পাওয়া যায়নি' };
+  if (row.load_status === 'loaded') return { ok: false, error: 'এই লোড ইতিমধ্যে সম্পন্ন হয়ে গেছে' };
+  if (!allowedLoadStatuses.includes(row.load_status)) return { ok: false, error: 'এই লোড এখন সম্পন্ন করা যাবে না' };
+  const items = (row.items || []).filter(it => num(it.totalUnits) > 0);
+  if (!items.length) return { ok: false, error: 'অর্ডারে কোনো পণ্য নেই' };
+
+  const prevStatus = row.load_status;
+  const loadedAt = now_();
+  const { data: claimed, error: claimErr } = await supabase.from('orders')
+    .update({ load_status: 'loaded', loaded_at: loadedAt })
+    .eq('id', id).eq('status', 'approved').eq('load_status', prevStatus).select('id');
+  if (claimErr) throw claimErr;
+  if (!claimed || !claimed.length) return { ok: false, error: 'এই লোড ইতিমধ্যে সম্পন্ন হয়েছে' };
+
+  let dsrName = '';
+  try {
+    const { data: sr } = await supabase.from('srs').select('name').eq('id', row.assigned_dsr_id).maybeSingle();
+    dsrName = (sr && sr.name) || '';
+  } catch (_) {}
+
+  const txId = randomUUID();
+  const date = bdtToday(); // Asia/Dhaka calendar day
+  const rows = items.map(item => {
+    const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
+    return {
+      tx_id: txId, type: 'give', sr_id: row.assigned_dsr_id, sr_name: dsrName,
+      date, slip_no: '', product_id: String(item.productId || ''), product_name: String(item.productName || ''),
+      sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
+      total_units: u, purchase_price: pp, selling_price: sp,
+      total_cost: u * pp, total_revenue: u * sp,
+      note: 'ভ্যান-লোড অর্ডার #' + String(row.id).slice(0, 8), created_at: loadedAt
+    };
+  });
+  const { error: txErr } = await supabase.from('transactions').insert(rows);
+  if (txErr) {
+    await supabase.from('orders').update({ load_status: prevStatus, loaded_at: null }).eq('id', id);
+    throw txErr;
+  }
+  return { ok: true, txId };
 }

@@ -1593,9 +1593,11 @@ async function loadOwnerApprovals() {
   el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div>';
   var reqs = await Promise.all([
     apiGet('/api/sr-payments?action=approvals'),
-    apiGet('/api/attendance?action=advance-list')
+    apiGet('/api/attendance?action=advance-list'),
+    apiGet('/api/sr-payments?action=orders_list')
   ]);
   var r = reqs[0], advR = reqs[1];
+  window._oaOrders = (reqs[2] && reqs[2].ok) ? (reqs[2].orders||[]).filter(function(o){return o.status!=='rejected';}) : [];
   if (!r || !r.ok) { el.innerHTML = '<div style="padding:16px;color:var(--re)">লোড ব্যর্থ</div>'; return; }
   _oaData = r.approvals || [];
   _advData = (advR && advR.ok) ? (advR.requests || []) : [];
@@ -1668,6 +1670,13 @@ function renderOwnerApprovals() {
   h += _advOwnerHtml();
   h += '<div style="height:6px"></div>';
 
+  // v60 — orders & stock given to DSRs: view-only, no approval needed
+  var _mon = (window._oaOrders||[]).slice(0, 15);
+  h += '<div class="ct" style="font-size:12px">📋 অর্ডার ও সরবরাহ <span style="font-weight:400;color:var(--mt2)">(শুধু দেখার জন্য — অনুমোদন লাগে না)</span></div>';
+  if (!_mon.length) h += '<div class="card" style="text-align:center;padding:16px;color:var(--mt2);font-size:12px">কোনো অর্ডার নেই</div>';
+  _mon.forEach(function(o){ h += _orderMonitorCard(o); });
+  h += '<div style="height:6px"></div>';
+
   // Pending count banner
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
   h += '<div style="font-weight:700;font-size:13px">⏳ পেন্ডিং: <span style="color:var(--am)">'+pending.length+'টি</span></div>';
@@ -1729,7 +1738,7 @@ function renderOwnerApprovals() {
 }
 
 function oaTypeLabel(inputType, d) {
-  var txMap = {give:'স্টক সরবরাহ',return:'ফেরত',damage:'ড্যামেজ',buy:'কেনা',point_sale:'পয়েন্ট সেল',point_damage_return:'পয়েন্ট ফেরত',dsr_sale:'দোকানে বিক্রয় (DSR)'};
+  var txMap = {give:'স্টক সরবরাহ',return:'ফেরত',damage:'ড্যামেজ',buy:'কেনা',return_company:'কোম্পানিতে ফেরত',point_sale:'পয়েন্ট সেল',point_damage_return:'পয়েন্ট ফেরত',dsr_sale:'দোকানে বিক্রয় (DSR)'};
   if (inputType==='transaction') return txMap[d.type]||d.type||'লেনদেন';
   if (inputType==='payment') return 'পেমেন্ট';
   if (inputType==='expense') return 'খরচ';
@@ -1896,7 +1905,7 @@ async function saveApprovalEdit() {
       var p = S.products.find(function(x){ return x.id === it.productId; });
       var caseSize = p ? (num(p.caseSize)||1) : 1;
       it.cases = cs; it.pcs = pc; it.totalUnits = cs*caseSize + pc;
-      if (d.type === 'buy' || d.type === 'damage') it.purchasePrice = pr; else it.sellingPrice = pr;
+      if (d.type === 'buy' || d.type === 'return_company' || d.type === 'damage') it.purchasePrice = pr; else it.sellingPrice = pr;
     });
     d.note = v('oae-note');
   } else if (a.inputType === 'payment') {
@@ -3402,6 +3411,108 @@ function svgGauge(pct, color, size) {
 }
 
 
+// ══════════════════════════════════════════════════════
+//  v60 — DSR / SO performance tracker (home screen)
+//  Two tabs. Tap a person → pie charts: (1) how much of his target he
+//  completed, (2) his share compared with the others in the same role.
+// ══════════════════════════════════════════════════════
+var _srPerfData = null;
+function _srPerfShell() {
+  var tab = S.srPerfTab || 'dsr';
+  return '<div class="seg" style="margin:8px 0">'
+    + '<button class="sbt '+(tab==='dsr'?'active':'')+'" onclick="srPerfTab(\'dsr\')">🚚 DSR</button>'
+    + '<button class="sbt '+(tab==='so'?'active':'')+'" onclick="srPerfTab(\'so\')">📊 SO</button></div>'
+    + '<div id="srperf-box">'+_srPerfListHtml()+'</div>';
+}
+function _srPerfListHtml() {
+  if (!_srPerfData) return '<div style="text-align:center;padding:18px;color:var(--mt2)">লোড হচ্ছে...</div>';
+  var tab = S.srPerfTab || 'dsr';
+  var rows = _srPerfData[tab] || [];
+  if (!rows.length) return '<div class="card" style="text-align:center;color:var(--mt2);padding:18px">কোনো '+(tab==='so'?'SO':'DSR')+' নেই</div>';
+  var h = '<div style="font-size:10px;color:var(--mt2);margin:0 2px 6px">'+(tab==='dsr'?'DSR-এর টার্গেট = তার SO-এর টার্গেটের ভাগ · ':'')+'নাম ট্যাপ করলে পাই চার্ট দেখা যাবে</div>';
+  h += '<div class="card" style="padding:0;overflow:hidden">';
+  rows.forEach(function(x, i) {
+    var pct = x.pct == null ? null : Math.min(100, x.pct);
+    var col = _CHART_COLORS[i % _CHART_COLORS.length];
+    var ti = thumbImg(x, '50%'), letter = esc((x.name||'?').charAt(0));
+    h += '<div class="dr" style="cursor:pointer" onclick="openSrPerfDetail(\''+esc(x.srId)+'\')">'
+      + '<div style="display:flex;align-items:center;gap:9px;min-width:0;flex:1">'
+      + '<div style="font-weight:800;color:var(--mt2);width:22px;text-align:center">'+(x.rank<=3?['🥇','🥈','🥉'][x.rank-1]:'#'+x.rank)+'</div>'
+      + '<div class="sr-av" style="width:38px;height:38px;font-size:15px">'+(ti||letter)+'</div>'
+      + '<div style="min-width:0;flex:1"><div style="font-weight:700;font-size:13px">'+esc(x.name)+'</div>'
+      + (pct==null ? '<div style="font-size:10px;color:var(--mt2)">টার্গেট সেট নেই</div>'
+                   : '<div class="pay-prog-bar" style="margin-top:4px"><div class="pay-prog-fill" style="width:'+pct+'%;background:'+col+'"></div></div>')
+      + '</div></div>'
+      + '<div style="text-align:right;margin-left:8px"><div style="font-size:14px;font-weight:700">৳'+fm(x.achieved)+'</div>'
+      + '<div style="font-size:10px;color:var(--mt2)">'+(x.pct==null?'—':x.pct+'% ▶')+'</div></div></div>';
+  });
+  return h + '</div>';
+}
+function srPerfTab(role) {
+  S.srPerfTab = role;
+  var bd = document.querySelector('#acc-srperf .acc-bd');
+  if (bd) bd.innerHTML = _srPerfShell();
+}
+function loadSrPerf() {
+  if (!document.getElementById('acc-srperf')) return;
+  apiGet('/api/dashboard?action=sr-perf').then(function(r) {
+    if (!r || !r.ok) return;
+    _srPerfData = r;
+    var bd = document.querySelector('#acc-srperf .acc-bd');
+    if (bd) bd.innerHTML = _srPerfShell();
+  });
+}
+function openSrPerfDetail(srId) {
+  if (!_srPerfData) return;
+  var all = (_srPerfData.dsr||[]).concat(_srPerfData.so||[]);
+  var x = all.find(function(p){ return String(p.srId)===String(srId); });
+  if (!x) return;
+  var peers = (_srPerfData[x.role]||[]);
+  var roleLb = x.role==='so' ? 'SO' : 'DSR';
+  var h = '<div class="due-modal-title">'+(x.role==='so'?'📊 ':'🚚 ')+esc(x.name)
+    + '<div style="font-size:11px;color:var(--mt);font-weight:400;margin-top:2px">'+roleLb+' পারফরম্যান্স · '+esc(_srPerfData.period||'')+'</div></div>';
+  h += '<div class="g2" style="margin-bottom:10px">'
+    + '<div class="met met-b"><div class="mv" style="font-size:16px">৳'+fm(x.achieved)+'</div><div class="ml" style="margin-top:5px">এ পর্যন্ত বিক্রি</div></div>'
+    + '<div class="met"><div class="mv" style="font-size:16px">'+(x.target>0?'৳'+fm(x.target):'—')+'</div><div class="ml" style="margin-top:5px">'+(x.role==='dsr'?'টার্গেট (SO-এর ভাগ)':'টার্গেট')+'</div></div></div>';
+
+  // Pie 1 — completed vs remaining of his own target
+  h += '<div class="ct" style="font-size:12px">🎯 টার্গেটের কতটা সম্পন্ন</div>';
+  if (x.target > 0) {
+    var done = Math.max(0, x.achieved), left = Math.max(0, x.target - x.achieved);
+    h += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">'
+      + svgDonut([{label:'সম্পন্ন',value:done,valueText:'৳'+fm(done)},{label:'বাকি',value:left,valueText:'৳'+fm(left)}], Math.round(x.pct)+'%', x.pct>=100?'লক্ষ্য পূরণ ✓':'সম্পন্ন')
+      + '</div>';
+  } else {
+    h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px;margin-bottom:10px;font-size:12px">'
+      + (x.role==='dsr' ? 'এই DSR-এর SO-এর টার্গেট সেট করা নেই' : 'এই SO-এর টার্গেট সেট করা নেই')+' — টার্গেট মেনু থেকে সেট করুন</div>';
+  }
+
+  // Pie 2 — comparison against the others in the same role
+  var pos = peers.filter(function(p){ return p.achieved > 0; });
+  h += '<div class="ct" style="font-size:12px">⚖️ অন্য '+roleLb+'-দের সাথে তুলনা</div>';
+  if (pos.length) {
+    var top = pos.slice(0, 5), rest = pos.slice(5);
+    var items = top.map(function(p){ return {label:(p.srId===x.srId?'⭐ ':'')+p.name, value:p.achieved, valueText:'৳'+fm(p.achieved)}; });
+    if (rest.length) { var rs = rest.reduce(function(a,p){return a+p.achieved;},0); items.push({label:'অন্যান্য ('+rest.length+' জন)', value:rs, valueText:'৳'+fm(rs)}); }
+    if (!top.some(function(p){return p.srId===x.srId;}) && x.achieved > 0) items.push({label:'⭐ '+x.name, value:x.achieved, valueText:'৳'+fm(x.achieved)});
+    h += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:6px">'+svgDonut(items, '#'+x.rank, peers.length+' জনের মধ্যে')+'</div>';
+    h += '<div style="font-size:11px;color:var(--mt);text-align:center;margin-bottom:8px">সব '+roleLb+'-এর মোট বিক্রির <b>'+x.share+'%</b> এই ব্যক্তির</div>';
+  } else {
+    h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px;margin-bottom:10px;font-size:12px">এই সাইকেলে এখনো কোনো বিক্রি নেই</div>';
+  }
+  var dT = _srPerfData.totals ? _srPerfData.totals : {dsr:0,so:0};
+  h += '<div style="background:var(--bll);border-radius:10px;padding:8px 12px;font-size:11px;display:flex;justify-content:space-between;margin-bottom:10px">'
+    + '<span>🚚 সব DSR: <b>৳'+fm(dT.dsr)+'</b></span><span>📊 সব SO: <b>৳'+fm(dT.so)+'</b></span></div>';
+  h += '<button class="btn btn-gh btn-w" onclick="document.body.removeChild(document.getElementById(\'sr-perf-modal\'))">বন্ধ করুন</button>';
+  var old = document.getElementById('sr-perf-modal'); if (old) document.body.removeChild(old);
+  var modal = document.createElement('div');
+  modal.id = 'sr-perf-modal'; modal.className = 'due-modal-bg';
+  modal.onclick = function(e){ if (e.target===modal) document.body.removeChild(modal); };
+  modal.innerHTML = '<div class="due-modal" style="max-height:88vh;overflow-y:auto">'+h+'</div>';
+  document.body.appendChild(modal);
+}
+
+
 function _quickActionsHtml() {
   var perms = MENU_PERMS[S.role] || ['dash'];
   var qa=[['tx','🧾','চালান ও মেমো'],['prod','📦','স্টক ও ক্যাটালগ'],['rep','🥧','রিপোর্ট ও গ্রাফ'],['cal','🗓️','ডিউ ক্যালেন্ডার'],['target','🎯','সেলস টার্গেট'],['attendance','📍','উপস্থিতি']].filter(function(q){return perms.indexOf(q[0])>=0;});
@@ -3484,20 +3595,9 @@ function renderDash(d) {
     h+=_acc('lowstock','🔴','কম স্টক সতর্কতা','<span style="color:var(--am)">'+ls.length+' পণ্য</span>',lowBody,true);
   }
 
-  // ── SR পারফরম্যান্স — closed by default; bars animate in on open
+  // ── DSR/SO পারফরম্যান্স — v60: two tabs (DSR | SO); tap a person for the pie charts
   var srp=d.srPerformance||[];
-  if (srp.length) {
-    var srBody='<div class="card" style="padding:0;overflow:hidden;margin-top:8px"><div class="gauge-grid">';
-    var maxRev=srp[0].revenue||1;
-    srp.slice(0,6).forEach(function(sr,i){
-      var pct=Math.round((sr.revenue/maxRev)*100);
-      srBody+='<div class="gauge-item">'+svgGauge(pct,_CHART_COLORS[i%_CHART_COLORS.length])
-        +'<div class="gauge-lb">'+esc(sr.name)+'</div>'
-        +'<div style="font-size:10px;color:var(--mt2);font-family:var(--font-num);font-feature-settings:\'tnum\' 1">৳'+fm(sr.revenue)+'</div></div>';
-    });
-    srBody+='</div></div>';
-    h+=_acc('srperf','🏆','SR পারফরম্যান্স (এই মাস)','#1 '+esc(srp[0].name),srBody,false);
-  }
+  h+=_acc('srperf','🏆','DSR/SO পারফরম্যান্স (এই মাস)',srp.length?'#1 '+esc(srp[0].name):'',_srPerfShell(),false);
 
   // ── সম্পূর্ণ SKU র‍্যাংকিং — Today & This Month, ranked in cases (§47).
   // Both lists live inside one accordion now instead of two always-open
@@ -3558,6 +3658,7 @@ function renderDash(d) {
   h+='<div style="text-align:center;font-size:10px;color:var(--mt2);padding:8px">'+esc(S.shopName||'AXIION DMS')+' · Powered by <span style="color:#FBBF24;font-weight:700">AXIION DMS</span></div>';
   document.getElementById('pg-dash').innerHTML = h;
   setTimeout(_tickerStart, 50);
+  setTimeout(loadSrPerf, 60);
   _fillRadtWidget();
   // ── Hero card figures — "today" uses the already-cached dashboard
   //    payload; any other range uses the last sales-range fetch (see
@@ -4094,6 +4195,7 @@ function renderDsrTxTab(txs, fromDate, toDate) {
   h+='<div style="text-align:center;font-size:10px;color:var(--mt2);padding:8px">'+esc(S.shopName||'AXIION DMS')+' · Powered by <span style="color:#FBBF24;font-weight:700">AXIION DMS</span></div>';
   document.getElementById('pg-dash').innerHTML = h;
   setTimeout(_tickerStart, 50);
+  setTimeout(loadSrPerf, 60);
   _fillRadtWidget();
 }
 
@@ -5490,14 +5592,13 @@ async function splitTargetEven() {
 //               can also request a quantity change before loading starts
 // ════════════════════════════════════════════════════
 function _ordStatusBdg(o) {
-  if (o.status === 'pending')          return '<span class="bdg b-am">⏳ অপেক্ষমান</span>';
+  if (o.status === 'pending')          return '<span class="bdg b-am">⚠️ DSR নিযুক্ত হয়নি</span>';
   if (o.status === 'modified_pending')  return '<span class="bdg b-am">✏️ পরিবর্তন পর্যালোচনায়</span>';
   if (o.status === 'rejected')          return '<span class="bdg b-re">❌ বাতিল</span>';
   if (o.status === 'approved') {
-    if (o.loadStatus === 'loaded')        return '<span class="bdg b-gr">📦 লোড সম্পন্ন</span>';
-    if (o.loadStatus === 'load_complete') return '<span class="bdg b-am">✅ DSR সম্পন্ন করেছে — নিশ্চিতকরণ প্রয়োজন</span>';
-    if (o.loadStatus === 'loading')       return '<span class="bdg b-bl">🚚 লোড হচ্ছে</span>';
-    return '<span class="bdg b-bl">✅ অনুমোদিত — লোড শুরু হয়নি</span>';
+    if (o.loadStatus === 'loaded')        return '<span class="bdg b-gr">📦 লোড সম্পন্ন — স্টক কাটা হয়েছে</span>';
+    if (o.loadStatus === 'load_complete') return '<span class="bdg b-am">✅ DSR সম্পন্ন করেছে (পুরনো ধাপ) — নিশ্চিতকরণ বাকি</span>';
+    return '<span class="bdg b-bl">🚚 DSR-এর লোডের অপেক্ষায়</span>';
   }
   return '<span class="bdg b-am">'+esc(o.status)+'</span>';
 }
@@ -5620,7 +5721,7 @@ async function ordSubmit() {
   var r = await apiPost('/api/sr-payments', {action:'order_submit', soId:S.userId, soName:S.userName, items:items});
   hideOvl();
   if (!r||!r.ok) return toast(r&&r.error||'ব্যর্থ');
-  toast('✅ অর্ডার জমা হয়েছে — অনুমোদনের অপেক্ষায়');
+  toast(r.autoAssigned ? '✅ অর্ডার সরাসরি আপনার DSR-এর লোড তালিকায় পাঠানো হয়েছে' : '⚠️ অর্ডার জমা হয়েছে — কিন্তু আপনার সাথে কোনো DSR যুক্ত নেই, ম্যানেজার/মালিক DSR নিয়োগ করবেন');
   _renderOrderMemo(items); // Update #29 — auto-generated, downloadable/printable memo
   _ordItems=[]; S.ordSelProd={}; S.ordStep=1;
   S.ordTab='mine'; loadMySOOrders();
@@ -5689,42 +5790,76 @@ async function loadMySOOrders() {
 
 // ── Owner / Manager: order queue (review, edit, assign, approve) ───
 var _ordEditId = null, _ordEditItems = null, _ordEditDsr = '', _ordDsrOverride = null;
+function _fmtDT(ts) {
+  if (!ts) return '—';
+  var d = String(ts).slice(0,10);
+  return fmtBn(d) + ' ' + _fmtTimeBn(ts);
+}
+function _qtyTxt(it) {
+  return (num(it.cases)?fn(it.cases)+' কেস ':'') + (num(it.pcs)?fn(it.pcs)+' পিস':'') + (num(it.totalUnits)?' ('+fn(it.totalUnits)+' পিস)':'');
+}
+// v60 — read-only detail card: who ordered, what, how much, what was
+// actually loaded (and when stock left the warehouse).
+function _orderMonitorCard(o) {
+  var dsr = (S.srs||[]).find(function(d){ return d.id===o.assignedDsrId; });
+  var orderedItems = (o.originalItems && o.originalItems.length) ? o.originalItems : (o.items||[]);
+  var finalItems = o.items || [];
+  var loaded = o.loadStatus==='loaded';
+  var changed = JSON.stringify((orderedItems||[]).map(function(i){return [i.productId,num(i.totalUnits)];}))
+             !== JSON.stringify((finalItems||[]).map(function(i){return [i.productId,num(i.totalUnits)];}));
+  var who = o.soId ? ('📊 SO: '+esc(o.soName)) : ('📤 '+esc(o.soName||'সরাসরি সরবরাহ'));
+  var amt = function(items){ return (items||[]).reduce(function(a,i){return a+num(i.totalUnits)*num(i.sellingPrice);},0); };
+  var h = '<div class="card" style="margin-bottom:10px'+(loaded?'':';border-left:4px solid var(--bl)')+'">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+_ordStatusBdg(o)+'<span style="font-size:10px;color:var(--mt2)">#'+esc(String(o.id).slice(0,8))+'</span></div>';
+  h += '<div style="font-size:12px;font-weight:700">'+who+'</div>';
+  h += '<div style="font-size:12px;margin-top:2px"><b>DSR:</b> '+esc(dsr?dsr.name:'— নিযুক্ত হয়নি')+'</div>';
+  h += '<div style="font-size:10.5px;color:var(--mt2);margin:4px 0 6px">🕒 অর্ডার/সরবরাহ: '+_fmtDT(o.createdAt)+(loaded?' &nbsp;·&nbsp; 📦 লোড: '+_fmtDT(o.loadedAt||o.approvedAt):'')+'</div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)"><th style="padding:4px 6px;text-align:left">পণ্য</th><th style="padding:4px">অর্ডার</th>'+(loaded||changed?'<th style="padding:4px">'+(loaded?'লোড হয়েছে':'সংশোধিত')+'</th>':'')+'<th style="padding:4px;text-align:right">দাম</th></tr></thead><tbody>';
+  var idx = {}; (finalItems||[]).forEach(function(i){ idx[i.productId]=i; });
+  var seen = {};
+  orderedItems.forEach(function(it){
+    seen[it.productId]=1;
+    var f = idx[it.productId];
+    var diff = f && num(f.totalUnits)!==num(it.totalUnits);
+    h += '<tr style="border-bottom:1px solid #E6ECE8"><td style="padding:4px 6px;font-weight:600">'+esc(it.productName)+'</td><td style="text-align:center">'+_qtyTxt(it)+'</td>'
+      + (loaded||changed ? '<td style="text-align:center;'+(diff||!f?'color:var(--am);font-weight:700':'')+'">'+(f?_qtyTxt(f):'বাদ')+'</td>' : '')
+      + '<td style="text-align:right">৳'+fm(num(it.totalUnits)*num(it.sellingPrice))+'</td></tr>';
+  });
+  (finalItems||[]).forEach(function(f){ if (seen[f.productId]) return;
+    h += '<tr style="border-bottom:1px solid #E6ECE8"><td style="padding:4px 6px;font-weight:600">'+esc(f.productName)+' <span style="color:var(--am)">(নতুন)</span></td><td style="text-align:center">—</td><td style="text-align:center;color:var(--am);font-weight:700">'+_qtyTxt(f)+'</td><td style="text-align:right">৳'+fm(num(f.totalUnits)*num(f.sellingPrice))+'</td></tr>'; });
+  h += '</tbody></table>';
+  h += '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;font-weight:700"><span>অর্ডারের মূল্য: ৳'+fm(amt(orderedItems))+'</span>'+((loaded||changed)?'<span style="color:var(--bl)">'+(loaded?'লোডের মূল্য':'সংশোধিত')+': ৳'+fm(amt(finalItems))+'</span>':'')+'</div>';
+  if (changed && o.modifiedBy) h += '<div style="font-size:10px;color:var(--am);margin-top:3px">✏️ পরিমাণ বদলেছেন: '+({dsr:'DSR',manager:'ম্যানেজার',owner:'মালিক'}[o.modifiedBy]||esc(o.modifiedBy))+'</div>';
+  return h + '</div>';
+}
 async function renderOrdersMgr() {
-  if (!S.ordMgrTab) S.ordMgrTab = 'pending';
+  var validTabs = {all:1, wait:1, nodsr:1, done:1};
+  if (!validTabs[S.ordMgrTab]) S.ordMgrTab = 'all';
   var el = document.getElementById('pg-orders'); if (!el) return;
-  var h = '<div class="seg" style="margin-bottom:12px;flex-wrap:wrap">';
-  h += '<button class="sbt '+(S.ordMgrTab==='pending'?'active':'')+'" onclick="S.ordMgrTab=\'pending\';renderOrdersMgr()">🕐 পেন্ডিং</button>';
-  h += '<button class="sbt '+(S.ordMgrTab==='loading'?'active':'')+'" onclick="S.ordMgrTab=\'loading\';renderOrdersMgr()">🚚 লোডিং চলছে</button>';
-  h += '<button class="sbt '+(S.ordMgrTab==='confirm'?'active':'')+'" onclick="S.ordMgrTab=\'confirm\';renderOrdersMgr()">✅ নিশ্চিতকরণ প্রয়োজন</button>';
-  h += '<button class="sbt '+(S.ordMgrTab==='done'?'active':'')+'" onclick="S.ordMgrTab=\'done\';renderOrdersMgr()">📦 সম্পন্ন</button>';
+  var tabs = [['all','📋 সব'],['wait','🚚 লোডের অপেক্ষায়'],['nodsr','⚠️ DSR নেই'],['done','📦 লোড সম্পন্ন']];
+  var h = '<div class="ct">📋 অর্ডার ও সরবরাহ মনিটর</div>'
+    + '<div class="ib" style="margin-bottom:10px">SO-র অর্ডার বা মালিক/ম্যানেজারের সরবরাহ সরাসরি DSR-এর কাছে যায়। DSR গাড়িতে লোড করে "সম্পন্ন" চাপলেই স্টক থেকে কাটা হয়। এখানে সব কিছু শুধু দেখার জন্য।</div>'
+    + '<div class="seg" style="margin-bottom:12px;flex-wrap:wrap">';
+  tabs.forEach(function(t){ h += '<button class="sbt '+(S.ordMgrTab===t[0]?'active':'')+'" onclick="S.ordMgrTab=\''+t[0]+'\';renderOrdersMgr()">'+t[1]+'</button>'; });
   h += '</div><div id="ord-body">লোড হচ্ছে...</div>';
   el.innerHTML = h;
   var r = await apiGet('/api/sr-payments?action=orders_list');
   var body = document.getElementById('ord-body'); if (!body) return;
   if (!r||!r.ok) { body.innerHTML='<div class="card" style="text-align:center;color:var(--re);padding:16px">লোড ব্যর্থ</div>'; return; }
-  var all = r.orders||[];
+  var all = (r.orders||[]).filter(function(o){ return o.status!=='rejected'; });
   var dsrs = (S.srs||[]).filter(function(s){return s.role==='dsr';});
+  var list, empty;
+  if (S.ordMgrTab==='wait')      { list = all.filter(function(o){ return o.status==='approved' && o.loadStatus!=='loaded'; }); empty='লোডের অপেক্ষায় কোনো অর্ডার নেই'; }
+  else if (S.ordMgrTab==='nodsr'){ list = all.filter(function(o){ return o.status==='pending'||o.status==='modified_pending'; }); empty='সব অর্ডারে DSR নিযুক্ত আছে ✓'; }
+  else if (S.ordMgrTab==='done') { list = all.filter(function(o){ return o.loadStatus==='loaded'; }).slice(0,40); empty='এখনো কোনো লোড সম্পন্ন হয়নি'; }
+  else                           { list = all.slice(0,50); empty='কোনো অর্ডার নেই'; }
+  if (!list.length) { body.innerHTML='<div class="card" style="text-align:center;color:var(--mt2);padding:20px">'+empty+'</div>'; return; }
   var out='';
-  if (S.ordMgrTab==='pending') {
-    var pend = all.filter(function(o){ return o.status==='pending'||o.status==='modified_pending'; });
-    if (!pend.length) out='<div class="card" style="text-align:center;color:var(--mt2);padding:20px">কোনো পেন্ডিং অর্ডার নেই</div>';
-    pend.forEach(function(o){ out += _ordMgrPendingCard(o, dsrs); });
-  } else if (S.ordMgrTab==='loading') {
-    var ld = all.filter(function(o){ return o.status==='approved' && (o.loadStatus==='not_started'||o.loadStatus==='loading'); });
-    if (!ld.length) out='<div class="card" style="text-align:center;color:var(--mt2);padding:20px">লোডিং চলছে এমন কোনো অর্ডার নেই</div>';
-    ld.forEach(function(o){ out += _ordMgrReadCard(o, dsrs); });
-  } else if (S.ordMgrTab==='confirm') {
-    // Update #28 — orders the DSR has marked "সম্পন্ন" (single-button
-    // complete) but that haven't had their `give` transactions written
-    // / stock deducted yet — that only happens once confirmed here.
-    var conf = all.filter(function(o){ return o.status==='approved' && o.loadStatus==='load_complete'; });
-    if (!conf.length) out='<div class="card" style="text-align:center;color:var(--mt2);padding:20px">নিশ্চিতকরণের অপেক্ষায় কোনো লোড নেই</div>';
-    conf.forEach(function(o){ out += _ordMgrConfirmCard(o, dsrs); });
-  } else {
-    var done = all.filter(function(o){ return o.loadStatus==='loaded'; }).slice(0,30);
-    if (!done.length) out='<div class="card" style="text-align:center;color:var(--mt2);padding:20px">এখনো কোনো অর্ডার লোড সম্পন্ন হয়নি</div>';
-    done.forEach(function(o){ out += _ordMgrReadCard(o, dsrs); });
-  }
+  list.forEach(function(o){
+    if (o.status==='pending'||o.status==='modified_pending') out += _ordMgrPendingCard(o, dsrs);   // only to assign a DSR
+    else if (o.status==='approved' && o.loadStatus==='load_complete') out += _ordMgrConfirmCard(o, dsrs); // legacy leftovers
+    else out += _orderMonitorCard(o);
+  });
   body.innerHTML = out;
 }
 // Update #28 — read-only, color-coded item list + one single confirm
@@ -5812,7 +5947,7 @@ function _ordMgrPendingCard(o, dsrs) {
   h+='</div>';
   h+='<div style="display:flex;gap:8px;margin-top:8px">';
   if (editing) h+='<button class="btn btn-gh" style="flex:1" onclick="_ordEditId=null;_ordEditItems=null;renderOrdersMgr()">বাতিল</button>';
-  h+='<button class="btn btn-gr" style="flex:2" onclick="ordMgrApprove(\''+o.id+'\')">✅ অনুমোদন ও DSR নিয়োগ</button>';
+  h+='<button class="btn btn-gr" style="flex:2" onclick="ordMgrApprove(\''+o.id+'\')">✅ DSR নিয়োগ করুন</button>';
   h+='<button class="btn btn-re" style="flex:1" onclick="ordMgrReject(\''+o.id+'\')">❌ বাতিল</button>';
   h+='</div></div>';
   return h;
@@ -5907,7 +6042,7 @@ function _vanCard(o) {
   var editing = _vanEditId === o.id;
   var items = editing ? _vanEditItems : o.items;
   var h='<div class="card" style="margin-bottom:10px'+(editing?';border:2px solid var(--bl)':'')+'">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+_ordStatusBdg(o)+'<span style="font-size:10px;color:var(--mt2)">SO: '+esc(o.soName)+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+_ordStatusBdg(o)+'<span style="font-size:10px;color:var(--mt2)">'+(o.soId?'SO: ':'')+esc(o.soName)+'</span></div>';
 
   if (!editing) {
     o.items.forEach(function(it,i){
@@ -5918,7 +6053,7 @@ function _vanCard(o) {
       h+='</div>';
     });
     h+='<div style="display:flex;gap:8px;margin-top:6px">';
-    h+='<button class="btn btn-gh" style="flex:1" onclick="vanStartEdit(\''+o.id+'\')">✏️ পরিমাণ পরিবর্তনের অনুরোধ</button>';
+    h+='<button class="btn btn-gh" style="flex:1" onclick="vanStartEdit(\''+o.id+'\')">✏️ পরিমাণ সংশোধন</button>';
     h+='<button class="btn btn-gr" style="flex:1" onclick="vanComplete(\''+o.id+'\')">✅ সম্পন্ন</button>';
     h+='</div>';
   } else {
@@ -5930,19 +6065,19 @@ function _vanCard(o) {
     });
     h+='<div style="display:flex;gap:8px;margin-top:6px">';
     h+='<button class="btn btn-gh" style="flex:1" onclick="_vanEditId=null;_vanEditItems=null;_paintVanOrders(true)">বাতিল</button>';
-    h+='<button class="btn btn-am" style="flex:2" onclick="vanSubmitModify(\''+o.id+'\')">📨 পরিবর্তনের অনুরোধ পাঠান</button>';
+    h+='<button class="btn btn-am" style="flex:2" onclick="vanSubmitModify(\''+o.id+'\')">💾 সংশোধন সংরক্ষণ</button>';
     h+='</div>';
   }
   h+='</div>';
   return h;
 }
 async function vanComplete(id) {
-  if (!confirm('সব পণ্য গাড়িতে তোলা হয়ে গেছে? এরপর ম্যানেজার/মালিকের নিশ্চিতকরণের অপেক্ষায় থাকবে।')) return;
+  if (!confirm('সব পণ্য গাড়িতে তোলা হয়ে গেছে? OK চাপলে গুদামের স্টক থেকে সাথে সাথে কাটা হবে এবং পণ্যগুলো আপনার নামে যোগ হবে।')) return;
   showOvl('পাঠানো হচ্ছে...');
   var r = await apiPost('/api/sr-payments', {action:'van_load_complete', id:id});
   hideOvl();
   if (!r||!r.ok) return toast(r&&r.error||'ব্যর্থ');
-  toast('✅ লোড সম্পন্ন — ম্যানেজার/মালিকের নিশ্চিতকরণের অপেক্ষায়');
+  toast('✅ লোড সম্পন্ন — স্টক থেকে বিয়োগ হয়েছে'); _dashCache=null; S.stockMap={};
   renderOrdersDSR();
 }
 function vanStartEdit(id) {
@@ -5965,7 +6100,7 @@ async function vanSubmitModify(id) {
   var r = await apiPost('/api/sr-payments', {action:'order_modify', id:id, items:_vanEditItems, requestedBy:'dsr'});
   hideOvl();
   if (!r||!r.ok) return toast(r&&r.error||'ব্যর্থ');
-  toast('📨 পরিবর্তনের অনুরোধ ম্যানেজার/মালিকের কাছে পাঠানো হয়েছে');
+  toast('✅ পরিমাণ সংশোধন হয়েছে — মালিক আসল অর্ডার ও সংশোধিত পরিমাণ দুটোই দেখতে পাবেন');
   _vanEditId=null; _vanEditItems=null;
   renderOrdersDSR();
 }
@@ -6667,7 +6802,7 @@ function renderTx() {
   else if(t==='damage') body=buildDamageWiz();
   else if(t==='point_sale') body=buildPointSaleWiz();
   else if(t==='point_damage_return') body=buildPointDmgWiz();
-  else if(t==='buy') body=buildSimpleTx();
+  else if(t==='buy'||t==='return_company') body=buildSimpleTx();
   else body='<div class="card" style="text-align:center;padding:30px 14px;color:var(--mt)">'
     +'<div style="font-size:36px;margin-bottom:10px">👆</div>'
     +'<div style="font-weight:700;margin-bottom:4px;color:var(--txt)">উপরে থেকে একটি ধরন বাছাই করুন</div>'
@@ -6678,10 +6813,11 @@ function renderTx() {
     +'<button class="tb '+(t==='return'?'tr_':'')+'\" onclick="S.txType=\'return\';S.retStep=1;renderTx()">↩️ ফেরত<br><small>DSR/SO থেকে</small></button>'
     +'<button class="tb '+(t==='damage'?'td_':'')+'\" onclick="S.txType=\'damage\';S.dmgStep=1;renderTx()">⚠️ ড্যামেজ<br><small>দাবি</small></button>'
     +'<button class="tb '+(t==='buy'?'tb_':'')+'\" onclick="S.txType=\'buy\';renderTx()">🛒 কেনা<br><small>কোম্পানি</small></button>'
+    +'<button class="tb '+(t==='return_company'?'tr_':'')+'\" onclick="S.txType=\'return_company\';renderTx()">↩️ কোম্পানিতে ফেরত<br><small>স্টক কমবে</small></button>'
     +'<button class="tb '+(t==='point_sale'||t==='point_damage_return'?'tpu':'')+'\" onclick="S.txType=\'point_sale\';S.psStep=1;renderTx()">🏪 পয়েন্ট সেল<br><small>কাস্টমার</small></button>'
     +'</div>'
     +'<div id="tx-body">'+body+'</div>';
-  if (t==='buy') setTimeout(renderTxRows, 0);
+  if (t==='buy'||t==='return_company') setTimeout(renderTxRows, 0);
 }
 
 function stepBar(step) {
@@ -6797,12 +6933,12 @@ async function saveGive(){
   var recipient = (S.srs||[]).find(function(s){return s.id===S.giveSRId;});
   var isDsr = recipient && recipient.role === 'dsr';
 
-  if (isDsr && S.role === 'owner') {
+  if (isDsr && (S.role === 'owner' || S.role === 'manager')) {
     showOvl('ভ্যান-লোড তালিকায় পাঠানো হচ্ছে...');
-    var rD = await apiPost('/api/sr-payments', { action:'give_direct', dsrId:S.giveSRId, items:items, requestedBy:'owner', requestedByName:S.userName });
+    var rD = await apiPost('/api/sr-payments', { action:'give_direct', dsrId:S.giveSRId, items:items, requestedBy:S.role, requestedByName:S.userName });
     hideOvl();
     if (!rD||!rD.ok) return toast(rD&&rD.error||'ব্যর্থ');
-    toast('✅ '+S.giveSRName+' এর ভ্যান-লোড তালিকায় পাঠানো হয়েছে — টিক দিয়ে লোড শেষ করলে স্টক বিয়োগ হবে');
+    toast('✅ '+S.giveSRName+' এর ভ্যান-লোড তালিকায় পাঠানো হয়েছে — DSR লোড করে "সম্পন্ন" চাপলে স্টক বিয়োগ হবে');
     S.giveStep=1;S.giveSRId='';S.giveSRName='';S.giveArea='';S.giveSelProd={};S.giveItems=[];
     renderTx();
     return;
@@ -6827,15 +6963,15 @@ async function saveGive(){
 }
 
 function buildSimpleTx() {
-  // Only for 'buy' now
-  var info='<div class="gib">কোম্পানি থেকে পণ্য কিনলে রেকর্ড করুন। স্টক বাড়বে।</div>';
+  var rc = S.txType==='return_company';
+  var info = rc ? '<div class="gib" style="background:var(--tel);border-color:var(--te)">↩️ কোম্পানিকে পণ্য ফেরত দিলে রেকর্ড করুন। শুধু স্টক থেকে বিয়োগ হবে — বাকি, বিক্রি বা অন্য কোনো হিসাব বদলাবে না।</div>' : '<div class="gib">কোম্পানি থেকে পণ্য কিনলে রেকর্ড করুন। স্টক বাড়বে।</div>';
   return info+'<div class="card">'
     +'<div class="g2" style="margin-bottom:10px"><div><label class="fl">তারিখ</label><input type="date" id="tx-dt" value="'+iso(new Date())+'"></div><div><label class="fl">নোট</label><input id="tx-nt" placeholder="ঐচ্ছিক"></div></div>'
     +'<label class="fl" style="margin-bottom:7px">পণ্য তালিকা</label>'
     +'<div id="tx-rows"></div>'
     +'<button class="btn btn-gh btn-sm" onclick="addTxRow()" style="margin-bottom:10px">➕ পণ্য যোগ করুন</button>'
     +'<div id="tx-grand" style="background:var(--bll);border-radius:7px;padding:8px 11px;margin-bottom:10px;font-size:12px;font-weight:700;color:var(--bl)"></div>'
-    +'<button class="btn btn-w btn-gr" onclick="saveTx()">🛒 ক্রয় রেকর্ড করুন</button></div>';
+    +'<button class="btn btn-w btn-gr" onclick="saveTx()">'+(rc?'↩️ কোম্পানিতে ফেরত রেকর্ড করুন':'🛒 ক্রয় রেকর্ড করুন')+'</button></div>';
 }
 
 function renderTxRows() {
@@ -6859,7 +6995,7 @@ function renderTxRows() {
 }
 function calcTxSubStr(item,p){
   var cs=num(p.caseSize)||1,ca=num(item.cases)||0,pc=num(item.pcs)||0,u=ca*cs+pc;
-  var price=num(S.txType==='buy'||S.txType==='damage'?p.purchasePrice:p.sellingPrice);
+  var price=num(S.txType==='buy'||S.txType==='return_company'||S.txType==='damage'?p.purchasePrice:p.sellingPrice);
   return u+'পিস · ৳'+fm(u*price);
 }
 function updTxSub(i) {
@@ -6873,7 +7009,7 @@ function updTxGrand(){
   S.txItems.forEach(function(item){
     var p=S.products.find(function(pr){return pr.id===item.productId;}); if(!p)return;
     var cs=num(p.caseSize)||1,ca=num(item.cases)||0,pc=num(item.pcs)||0,u=ca*cs+pc;
-    var price=num(S.txType==='buy'||S.txType==='damage'?p.purchasePrice:p.sellingPrice);
+    var price=num(S.txType==='buy'||S.txType==='return_company'||S.txType==='damage'?p.purchasePrice:p.sellingPrice);
     gU+=u;gA+=u*price;
   });
   var gEl=document.getElementById('tx-grand');if(gEl)gEl.textContent='মোট: '+gU+' পিস · ৳'+fm(gA);
@@ -6886,6 +7022,12 @@ async function saveTx(){
   var valid=S.txItems.filter(function(i){return i.productId&&(num(i.cases)+num(i.pcs))>0;});
   if(!valid.length)return toast('পরিমাণ দিন');
   var items=valid.map(function(i){var p=S.products.find(function(pr){return pr.id===i.productId;});var cs=num(p.caseSize)||1,ca=num(i.cases)||0,pc=num(i.pcs)||0,u=ca*cs+pc;return{productId:p.id,productName:p.name,sku:p.sku,cases:ca,pcs:pc,totalUnits:u,purchasePrice:num(p.purchasePrice),sellingPrice:num(p.sellingPrice),unitType:p.unitType||'কেস'};});
+  if (t==='return_company') {
+    for (var q=0;q<items.length;q++) {
+      var have = num(S.stockMap[items[q].productId])||0;
+      if (items[q].totalUnits > have) return toast(items[q].productName+' — স্টকে আছে '+fn(have)+' পিস, ফেরত দিতে চাইছেন '+fn(items[q].totalUnits)+' পিস');
+    }
+  }
   var txPayload={type:t,srId:'',srName:'',date:v('tx-dt')||iso(new Date()),note:v('tx-nt'),items:items};
   showOvl('সংরক্ষণ হচ্ছে...');
   var r=await mgrPost('transaction','/api/transactions',txPayload);
@@ -6893,7 +7035,8 @@ async function saveTx(){
   if(!r.ok)return toast(r.error||'ব্যর্থ');
   if(r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');S.txItems=[{productId:'',cases:'',pcs:''}];renderTx();return;}
   _dashCache=null;
-  toast('🛒 ক্রয় রেকর্ড হয়েছে');
+  toast(t==='return_company' ? '↩️ কোম্পানিতে ফেরত রেকর্ড হয়েছে — স্টক কমানো হয়েছে' : '🛒 ক্রয় রেকর্ড হয়েছে');
+  items.forEach(function(i){ S.stockMap[i.productId]=(num(S.stockMap[i.productId])||0)+(t==='return_company'?-1:1)*i.totalUnits; });
   S.txItems=[{productId:'',cases:'',pcs:''}]; renderTx();
 }
 
@@ -8507,7 +8650,7 @@ function _letterheadHtml() {
 function iso(d){if(d instanceof Date){var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}return String(d).slice(0,10);}
 function fmtBn(d){if(!d)return'';try{var p=String(d).slice(0,10).split('-');if(p.length!==3)return String(d).slice(0,10);return p[2]+'/'+p[1]+'/'+p[0];}catch(e){return String(d).slice(0,10);}}
 function prodUnit(pid){var p=(S.products||[]).find(function(x){return x.id===pid;});return p?p.unitType||'কেস':'কেস';}
-function txBdg(t){var m={give:'<span class="bdg b-bl">দেওয়া</span>',return:'<span class="bdg b-te">ফেরত</span>',damage:'<span class="bdg b-re">ড্যামেজ</span>',buy:'<span class="bdg b-gr">কেনা</span>',point_sale:'<span class="bdg b-pu">পয়েন্ট সেল</span>',point_damage_return:'<span class="bdg b-re">পয়েন্ট ফেরত</span>',dsr_sale:'<span class="bdg b-am">দোকানে বিক্রয়</span>'};return m[t]||'<span class="bdg b-gy">'+t+'</span>';}
+function txBdg(t){var m={give:'<span class="bdg b-bl">দেওয়া</span>',return:'<span class="bdg b-te">ফেরত</span>',damage:'<span class="bdg b-re">ড্যামেজ</span>',buy:'<span class="bdg b-gr">কেনা</span>',return_company:'<span class="bdg b-te">কোম্পানিতে ফেরত</span>',point_sale:'<span class="bdg b-pu">পয়েন্ট সেল</span>',point_damage_return:'<span class="bdg b-re">পয়েন্ট ফেরত</span>',dsr_sale:'<span class="bdg b-am">দোকানে বিক্রয়</span>'};return m[t]||'<span class="bdg b-gy">'+t+'</span>';}
 var _ot;
 function showOvl(m){document.getElementById('ovl-m').textContent=m||'লোড হচ্ছে...';document.getElementById('ovl').style.display='flex';clearTimeout(_ot);_ot=setTimeout(hideOvl,30000);}
 function hideOvl(){document.getElementById('ovl').style.display='none';clearTimeout(_ot);}
@@ -8824,36 +8967,89 @@ function calPersonDayDetail(dateStr, personName) {
 //    shop when there is one) plus every payment made, instead of just
 //    the bare due total.
 async function openSrDueHistory(srId, srName) {
+  var old = document.getElementById('sr-due-hist-modal'); if (old) document.body.removeChild(old);
   var modal = document.createElement('div');
   modal.id = 'sr-due-hist-modal';
   modal.className = 'due-modal-bg';
   modal.onclick = function(e){ if(e.target===modal) document.body.removeChild(modal); };
-  modal.innerHTML = '<div class="due-modal"><div class="due-modal-title">📜 '+esc(srName||'—')+' — বাকির ইতিহাস</div>'
+  modal.innerHTML = '<div class="due-modal"><div class="due-modal-title">📜 '+esc(srName||'—')+' — বিস্তারিত হিসাব</div>'
     + '<div style="text-align:center;padding:30px 0;color:var(--mt2)">লোড হচ্ছে...</div></div>';
   document.body.appendChild(modal);
-
   var r = await apiGet('/api/transactions?action=due-history&srId='+encodeURIComponent(srId));
   var box = modal.querySelector('.due-modal');
   if (!r || !r.ok) { box.innerHTML = '<div class="due-modal-title">📜 '+esc(srName||'—')+'</div><div style="text-align:center;padding:20px 0;color:var(--re)">তথ্য লোড ব্যর্থ হয়েছে</div><button class="btn btn-gh btn-w" style="margin-top:10px" onclick="document.body.removeChild(document.getElementById(\'sr-due-hist-modal\'))">বন্ধ</button>'; return; }
+  window._dh = { r:r, name:srName, filter:'all' };
+  _dhRender();
+}
+function _fmtTimeBn(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleTimeString('bn-BD', {hour:'2-digit', minute:'2-digit', timeZone:'Asia/Dhaka'}); } catch(e) { return ''; }
+}
+function _dhQty(row) {
+  var t = (num(row.cases)?fn(row.cases)+' কেস ':'') + (num(row.pcs)?fn(row.pcs)+' পিস':'');
+  return (t?t+' · ':'') + fn(row.totalUnits)+' পিস';
+}
+function _dhSetFilter(f) { window._dh.filter = f; _dhRender(); }
+function _dhRender() {
+  var D = window._dh, r = D.r, t = r.totals || {}, box = document.querySelector('#sr-due-hist-modal .due-modal');
+  if (!box) return;
+  var srcLbl = { give:'📤 নিয়েছে (স্টক সরবরাহ)', return:'↩️ ফেরত দিয়েছে', damage:'⚠️ ড্যামেজ', dsr_sale:'🏪 দোকানে বিক্রয়', payment:'💵 পেমেন্ট জমা' };
+  var srcClr = { give:'var(--bl)', return:'var(--te)', damage:'var(--re)', dsr_sale:'var(--am)', payment:'var(--gr)' };
+  var h = '<div class="due-modal-title">📜 '+esc(D.name||'—')+'<div style="font-size:11px;color:var(--mt);font-weight:400;margin-top:2px">কখন কী নিয়েছে, কী করেছে — সম্পূর্ণ বিবরণ</div></div>';
 
-  var srcLbl = { give:'স্টক সরবরাহ', return:'ফেরত', damage:'ড্যামেজ', payment:'পরিশোধ' };
-  var srcClr = { give:'var(--bl)', return:'var(--te)', damage:'var(--re)', payment:'var(--gr)' };
-  var h = '<div class="due-modal-title">📜 '+esc(srName||'—')+'<div style="font-size:11px;color:var(--mt);font-weight:400;margin-top:2px">সম্পূর্ণ বাকির ইতিহাস — উৎস, তারিখ ও দোকান</div></div>';
-  h += '<div style="background:var(--rel);border-radius:10px;padding:9px 12px;margin-bottom:12px;display:flex;justify-content:space-between;font-weight:700;font-size:13px">';
-  h += '<span>বর্তমান বাকি</span><span style="color:'+(num(r.totals.due)>0?'var(--re)':'var(--gr)')+'">৳'+fm(r.totals.due)+'</span></div>';
-  if (!r.rows || !r.rows.length) {
+  // summary
+  h += '<div style="background:var(--rel);border-radius:10px;padding:9px 12px;margin-bottom:8px;display:flex;justify-content:space-between;font-weight:700;font-size:13px"><span>বর্তমান বাকি</span><span style="color:'+(num(t.due)>0?'var(--re)':'var(--gr)')+'">৳'+fm(t.due)+'</span></div>';
+  h += '<div class="g2" style="margin-bottom:6px">'
+    + '<div class="met"><div class="mv" style="font-size:14px;color:var(--bl)">৳'+fm(t.givenRev)+'</div><div class="ml" style="margin-top:4px">মোট নিয়েছে · '+fn(t.givenUnits)+' পিস</div></div>'
+    + '<div class="met"><div class="mv" style="font-size:14px;color:var(--te)">৳'+fm(t.returnRev)+'</div><div class="ml" style="margin-top:4px">ফেরত দিয়েছে · '+fn(t.returnUnits)+' পিস</div></div>'
+    + '<div class="met"><div class="mv" style="font-size:14px;color:var(--gr)">৳'+fm(t.payments)+'</div><div class="ml" style="margin-top:4px">মোট জমা দিয়েছে</div></div>'
+    + '<div class="met"><div class="mv" style="font-size:14px;color:var(--am)">৳'+fm(t.shopSalesRev)+'</div><div class="ml" style="margin-top:4px">দোকানে বিক্রি · '+fn(t.shopSalesUnits)+' পিস</div></div></div>';
+  if (num(t.cash)||num(t.commission)||num(t.discount)||num(t.damagePaid)) {
+    h += '<div style="font-size:10.5px;color:var(--mt);background:var(--bll);border-radius:8px;padding:6px 10px;margin-bottom:8px">জমার বিভাজন — নগদ ৳'+fm(t.cash)+' · কমিশন ৳'+fm(t.commission)+' · ডিসকাউন্ট ৳'+fm(t.discount)+' · ড্যামেজ ৳'+fm(t.damagePaid)+'</div>';
+  }
+
+  // per-product summary
+  var prods = r.products || [];
+  if (prods.length) {
+    h += '<div class="ct" style="font-size:12px;margin-top:6px">📦 পণ্য অনুযায়ী</div>';
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)">'
+      + '<th style="padding:5px 6px;text-align:left">পণ্য</th><th style="padding:5px 4px">নিয়েছে</th><th style="padding:5px 4px">ফেরত</th><th style="padding:5px 4px">দোকানে</th><th style="padding:5px 4px">ড্যামেজ</th></tr></thead><tbody>';
+    prods.forEach(function(p) {
+      h += '<tr style="border-bottom:1px solid #E6ECE8"><td style="padding:5px 6px;font-weight:600">'+esc(p.productName)+'</td>'
+        + '<td style="text-align:center">'+fn(p.givenUnits)+'</td><td style="text-align:center;color:var(--te)">'+(p.returnedUnits?fn(p.returnedUnits):'—')+'</td>'
+        + '<td style="text-align:center;color:var(--am)">'+(p.soldUnits?fn(p.soldUnits):'—')+'</td><td style="text-align:center;color:var(--re)">'+(p.damageUnits?fn(p.damageUnits):'—')+'</td></tr>';
+    });
+    h += '</tbody></table></div><div style="font-size:9.5px;color:var(--mt2);margin-top:2px">সংখ্যা পিসে</div>';
+  }
+
+  // timeline with filter
+  h += '<div class="ct" style="font-size:12px;margin-top:10px">🕒 লেনদেনের ইতিহাস</div>';
+  var fl = [['all','সব'],['give','নিয়েছে'],['return','ফেরত'],['dsr_sale','বিক্রয়'],['payment','জমা'],['damage','ড্যামেজ']];
+  h += '<div class="seg" style="margin-bottom:8px;flex-wrap:wrap">';
+  fl.forEach(function(f){ h += '<button class="sbt '+(D.filter===f[0]?'active':'')+'" style="font-size:11px" onclick="_dhSetFilter(\''+f[0]+'\')">'+f[1]+'</button>'; });
+  h += '</div>';
+  var rows = (r.rows||[]).filter(function(x){ return D.filter==='all' || x.source===D.filter; });
+  if (!rows.length) {
     h += '<div style="text-align:center;padding:20px 0;color:var(--mt2)">কোনো লেনদেন পাওয়া যায়নি</div>';
   } else {
-    h += '<div style="max-height:50vh;overflow-y:auto">';
-    r.rows.forEach(function(row){
-      h += '<div class="due-item" style="border-bottom:1px solid #E6ECE8;padding:9px 2px">';
-      h += '<div style="flex:1;min-width:0">';
-      h += '<div style="font-weight:700;font-size:12.5px;color:'+(srcClr[row.source]||'var(--txt)')+'">'+(srcLbl[row.source]||row.source)+'</div>';
-      if (row.productName) h += '<div style="font-size:11px;color:var(--mt);margin-top:1px">'+esc(row.productName)+(row.totalUnits?' · '+fn(row.totalUnits)+' পিস':'')+'</div>';
-      h += '<div style="font-size:10px;color:var(--mt2);margin-top:2px">🕒 '+fmtBn(row.date)+(row.shopName?' · 🏪 '+esc(row.shopName):'')+'</div>';
-      h += '</div>';
-      h += '<div style="text-align:right;margin-left:8px"><div style="font-size:13px;font-weight:700">৳'+fm(row.amount)+'</div></div>';
-      h += '</div>';
+    h += '<div style="max-height:44vh;overflow-y:auto">';
+    var lastDate = '';
+    rows.forEach(function(row) {
+      if (row.date !== lastDate) { lastDate = row.date; h += '<div style="font-size:11px;font-weight:700;color:var(--mt);background:var(--bll);padding:4px 8px;border-radius:6px;margin:8px 0 2px">📅 '+fmtBn(row.date)+'</div>'; }
+      h += '<div class="due-item" style="border-bottom:1px solid #E6ECE8;padding:8px 2px">';
+      h += '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12.5px;color:'+(srcClr[row.source]||'var(--txt)')+'">'+(srcLbl[row.source]||row.source)+'</div>';
+      if (row.productName) h += '<div style="font-size:11px;color:var(--mt);margin-top:1px">'+esc(row.productName)+' · '+_dhQty(row)+(row.unitPrice?' × ৳'+fm(row.unitPrice):'')+'</div>';
+      if (row.source==='payment') {
+        var parts = [];
+        if (num(row.cash)) parts.push('নগদ ৳'+fm(row.cash));
+        if (num(row.commission)) parts.push('কমিশন ৳'+fm(row.commission));
+        if (num(row.discount)) parts.push('ডিসকাউন্ট ৳'+fm(row.discount));
+        if (num(row.damage)) parts.push('ড্যামেজ ৳'+fm(row.damage));
+        if (parts.length) h += '<div style="font-size:11px;color:var(--mt);margin-top:1px">'+parts.join(' · ')+'</div>';
+      }
+      h += '<div style="font-size:10px;color:var(--mt2);margin-top:2px">🕒 '+_fmtTimeBn(row.createdAt)+(row.shopName?' · 🏪 '+esc(row.shopName):'')+(row.note?' · '+esc(row.note):'')+'</div></div>';
+      h += '<div style="text-align:right;margin-left:8px"><div style="font-size:13px;font-weight:700">৳'+fm(row.amount)+'</div>'
+        + (row.affectsDue===false?'<div style="font-size:9px;color:var(--mt2)">বাকিতে ধরা হয়নি</div>':'')+'</div></div>';
     });
     h += '</div>';
   }
@@ -8951,8 +9147,8 @@ function _onlineDepositPanel(canEdit, skipTitle) {
   var h = skipTitle ? '' : '<div class="ct">💵 অনলাইন জমার পরিমাণ'+(canEdit?'':'')+'</div>';
   h += '<div class="card">';
   h += '<div class="g2">';
-  h += '<div class="met met-b"><div class="ml">আজকের অনলাইন জমা</div><div class="mv">৳'+fm(dep?dep.today:0)+'</div></div>';
-  h += '<div class="met met-a" style="cursor:pointer" onclick="openDepositHistory()"><div class="ml">এই মাসের মোট জমা</div><div class="mv">৳'+fm(dep?dep.month:0)+'</div><div style="font-size:9px;color:var(--mt2);margin-top:2px">বিস্তারিত দেখুন ▶</div></div>';
+  h += '<div class="met met-b"><div class="mv">৳'+fm(dep?dep.today:0)+'</div><div class="ml" style="margin-top:5px">আজকের অনলাইন জমা</div></div>';
+  h += '<div class="met met-a" style="cursor:pointer" onclick="openDepositHistory()"><div class="mv">৳'+fm(dep?dep.month:0)+'</div><div class="ml" style="margin-top:5px">এই মাসের মোট জমা</div><div style="font-size:9px;color:var(--mt2);margin-top:2px">বিস্তারিত দেখুন ▶</div></div>';
   h += '</div>';
   if (canEdit) {
     h += '<button class="btn btn-bl btn-sm" style="width:100%;margin-top:10px" onclick="onlineDepositModal()">➕ নতুন জমা যোগ করুন</button>';

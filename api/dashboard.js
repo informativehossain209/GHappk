@@ -55,6 +55,78 @@ module.exports = async (req, res) => {
     }
 
     // ══════════════════════════════════════════════════════
+    //  v60 — SR-PERF: DSR / SO performance for the home-screen tracker.
+    //  Lives on this existing route (never a 13th api/*.js file).
+    //  GET /api/dashboard?action=sr-perf[&period=YYYY-MM]
+    //  Per person, for the pay-cycle: achieved = net sales (give − return),
+    //  target = SO's own target; a DSR's target is his paired SO's target
+    //  split evenly across that SO's DSRs (a DSR has no target row of his
+    //  own — see attendance.js target-set). Also returns the share of the
+    //  company total so the UI can compare people against each other.
+    // ══════════════════════════════════════════════════════
+    if (action === 'sr-perf') {
+      const period = /^\d{4}-\d{2}$/.test(req.query.period || '') ? req.query.period : cyclePeriodForDate(bdtToday());
+      const { start, end } = cyclePeriodBounds(period);
+      const [srRes, tgRes, txRows] = await Promise.all([
+        supabase.from('srs').select('id,name,role,so_id,so_name,thumb,area,display_no').in('role', ['dsr', 'so']),
+        supabase.from('targets').select('user_key,target_amount').eq('period', period),
+        fetchAll(() => supabase.from('transactions').select('sr_id,type,total_units,total_revenue').in('type', ['give', 'return', 'point_sale', 'point_damage_return']).gte('date', start).lte('date', end))
+      ]);
+      if (srRes.error) throw srRes.error;
+      const people = srRes.data || [];
+      const tMap = {};
+      (tgRes.data || []).forEach(t => { tMap[String(t.user_key)] = num(t.target_amount); });
+
+      const own = {};   // sr_id → { rev, units }
+      (txRows || []).forEach(r => {
+        const id = String(r.sr_id || ''); if (!id) return;
+        if (!own[id]) own[id] = { rev: 0, units: 0 };
+        const sign = (r.type === 'give' || r.type === 'point_sale') ? 1 : -1;
+        own[id].rev   += sign * num(r.total_revenue);
+        own[id].units += sign * num(r.total_units);
+      });
+
+      const dsrsBySo = {};
+      people.filter(p => p.role === 'dsr').forEach(d => {
+        const k = String(d.so_id || ''); if (!k) return;
+        (dsrsBySo[k] = dsrsBySo[k] || []).push(d);
+      });
+
+      const list = people.map(p => {
+        const id = String(p.id);
+        let achieved, target;
+        if (p.role === 'so') {
+          achieved = (own[id] ? own[id].rev : 0) + (dsrsBySo[id] || []).reduce((s, d) => s + (own[String(d.id)] ? own[String(d.id)].rev : 0), 0);
+          target = tMap[id] || 0;
+        } else {
+          achieved = own[id] ? own[id].rev : 0;
+          const soKey = String(p.so_id || '');
+          const n = (dsrsBySo[soKey] || []).length || 1;
+          target = soKey ? (tMap[soKey] || 0) / n : 0;
+        }
+        achieved = Math.round(achieved * 100) / 100;
+        target = Math.round(target * 100) / 100;
+        return {
+          srId: id, name: p.name || '', role: p.role, area: p.area || '', thumb: p.thumb || '',
+          displayNo: p.display_no, soName: p.so_name || '',
+          units: own[id] ? own[id].units : 0,
+          achieved, target,
+          pct: target > 0 ? Math.round((achieved / target) * 1000) / 10 : null,
+          remaining: Math.max(0, target - achieved)
+        };
+      });
+
+      const rank = role => {
+        const rows = list.filter(x => x.role === role).sort((a, b) => b.achieved - a.achieved);
+        const total = rows.reduce((s, x) => s + Math.max(0, x.achieved), 0);
+        rows.forEach((x, i) => { x.rank = i + 1; x.share = total > 0 ? Math.round((Math.max(0, x.achieved) / total) * 1000) / 10 : 0; });
+        return { rows, total };
+      };
+      const d = rank('dsr'), so = rank('so');
+      return res.json({ ok: true, period, dsr: d.rows, so: so.rows, totals: { dsr: d.total, so: so.total } });
+    }
+
+    // ══════════════════════════════════════════════════════
     //  SALES-RANGE — the hero "আজ বিক্রি" card's small range picker
     //  (আজ/৭ দিন/এই মাস/এই বছর/কাস্টম). Kept as its own lightweight
     //  action on the existing dashboard.js route (never a 13th api/*.js

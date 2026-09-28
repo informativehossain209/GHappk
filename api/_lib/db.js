@@ -282,7 +282,12 @@ function mapOrder(r) {
     loadTicks: r.load_ticks || {},
     approvedBy: r.approved_by || '',
     approvedAt: r.approved_at || '',
-    createdAt: r.created_at || ''
+    createdAt: r.created_at || '',
+    // v60 — simplified flow: what was originally ordered/given (before
+    // the DSR adjusted quantities at loading) and when the van load
+    // was confirmed (= when stock actually left the warehouse).
+    originalItems: r.original_items || null,
+    loadedAt: r.loaded_at || ''
   };
 }
 
@@ -425,6 +430,8 @@ function calcStock(allTx) {
     if (r.type === 'buy')    m[pid] += u;
     if (r.type === 'give')   m[pid] -= u;
     if (r.type === 'return') m[pid] += u;
+    // v60 — 'return_company': stock sent back to the company, leaves the warehouse.
+    if (r.type === 'return_company') m[pid] -= u;
     // V35 — 'damage' deliberately does NOT touch stock. Damage is only a
     // reporting/reimbursement record (see dmg_claims + DSR payment page);
     // the physical product was already removed from warehouse stock at

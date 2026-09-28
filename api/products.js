@@ -6,7 +6,8 @@ const { resolveThumb, deleteThumb } = require('./_lib/thumb');
 // manual resync can never disagree with what the trigger computes
 // going forward.
 const STOCK_TYPE_SIGN = {
-  buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1
+  buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1,
+  return_company: -1   // v60 — returned to the company: leaves the warehouse
 };
 
 module.exports = async (req, res) => {

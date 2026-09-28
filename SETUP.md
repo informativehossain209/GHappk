@@ -47,3 +47,13 @@ The schema seeds one login:
 - Password: `12345`
 
 You'll be forced to set a new password on first login.
+
+## 7. What's new in 4.7.0
+`schema.sql` already includes everything (new `return_company` transaction type, order
+columns, and the 35 default products). Nothing else to run.
+
+- SO order / manager or owner "give" -> straight to the DSR's load list. The DSR presses
+  "সম্পন্ন" after loading and stock is deducted at that moment. No approval steps.
+- Orders tab and Approvals page show every order read-only (who, what, ordered vs loaded, times).
+- Transactions -> "কোম্পানিতে ফেরত": removes stock only (blocked if it exceeds current stock).
+- Still 12 API files.

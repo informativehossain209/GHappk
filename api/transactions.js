@@ -1,7 +1,7 @@
 const { supabase, cors, num, now_, mapTx, safeErr, fetchAll } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 
-const VALID_TYPES = new Set(['buy','give','return','damage','point_sale','point_damage_return','dsr_sale']);
+const VALID_TYPES = new Set(['buy','give','return','damage','point_sale','point_damage_return','dsr_sale','return_company']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Update #49 — DSR/SO due-history modal: given a set of transaction
@@ -38,8 +38,12 @@ module.exports = async (req, res) => {
       const srId = String(req.query.srId || '');
       if (!srId) return res.json({ ok: false, error: 'srId আবশ্যক' });
 
+      // v60 — detailed history: besides give/return (which make up the
+      // due) we now also pull shop sales and damage so the owner sees
+      // everything the person took and did. Only give/return/payments
+      // change the due figure (affectsDue flag) — the rest is context.
       const [txRows, payRows] = await Promise.all([
-        fetchAll(() => supabase.from('transactions').select('*').eq('sr_id', srId).in('type', ['give', 'return']).order('date', { ascending: false })),
+        fetchAll(() => supabase.from('transactions').select('*').eq('sr_id', srId).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('date', { ascending: false }).order('created_at', { ascending: false })),
         fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', srId).order('date', { ascending: false }))
       ]);
       const txs  = (txRows  || []).map(mapTx);
@@ -50,32 +54,71 @@ module.exports = async (req, res) => {
       const rows = [];
       txs.forEach(t => {
         rows.push({
-          source: t.type,                                   // 'give' | 'return'
+          source: t.type,                                   // give | return | damage | dsr_sale
+          affectsDue: t.type === 'give' || t.type === 'return',
           date: t.date,
+          txId: t.txId,
+          createdAt: t.createdAt || '',
+          productId: t.productId,
           productName: t.productName,
+          cases: num(t.cases),
+          pcs: num(t.pcs),
           totalUnits: num(t.totalUnits),
+          unitPrice: num(t.sellingPrice),
           shopName: t.shopId ? (shopMap[t.shopId] || '') : '',
+          note: t.note || '',
           amount: num(t.totalRevenue)
         });
       });
       pays.forEach(p => {
         rows.push({
           source: 'payment',
+          affectsDue: true,
           date: p.date ? String(p.date).slice(0, 10) : '',
-          productName: '',
-          totalUnits: 0,
-          shopName: '',
+          txId: '',
+          createdAt: p.created_at || '',
+          productName: '', cases: 0, pcs: 0, totalUnits: 0, unitPrice: 0, shopName: '',
+          cash: num(p.cash_amount), commission: num(p.commission_amt),
+          discount: num(p.discount_amt), damage: num(p.damage_amt),
+          note: p.note || '',
           amount: num(p.amount)
         });
       });
-      rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
-      const givenRev  = txs.filter(t => t.type === 'give').reduce((s, t) => s + num(t.totalRevenue), 0);
-      const returnRev = txs.filter(t => t.type === 'return').reduce((s, t) => s + num(t.totalRevenue), 0);
+      const sumRev = t => txs.filter(x => x.type === t).reduce((s, x) => s + num(x.totalRevenue), 0);
+      const sumUn  = t => txs.filter(x => x.type === t).reduce((s, x) => s + num(x.totalUnits), 0);
+      const givenRev  = sumRev('give');
+      const returnRev = sumRev('return');
       const payments  = pays.reduce((s, p) => s + num(p.amount), 0);
       const due       = (givenRev - returnRev) - payments;
 
-      return res.json({ ok: true, srId, rows, totals: { givenRev, returnRev, payments, due } });
+      // Per-product summary: what he took, gave back, and what is still with him.
+      const pm = {};
+      txs.forEach(t => {
+        if (t.type !== 'give' && t.type !== 'return' && t.type !== 'dsr_sale' && t.type !== 'damage') return;
+        const k = t.productId || t.productName;
+        if (!pm[k]) pm[k] = { productId: t.productId, productName: t.productName, givenUnits: 0, returnedUnits: 0, soldUnits: 0, damageUnits: 0, givenAmt: 0, returnedAmt: 0 };
+        const u = num(t.totalUnits), a = num(t.totalRevenue);
+        if (t.type === 'give')     { pm[k].givenUnits += u;    pm[k].givenAmt += a; }
+        if (t.type === 'return')   { pm[k].returnedUnits += u; pm[k].returnedAmt += a; }
+        if (t.type === 'dsr_sale') { pm[k].soldUnits += u; }
+        if (t.type === 'damage')   { pm[k].damageUnits += u; }
+      });
+      const products = Object.values(pm).sort((a, b) => b.givenAmt - a.givenAmt);
+
+      const totals = {
+        givenRev, returnRev, payments, due,
+        givenUnits: sumUn('give'), returnUnits: sumUn('return'),
+        shopSalesRev: sumRev('dsr_sale'), shopSalesUnits: sumUn('dsr_sale'),
+        damageRev: sumRev('damage'), damageUnits: sumUn('damage'),
+        cash: pays.reduce((s, p) => s + num(p.cash_amount), 0),
+        commission: pays.reduce((s, p) => s + num(p.commission_amt), 0),
+        discount: pays.reduce((s, p) => s + num(p.discount_amt), 0),
+        damagePaid: pays.reduce((s, p) => s + num(p.damage_amt), 0)
+      };
+
+      return res.json({ ok: true, srId, rows, products, totals });
     }
 
     // POST — add transaction (one or many items share same txId)
@@ -85,6 +128,25 @@ module.exports = async (req, res) => {
       if (!d.date || !DATE_RE.test(d.date)) return res.json({ ok: false, error: 'বৈধ তারিখ দিন (YYYY-MM-DD)' });
       if (!Array.isArray(d.items) || !d.items.length) return res.json({ ok: false, error: 'কমপক্ষে একটি আইটেম দিন' });
       if (d.items.length > 100) return res.json({ ok: false, error: 'একসাথে সর্বোচ্চ ১০০টি আইটেম' });
+      // v60 — return to company: you can only send back what is in stock.
+      // Stock then drops by exactly that amount (DB trigger), nothing else
+      // changes (no due, no revenue, no DSR involved).
+      if (d.type === 'return_company') {
+        const want = {};
+        (d.items || []).forEach(it => {
+          const pid = String(it.productId || ''); if (!pid) return;
+          want[pid] = (want[pid] || 0) + num(it.totalUnits);
+        });
+        const ids = Object.keys(want);
+        if (!ids.length) return res.json({ ok: false, error: 'পণ্য বাছাই করুন' });
+        const { data: stk, error: stkErr } = await supabase.from('products').select('id,name,current_stock').in('id', ids);
+        if (stkErr) throw stkErr;
+        for (const p of (stk || [])) {
+          if (want[String(p.id)] > num(p.current_stock))
+            return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — স্টকে আছে ' + num(p.current_stock) + ' পিস, ফেরত দিতে চাইছেন ' + want[String(p.id)] + ' পিস' });
+        }
+      }
+
       const txId = randomUUID();
       const ts   = now_();
 
