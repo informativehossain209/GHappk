@@ -745,6 +745,7 @@ body.dark .smi.active{background:rgba(255,255,255,.2)!important}
     <div class="page active" id="pg-dash"></div>
     <div class="page" id="pg-prod"></div>
     <div class="page" id="pg-sr"></div>
+    <div class="page" id="pg-settle"></div>
     <div class="page" id="pg-tx"></div>
     <div class="page" id="pg-pwmgr"></div>
     <div class="page" id="pg-ownerapproval"></div>
@@ -989,6 +990,7 @@ async function _submitForcedPwSetup(r, tempPin, modal) {
 var MENU_ITEMS = [
   { id:'dash',          ic:'🏠', lb:'হোম' },
   { id:'prod',          ic:'📦', lb:'পণ্য' },
+  { id:'settle',        ic:'🧮', lb:'বাকি পেমেন্ট' },
   { id:'sr',            ic:'🧑\u200d🤝\u200d🧑', lb:'DSR/SO' },
   { id:'tx',            ic:'🧾', lb:'লেনদেন' },
   { id:'pwmgr',         ic:'🔐', lb:'পাসওয়ার্ড ম্যানেজার' },
@@ -1011,13 +1013,13 @@ var MENU_ITEMS = [
 // OWN pin there — the "manage everyone's PIN" admin section underneath
 // stays gated to role==='owner' inside renderPwMgrTab() itself.
 var MENU_PERMS = {
-  owner:   ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'],
-  manager: ['dash','prod','sr','tx','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','target','orders'],
+  owner:   ['dash','settle','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'],
+  manager: ['dash','settle','prod','sr','tx','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','target','orders'],
   so:      ['dash','prod','pwmgr','attendance','shopsmap','chat','numbers','target','orders'],
   dsr:     ['dash','pwmgr','cal','attendance','chat','numbers','target','orders'],
   driver:  ['pwmgr','attendance','chat']
 };
-var TABS = ['dash','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'];
+var TABS = ['dash','settle','prod','sr','tx','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'];
 
 function applyRole() {
   var r = S.role;
@@ -1048,6 +1050,7 @@ function applyRole() {
 // wiring above — no tab, id, or permission logic changes here.
 var MENU_GROUPS = [
   { lb: '',                        ids: ['dash'] },
+  { lb: 'বাকি পেমেন্ট',             ids: ['settle'] },
   { lb: 'পণ্য ও বিক্রয়',           ids: ['prod', 'tx', 'target', 'orders'] },
   { lb: 'টিম ও উপস্থিতি',          ids: ['sr', 'attendance', 'chat', 'ownerapproval'] },
   { lb: 'দোকান ও এলাকা',           ids: ['shopsmap', 'cal'] },
@@ -1066,6 +1069,7 @@ var MENU_GROUPS = [
 // ════════════════════════════════════════════════════
 var TOPNAV_GROUPS = [
   { id:'g-dash',  ic:'📊', lb:'ড্যাশবোর্ড ওভারভিউ',      ids:['dash'] },
+  { id:'g-settle',ic:'🧮', lb:'বাকি পেমেন্ট',             ids:['settle'] },
   { id:'g-audit', ic:'🥧', lb:'অডিট ও পাই গ্রাফ',         ids:['rep','sr','ownerapproval'] },
   { id:'g-cat',   ic:'📦', lb:'পণ্য ও স্টক ক্যাটালগ',      ids:['prod'] },
   { id:'g-tx',    ic:'🧾', lb:'চালান ও ডিজিটাল মেমো',      ids:['tx','orders'] },
@@ -2319,6 +2323,7 @@ function gTab(t, _fromBack) {
   if (t==='dash')  loadDash();
   if (t==='prod')  renderProd();
   if (t==='sr')    renderSR();
+  if (t==='settle') renderSettle();
   if (t==='tx')    { if (!_fromBack) S.txType=''; renderTx(); }
   if (t==='pwmgr') renderPwMgrTab();
   if (t==='ownerapproval') renderOwnerApprovalTab();
@@ -5634,8 +5639,8 @@ async function saveQuickCash() {
 
 // ── Owner / Manager • আদায় (DSR-রা যা বাকি ও ড্যামেজ কালেকশন করেছে) ──
 async function _loadCollectionsTab() {
-  var el = document.getElementById('pg-sr'); if (!el) return;
-  var tabs = document.querySelector('#pg-sr .seg');
+  var el = document.getElementById('pg-settle'); if (!el) return;
+  var tabs = document.querySelector('#pg-settle .nav-box-grid');
   var f = S.colFrom || iso(new Date()), t = S.colTo || f, dsr = S.colDsr || '';
   var r = await apiGet('/api/sr-payments?action=collections-list&from=' + f + '&to=' + t + (dsr ? '&dsrId=' + _enc(dsr) : ''));
   var opts = '<option value="">সব DSR</option>' + S.srs.filter(function(s) { return s.role === 'dsr'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === dsr ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('');
@@ -6977,16 +6982,14 @@ async function delProd(id){
 function renderSR() {
   var canEdit = S.role==='owner';
   var el=document.getElementById('pg-sr');
-  var tabs='<div class="seg">'
-    +'<button class="sbt '+(S.srTab==='list'?'active':'')+'\" onclick="S.srTab=\'list\';renderSR()">👥 তালিকা</button>';
-  if (canEdit) tabs+='<button class="sbt '+(S.srTab==='add'?'active':'')+'\" onclick="S.srTab=\'add\';renderSR()">➕ যোগ করুন</button>';
-  tabs+='<button class="sbt '+(S.srTab==='pay'?'active':'')+'\" onclick="S.srTab=\'pay\';renderSR()">🧮 হিসাব/পেমেন্ট</button>';
-  tabs+='<button class="sbt '+(S.srTab==='coll'?'active':'')+'\" onclick="S.srTab=\'coll\';renderSR()">📥 আদায়</button>';
-  if (canEdit) tabs+='<button class="sbt '+(S.srTab==='road'?'active':'')+'\" onclick="S.srTab=\'road\';renderSR()">🛣️ রোড</button>';
-  tabs+='</div>';
+  // হিসাব/পেমেন্ট ও আদায় এখন আলাদা মেনু ("বাকি পেমেন্ট") — এখানে শুধু তালিকা, যোগ ও রোড।
+  var okTabs = canEdit ? ['list','add','road'] : ['list'];
+  if (okTabs.indexOf(S.srTab) < 0) S.srTab = 'list';
+  var tabDefs = [{id:'list', lbl:'👥 তালিকা'}];
+  if (canEdit) { tabDefs.push({id:'add', lbl:'➕ যোগ করুন'}); tabDefs.push({id:'road', lbl:'🛣️ রোড'}); }
+  var tabs = _navBoxBar(tabDefs, S.srTab, function(id){ return "S.srTab='"+id+"';renderSR()"; });
   if (S.srTab === 'road') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadAndRenderRoads(); }
-  if (S.srTab === 'coll') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadCollectionsTab(); }
-  el.innerHTML = tabs + (S.srTab==='list'?buildSRList(canEdit):S.srTab==='add'?buildSRForm():buildPayForm());
+  el.innerHTML = tabs + (S.srTab==='add'?buildSRForm():buildSRList(canEdit));
   if (S.srTab==='add') {
     var sr2=S.editSRId?S.srs.find(function(x){return x.id===S.editSRId;}):null;
     var fb=sr2?sr2.name.charAt(0)||'?':'?';
@@ -6997,6 +7000,16 @@ function renderSR() {
       else if(sr2&&getThumb(sr2))setContainerImg(prv,getThumb(sr2));
     },0);
   }
+}
+// ════════════════════════════════════════════════════
+//  বাকি পেমেন্ট — Owner/Manager-এর নিজস্ব মেনু (দিনশেষে লাগে, তাই DSR/SO থেকে আলাদা)
+// ════════════════════════════════════════════════════
+function renderSettle() {
+  var el = document.getElementById('pg-settle'); if (!el) return;
+  if (S.settleTab !== 'pay' && S.settleTab !== 'coll') S.settleTab = 'pay';
+  var tabs = _navBoxBar([{id:'pay', lbl:'🧮 হিসাব/পেমেন্ট'}, {id:'coll', lbl:'📥 আদায়'}], S.settleTab, function(id){ return "S.settleTab='"+id+"';renderSettle()"; });
+  if (S.settleTab === 'coll') { el.innerHTML = tabs + '<div style="text-align:center;padding:20px;color:var(--mt2)">লোড হচ্ছে...</div>'; return _loadCollectionsTab(); }
+  el.innerHTML = tabs + buildPayForm();
 }
 function buildSRList(canEdit) {
   if (!S.srs.length) return '<div style="padding:24px;text-align:center;color:var(--mt2)">কোনো DSR/SO নেই</div>';
@@ -7101,7 +7114,7 @@ async function _loadAndRenderRoads() {
 var WEEKDAY_LABELS_BN = ['রবি','সোম','মঙ্গল','বুধ','বৃহঃ','শুক্র','শনি'];
 function _renderRoadsTab() {
   var el = document.getElementById('pg-sr'); if (!el) return;
-  var tabs = document.querySelector('#pg-sr .seg');
+  var tabs = document.querySelector('#pg-sr .nav-box-grid');
   var h = '<div class="card" style="margin-top:10px">';
   h += '<div class="fg"><label class="fl">নতুন রোডের নাম</label><input id="road-new-name" placeholder="যেমন: শাহজাদপুর রোড"></div>';
   h += '<button class="btn btn-bl btn-w" onclick="createRoad()">➕ রোড তৈরি করুন</button>';
@@ -10250,9 +10263,10 @@ cart:'<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="
 save:'<path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/>',
 edit:'<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
 refresh:'<path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8M21 4v5h-5M3 20v-5h5"/>',
+calc:'<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M8 7h8M8 12h.1M12 12h.1M16 12h.1M8 16h.1M12 16h.1M16 16h.1"/>',
 crown:'<path d="M3 18l-1-11 6 5 4-8 4 8 6-5-1 11z"/>'};
 window.axIcon=function(k){return '<span class="ai"><svg viewBox="0 0 24 24">'+(P[k]||P.box)+'</svg></span>';};
-var IDI={dash:'home',prod:'box',sr:'users',tx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'};
+var IDI={settle:'calc',dash:'home',prod:'box',sr:'users',tx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'};
 var EM={'🏠':'home','📦':'box','🧾':'receipt','🔐':'key','✅':'check','📈':'chart','📊':'chart','📍':'pin','🏪':'store','💬':'chat','📢':'bell','☎':'phone','💰':'wallet','🗓':'cal','📅':'cal','🎯':'target','📋':'truck','⚙':'cog','🗑':'trash','📤':'send','↩':'undo','⚠':'alert','🛒':'cart','💾':'save','📝':'edit','🔄':'refresh','👑':'crown','🔒':'lock','🌙':'moon','☀':'sun','🚚':'truck','🚛':'truck','🧑':'users','👆':'target'};
 var RX=new RegExp('('+Object.keys(EM).join('|')+')(\\uFE0F|\\u200d(🤝\\u200d🧑)?)?','g');
 function conv(root){
@@ -10275,6 +10289,7 @@ new MutationObserver(function(){ if(busy)return; busy=true; try{conv(document.ge
 /* ── Regrouped navigation: each shortcut holds only related pages ── */
 window.MENU_GROUPS=[
  {lb:'',ids:['dash']},
+ {lb:'বাকি পেমেন্ট',ids:['settle']},
  {lb:'পণ্য ও বিক্রয়',ids:['prod','tx','orders','target']},
  {lb:'ডিএসআর / এসও',ids:['sr','ownerapproval']},
  {lb:'উপস্থিতি ও যোগাযোগ',ids:['attendance','chat','numbers']},
@@ -10283,13 +10298,14 @@ window.MENU_GROUPS=[
  {lb:'সিস্টেম',ids:['settings','pwmgr','notice','reset']}];
 window.TOPNAV_GROUPS=[
  {id:'g-dash',ic:'',lb:'হোম',ids:['dash']},
+ {id:'g-settle',ic:'',lb:'বাকি পেমেন্ট',ids:['settle']},
  {id:'g-sales',ic:'',lb:'পণ্য ও লেনদেন',ids:['prod','tx','orders','target']},
  {id:'g-team',ic:'',lb:'ডিএসআর / এসও',ids:['sr','ownerapproval']},
  {id:'g-att',ic:'',lb:'উপস্থিতি',ids:['attendance','chat','numbers']},
  {id:'g-area',ic:'',lb:'দোকান ও ডিউ',ids:['shopsmap','cal']},
  {id:'g-rep',ic:'',lb:'রিপোর্ট ও খরচ',ids:['rep','exp']},
  {id:'g-sys',ic:'',lb:'সেটিং',ids:['settings','pwmgr','notice','reset']}];
-var GIC={'g-dash':'home','g-sales':'receipt','g-team':'users','g-att':'pin','g-area':'store','g-rep':'chart','g-sys':'cog'};
+var GIC={'g-dash':'home','g-settle':'calc','g-sales':'receipt','g-team':'users','g-att':'pin','g-area':'store','g-rep':'chart','g-sys':'cog'};
 var _bt=window.buildTopNav;
 window.buildTopNav=function(){ _bt(); document.querySelectorAll('.topnav-btn').forEach(function(b){
   var m=(b.getAttribute('onclick')||'').match(/'(g-[a-z]+)'/); if(m){var i=b.querySelector('.tnb-ic'); if(i) i.innerHTML=axIcon(GIC[m[1]]);} });
