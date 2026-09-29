@@ -595,7 +595,8 @@ CREATE TABLE targets (
   user_name     TEXT          DEFAULT '',
   role          TEXT          DEFAULT '' CHECK (role IN ('', 'dsr', 'so', 'company')),
   period        TEXT          NOT NULL,               -- 'YYYY-MM'
-  target_amount NUMERIC(14,4) DEFAULT 0,
+  target_amount NUMERIC(14,4) DEFAULT 0,               -- money target (৳)
+  target_boxes  NUMERIC(14,4) DEFAULT 0,               -- BOX target (1 box = 1 full case of any SKU) — the company's real measure
   set_by        TEXT          DEFAULT '',
   set_at        TIMESTAMPTZ   DEFAULT NOW(),
   UNIQUE (user_key, period)

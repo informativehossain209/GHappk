@@ -6016,102 +6016,158 @@ var TARGET_PALETTE = [
   { bg:'#FBE9E7', bd:'#D84315' }  // deep orange
 ];
 function _targetColor(i) { return TARGET_PALETTE[i % TARGET_PALETTE.length]; }
-function _targetCard(opts) {
-  // Shared renderer for both the company-total card and each per-person
-  // card below — opts: {title, badge, isSelf, canEdit, inputId, saveOnclick, targetAmount, achieved, pct, remaining}
-  var pct = opts.pct==null ? null : Math.max(0, opts.pct);
-  var barPct = pct==null ? 0 : Math.min(100, pct);
-  var barColor = pct==null ? 'var(--mt2)' : (pct>=100 ? 'var(--gr)' : pct>=60 ? 'var(--am)' : 'var(--re)');
-  var h = '<div class="card" style="margin-bottom:10px'+(opts.isSelf?';border:2px solid var(--bl)':'')+(opts.highlight?';border:2px solid var(--am)':'')+'">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-  h += '<div style="font-weight:700;font-size:13px">'+opts.title+(opts.badge||'')+'</div>';
-  h += '<div style="font-size:11px;color:var(--mt2)">'+opts.period+'</div></div>';
-
-  if (opts.canEdit) {
-    h += '<div class="g2" style="margin-bottom:6px">';
-    h += '<div class="fg" style="margin:0"><label class="fl">টার্গেট (৳)</label><input type="number" min="0" id="'+opts.inputId+'" value="'+(opts.targetAmount||'')+'" placeholder="০"></div>';
-    h += '<div style="display:flex;align-items:flex-end"><button class="btn btn-bl btn-w" style="padding:9px" onclick="'+opts.saveOnclick+'">💾 সংরক্ষণ</button></div>';
-    h += '</div>';
-    if (opts.extraBtn) h += opts.extraBtn;
-  } else {
-    h += '<div style="font-size:12px;color:var(--mt);margin-bottom:4px">টার্গেট: ৳'+fm(opts.targetAmount||0)+'</div>';
-  }
-
-  h += '<div style="font-size:12px;font-weight:600;margin-bottom:4px">অর্জিত: ৳'+fm(opts.achieved||0)
-     + (opts.targetAmount>0 ? ' / ৳'+fm(opts.targetAmount) : '')
-     + (pct!=null ? ' <span style="color:'+barColor+'">('+pct+'%)</span>' : '')+'</div>';
-  if (opts.targetAmount>0) {
-    h += '<div style="display:flex;justify-content:center;margin:6px 0">'+svgGauge(barPct,barColor,92)+'</div>';
-    if (opts.remaining>0) h += '<div style="font-size:11px;color:var(--mt2);margin-top:4px">বাকি লক্ষ্যে পৌঁছাতে: ৳'+fm(opts.remaining)+'</div>';
-    else h += '<div style="font-size:11px;color:var(--gr);margin-top:4px">✅ লক্ষ্য পূর্ণ হয়েছে</div>';
-  } else {
-    h += '<div style="font-size:11px;color:var(--mt2)">এখনো কোনো টার্গেট সেট করা হয়নি</div>';
-  }
-  h += '</div>';
-  return h;
+// ══════════════════════════════════════════════════════
+//  BOX-BASED SALES TARGET (company policy)
+//  The company sets its target in BOXES (1 box = 1 full case of ANY SKU,
+//  whatever the pieces per box) plus a money figure. Owner enters the
+//  company total, then splits it among the SOs as REAL numbers.
+// ══════════════════════════════════════════════════════
+function _fbox(n) { return (Number(n)||0).toLocaleString('en-IN',{maximumFractionDigits:1}); }
+function _tgtCol(pct) { return pct==null ? '#94A3B8' : (pct>=100 ? '#10B981' : pct>=60 ? '#F59E0B' : '#EF4444'); }
+// Animated ring. pct may exceed 100 (label shows the real figure, ring caps at full + gold glow).
+function _tgtDonut(pct, size, stroke, label, sub, dark) {
+  var has = pct!=null, p = has ? Math.max(0, pct) : 0, arc = Math.min(100, p);
+  var col = has ? (p>=100 ? '#10B981' : _tgtCol(p)) : '#94A3B8';
+  var m = size/2, R = m - stroke/2 - 2, C = 2*Math.PI*R, len = C*arc/100;
+  var track = dark ? 'rgba(255,255,255,.14)' : 'var(--seg-bg)';
+  var txt = dark ? '#fff' : 'var(--txt)', sb = dark ? 'rgba(255,255,255,.7)' : 'var(--mt2)';
+  var glow = p>=100 ? 'filter:drop-shadow(0 0 6px rgba(251,191,36,.9));' : '';
+  var svg = '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" style="'+glow+'flex:none">'
+    +'<circle cx="'+m+'" cy="'+m+'" r="'+R+'" fill="none" stroke="'+track+'" stroke-width="'+stroke+'"/>'
+    +'<circle cx="'+m+'" cy="'+m+'" r="'+R+'" fill="none" stroke="'+col+'" stroke-width="'+stroke+'" stroke-linecap="round" stroke-dasharray="0 '+C.toFixed(2)+'" transform="rotate(-90 '+m+' '+m+')">'
+    +'<animate attributeName="stroke-dasharray" from="0 '+C.toFixed(2)+'" to="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" dur="1.1s" fill="freeze" calcMode="spline" keySplines=".2 .8 .2 1" keyTimes="0;1"/></circle>'
+    +'<text x="'+m+'" y="'+(m+(sub?0:size*.07))+'" text-anchor="middle" style="font:800 '+Math.round(size*.22)+'px Inter,sans-serif;fill:'+txt+'">'+(has ? (Math.round(p*10)/10)+'%' : '—')+'</text>'
+    +(sub ? '<text x="'+m+'" y="'+(m+size*.15)+'" text-anchor="middle" style="font:600 '+Math.max(9,Math.round(size*.09))+'px Inter,sans-serif;fill:'+sb+'">'+sub+'</text>' : '')
+    +'</svg>';
+  return '<div style="display:flex;flex-direction:column;align-items:center;gap:3px">'+svg
+    +(label ? '<div style="font-size:11px;font-weight:700;color:'+sb+'">'+label+'</div>' : '')+'</div>';
+}
+function _tgtBar(pct, col) {
+  var w = pct==null ? 0 : Math.min(100, Math.max(0, pct));
+  return '<div style="height:8px;border-radius:6px;background:var(--seg-bg);overflow:hidden"><div style="height:100%;width:0;background:'+col
+    +';border-radius:6px;transition:width 1.1s cubic-bezier(.2,.8,.2,1)" data-w="'+w+'"></div></div>';
+}
+function _tgtAnimateBars() {
+  requestAnimationFrame(function(){ requestAnimationFrame(function(){
+    document.querySelectorAll('#pg-target [data-w]').forEach(function(b){ b.style.width = b.getAttribute('data-w')+'%'; });
+  }); });
+}
+// which measure drives a person's ring: boxes if a box target exists, else money
+function _tgtPrimary(t) {
+  if (t.targetBoxes > 0) return { pct: t.pctBoxes, label: 'বক্স' };
+  if (t.targetAmount > 0) return { pct: t.pct, label: 'টাকা' };
+  return { pct: null, label: '' };
 }
 function _renderTargetList(canEdit) {
   var el = document.getElementById('pg-target'); if (!el) return;
   var list = S.targetList || [];
-  var company = S.targetCompany || {targetAmount:0, achieved:0, pct:null, remaining:0};
+  var c = S.targetCompany || {targetAmount:0, achieved:0, pct:null, remaining:0, targetBoxes:0, achievedBoxes:0, pctBoxes:null, remainingBoxes:0};
   var h = '<div class="ct">🎯 সেলস টার্গেট</div>';
   h += '<div class="card" style="padding:10px;margin-bottom:12px">';
   h += '<div class="fg" style="margin:0"><label class="fl">মাস নির্বাচন করুন</label>';
   h += '<input type="month" id="target-period-inp" value="'+S.targetPeriod+'" onchange="S.targetPeriod=this.value;renderTargetTab()"></div>';
   h += '</div>';
 
-  // Company-wide total target — set by Owner only, always visible to every role.
-  h += _targetCard({
-    title: '🏢 সর্বমোট বিক্রয় টার্গেট (কোম্পানি)', period: S.targetPeriod, canEdit: canEdit,
-    inputId: 'tgt-inp-COMPANY_TOTAL', saveOnclick: "saveCompanyTarget()",
-    targetAmount: company.targetAmount, achieved: company.achieved, pct: company.pct, remaining: company.remaining,
-    highlight: true,
-    extraBtn: '<button class="btn btn-gh btn-w" style="margin-top:2px;font-size:12px" onclick="splitTargetEven()">🔄 সব SO-এর মধ্যে সমান ভাগে ভাগ করুন</button>'
-  });
+  // ── HERO: whole-company performance — boxes (main) + money ──
+  var hasBox = c.targetBoxes > 0, hasAmt = c.targetAmount > 0;
+  h += '<div class="card" style="padding:16px;margin-bottom:12px;color:#fff;background:linear-gradient(135deg,#064E3B 0%,#0F172A 100%);border:none;position:relative;overflow:hidden">';
+  h += '<div style="font-size:13px;font-weight:800;margin-bottom:2px">🏢 সর্বমোট কোম্পানি টার্গেট</div>';
+  h += '<div style="font-size:10px;opacity:.7;margin-bottom:12px">'+esc(S.targetPeriod)+' · ১ বক্স = যেকোনো SKU-র ১টি পূর্ণ বক্স/পলি</div>';
+  if (!hasBox && !hasAmt) {
+    h += '<div style="text-align:center;padding:14px 0;opacity:.85;font-size:12px">এখনো কোনো সর্বমোট টার্গেট সেট করা হয়নি'+(canEdit?' — নিচের "টার্গেট নির্ধারণ" থেকে দিন':'')+'</div>';
+  } else {
+    h += '<div style="display:flex;align-items:center;justify-content:space-around;gap:10px;flex-wrap:wrap">';
+    h += _tgtDonut(hasBox ? c.pctBoxes : null, 138, 13, '📦 বক্স', hasBox ? '' : '', true);
+    h += _tgtDonut(hasAmt ? c.pct : null, 96, 10, '💰 টাকা', '', true);
+    h += '</div>';
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">';
+    h += '<div style="background:rgba(255,255,255,.08);border-radius:10px;padding:8px 10px"><div style="font-size:10px;opacity:.7">📦 বক্স</div>'
+      + '<div style="font-size:15px;font-weight:800">'+_fbox(c.achievedBoxes)+(hasBox?' <span style="font-size:11px;font-weight:600;opacity:.75">/ '+_fbox(c.targetBoxes)+'</span>':'')+'</div>'
+      + (hasBox ? '<div style="font-size:10px;opacity:.8;margin-top:1px">'+(c.remainingBoxes>0?'বাকি '+_fbox(c.remainingBoxes)+' বক্স':'✅ লক্ষ্য পূর্ণ')+'</div>' : '')+'</div>';
+    h += '<div style="background:rgba(255,255,255,.08);border-radius:10px;padding:8px 10px"><div style="font-size:10px;opacity:.7">💰 টাকা</div>'
+      + '<div style="font-size:15px;font-weight:800">৳'+fm(c.achieved)+'</div>'
+      + (hasAmt ? '<div style="font-size:10px;opacity:.8;margin-top:1px">লক্ষ্য ৳'+fm(c.targetAmount)+' · '+(c.remaining>0?'বাকি ৳'+fm(c.remaining):'✅ পূর্ণ')+'</div>' : '')+'</div>';
+    h += '</div>';
+  }
+  // allocation strip: how the total is split among SOs
+  var baseT = hasBox ? c.targetBoxes : c.targetAmount;
+  if (baseT > 0 && list.length && S.role !== 'dsr' && S.role !== 'so') {
+    var segs = '', legend = '', used = 0;
+    list.forEach(function(t, i){
+      var v = hasBox ? t.targetBoxes : t.targetAmount; if (!(v>0)) return;
+      var w = Math.min(100 - used, v / baseT * 100); used += w;
+      segs += '<div title="'+esc(t.userName)+'" style="width:'+w+'%;background:'+_targetColor(i).bd+'"></div>';
+      legend += '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;margin:2px 8px 0 0"><i style="width:8px;height:8px;border-radius:50%;background:'+_targetColor(i).bd+';display:inline-block"></i>'+esc(t.userName)+' '+(Math.round(v/baseT*1000)/10)+'%</span>';
+    });
+    if (segs) {
+      h += '<div style="margin-top:14px;font-size:10px;opacity:.75">SO-দের মধ্যে ভাগ ('+(hasBox?'বক্স':'টাকা')+')</div>';
+      h += '<div style="display:flex;height:10px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.14);margin-top:4px">'+segs+'</div><div>'+legend
+        +(used<99.9?'<span style="font-size:10px;opacity:.7;margin-top:2px;display:inline-block">ভাগ হয়নি '+(Math.round((100-used)*10)/10)+'%</span>':'')+'</div>';
+    }
+  }
+  h += '</div>';
+
+  // ── OWNER: set the company total + split among SOs in REAL numbers ──
+  if (canEdit) {
+    h += '<details class="card" style="padding:12px;margin-bottom:12px"'+((!hasBox && !hasAmt)?' open':'')+'>';
+    h += '<summary style="font-weight:800;font-size:13px;cursor:pointer">⚙️ টার্গেট নির্ধারণ ও SO-দের মধ্যে ভাগ</summary>';
+    h += '<div style="font-size:11px;color:var(--mt2);margin:8px 0">সর্বমোট বক্স ও টাকা দিন, তারপর প্রতিজন SO-কে আসল সংখ্যায় ভাগ করে দিন (সমান হতে হবে না)।</div>';
+    h += '<div class="g2" style="margin-bottom:10px">';
+    h += '<div class="fg" style="margin:0"><label class="fl">সর্বমোট বক্স 📦</label><input type="number" min="0" id="tp-cbox" value="'+(c.targetBoxes||'')+'" placeholder="যেমন: ১০০০০" oninput="_tgtRecalc()"></div>';
+    h += '<div class="fg" style="margin:0"><label class="fl">সর্বমোট টাকা (৳) 💰</label><input type="number" min="0" id="tp-camt" value="'+(c.targetAmount||'')+'" placeholder="যেমন: ১০০০০০০" oninput="_tgtRecalc()"></div>';
+    h += '</div>';
+    if (!list.length) h += '<div style="color:var(--mt2);font-size:12px">কোনো SO পাওয়া যায়নি</div>';
+    list.forEach(function(t, i){
+      var th = _targetColor(i);
+      h += '<div style="border-left:5px solid '+th.bd+';background:'+th.bg+';border-radius:10px;padding:8px 10px;margin-bottom:8px">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12px">'+esc(t.userName)+'</b>'
+        +'<span id="tp-sh-'+t.userKey+'" style="font-size:11px;font-weight:700;color:var(--mt2)"></span></div>';
+      h += '<div class="g2"><div class="fg" style="margin:0"><label class="fl">বক্স</label><input type="number" min="0" id="tp-box-'+t.userKey+'" value="'+(t.targetBoxes||'')+'" placeholder="০" oninput="_tgtRecalc()"></div>';
+      h += '<div class="fg" style="margin:0"><label class="fl">টাকা (৳)</label><input type="number" min="0" id="tp-amt-'+t.userKey+'" value="'+(t.targetAmount||'')+'" placeholder="০" oninput="_tgtRecalc()"></div></div></div>';
+    });
+    h += '<div id="tp-sum" style="font-size:12px;margin:8px 0"></div>';
+    h += '<div style="display:flex;gap:8px"><button class="btn btn-gh btn-w" style="font-size:12px" onclick="_tgtFillEven()">🔄 সমান ভাগ (ইনপুটে বসান)</button>'
+      +'<button class="btn btn-bl btn-w" id="tp-save" onclick="saveTargetPlan()">💾 সংরক্ষণ</button></div>';
+    h += '</details>';
+  }
 
   if (S.role === 'dsr') {
     h += '<div style="font-size:11px;color:var(--mt2);margin:2px 0 14px;text-align:center">আপনার আলাদা কোনো টার্গেট নেই — আপনার SO-এর টার্গেটই এখানে দেখানো হয়েছে</div>';
-  } else {
-    h += '<div style="font-size:11px;color:var(--mt2);margin:2px 0 14px;text-align:center">নিচে এই একই টার্গেট প্রতিটি SO-এর মধ্যে ভাগ করা আছে (প্রতিটি SO-এর অধীনে থাকা DSR স্বয়ংক্রিয়ভাবে একই টার্গেটের সাথে যুক্ত)</div>';
   }
 
+  // ── PER-SO PERFORMANCE — each SO's own ring vs the target given to him ──
+  h += '<div class="ct" style="margin-top:6px">📊 SO ভিত্তিক পারফরম্যান্স</div>';
   if (!list.length) {
     h += '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">কোনো SO পাওয়া যায়নি</div>';
-    el.innerHTML = h; return;
   }
-
   list.forEach(function(t, tIdx) {
-    var isSelf = t.userKey === S.userId;
-    var pct = t.pct==null ? null : Math.max(0, t.pct);
-    var barPct = pct==null ? 0 : Math.min(100, pct);
-    var barColor = pct==null ? 'var(--mt2)' : (pct>=100 ? 'var(--gr)' : pct>=60 ? 'var(--am)' : 'var(--re)');
+    var isSelf = t.userKey === S.userId, th = _targetColor(tIdx), pr = _tgtPrimary(t);
     var noBdg = t.displayNo ? ' <span class="bdg b-bl" style="font-size:9px">SO-'+t.displayNo+'</span>' : '';
-    // Update #3: each SO gets its own distinct color theme so it's
-    // immediately clear whose numbers are whose on a shared dashboard.
-    var soTheme = _targetColor(tIdx);
-    h += '<div class="card" style="margin-bottom:10px;background:'+soTheme.bg+';border:2px solid '+(isSelf?'var(--bl)':soTheme.bd)+'">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    h += '<div style="font-weight:700;font-size:13px">'+esc(t.userName)+noBdg+(S.role==='dsr'?' <span style="font-size:10px;font-weight:400;color:var(--mt2)">(আপনার SO)</span>':'')+'</div>';
-    h += '<div style="font-size:11px;color:var(--mt2)">'+(t.period)+'</div></div>';
-
-    if (canEdit) {
-      h += '<div class="g2" style="margin-bottom:6px">';
-      h += '<div class="fg" style="margin:0"><label class="fl">টার্গেট (৳)</label><input type="number" min="0" id="tgt-inp-'+t.userKey+'" value="'+(t.targetAmount||'')+'" placeholder="০"></div>';
-      h += '<div style="display:flex;align-items:flex-end"><button class="btn btn-bl btn-w" style="padding:9px" onclick="saveTarget(\''+t.userKey+'\',\''+esc(t.userName)+'\')">💾 সংরক্ষণ</button></div>';
-      h += '</div>';
+    var share = (hasBox ? t.shareBoxesPct : t.shareAmountPct);
+    h += '<div class="card" style="margin-bottom:10px;background:'+th.bg+';border:2px solid '+(isSelf?'var(--bl)':th.bd)+'">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px">';
+    h += '<div style="font-weight:800;font-size:14px">'+esc(t.userName)+noBdg+(S.role==='dsr'?' <span style="font-size:10px;font-weight:400;color:var(--mt2)">(আপনার SO)</span>':'')+'</div>';
+    h += (share!=null && share>0 ? '<span style="font-size:10px;font-weight:700;background:'+th.bd+';color:#fff;border-radius:10px;padding:2px 8px">কোম্পানি টার্গেটের '+share+'%</span>' : '')+'</div>';
+    if (!(t.targetBoxes>0) && !(t.targetAmount>0)) {
+      h += '<div style="font-size:12px;color:var(--mt2)">এখনো কোনো টার্গেট সেট করা হয়নি</div>';
+      if (t.achievedBoxes>0 || t.achieved>0) h += '<div style="font-size:12px;margin-top:4px">এ মাসে বিক্রি: '+_fbox(t.achievedBoxes)+' বক্স · ৳'+fm(t.achieved)+'</div>';
     } else {
-      h += '<div style="font-size:12px;color:var(--mt);margin-bottom:4px">টার্গেট: ৳'+fm(t.targetAmount||0)+'</div>';
-    }
-
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:4px">অর্জিত: ৳'+fm(t.achieved||0)
-       + (t.targetAmount>0 ? ' / ৳'+fm(t.targetAmount) : '')
-       + (pct!=null ? ' <span style="color:'+barColor+'">('+pct+'%)</span>' : '')+'</div>';
-    if (t.targetAmount>0) {
-      h += '<div style="display:flex;justify-content:center;margin:6px 0">'+svgGauge(barPct,barColor,92)+'</div>';
-      if (t.remaining>0) h += '<div style="font-size:11px;color:var(--mt2);margin-top:4px">বাকি লক্ষ্যে পৌঁছাতে: ৳'+fm(t.remaining)+'</div>';
-      else h += '<div style="font-size:11px;color:var(--gr);margin-top:4px">✅ লক্ষ্য পূর্ণ হয়েছে</div>';
-    } else {
-      h += '<div style="font-size:11px;color:var(--mt2)">এখনো কোনো টার্গেট সেট করা হয়নি</div>';
+      h += '<div style="display:flex;align-items:center;gap:14px">';
+      h += _tgtDonut(pr.pct, 108, 11, pr.label ? pr.label+' টার্গেটে' : '', '', false);
+      h += '<div style="flex:1;min-width:0">';
+      if (t.targetBoxes>0) {
+        h += '<div style="font-size:11px;color:var(--mt2)">📦 বক্স</div>';
+        h += '<div style="font-size:15px;font-weight:800">'+_fbox(t.achievedBoxes)+' <span style="font-size:11px;font-weight:600;color:var(--mt2)">/ '+_fbox(t.targetBoxes)+'</span></div>';
+        h += '<div style="font-size:10px;margin:2px 0 6px;color:'+(t.remainingBoxes>0?'var(--mt2)':'var(--gr)')+'">'+(t.remainingBoxes>0?'বাকি '+_fbox(t.remainingBoxes)+' বক্স':'✅ বক্স লক্ষ্য পূর্ণ')+'</div>';
+      }
+      if (t.targetAmount>0) {
+        h += '<div style="font-size:11px;color:var(--mt2)">💰 টাকা <b style="color:'+_tgtCol(t.pct)+'">'+(t.pct!=null?t.pct+'%':'')+'</b></div>';
+        h += '<div style="font-size:13px;font-weight:800">৳'+fm(t.achieved)+' <span style="font-size:10px;font-weight:600;color:var(--mt2)">/ ৳'+fm(t.targetAmount)+'</span></div>';
+        h += '<div style="margin:3px 0">'+_tgtBar(t.pct, _tgtCol(t.pct))+'</div>';
+        h += '<div style="font-size:10px;color:'+(t.remaining>0?'var(--mt2)':'var(--gr)')+'">'+(t.remaining>0?'বাকি ৳'+fm(t.remaining):'✅ টাকার লক্ষ্য পূর্ণ')+'</div>';
+      }
+      h += '</div></div>';
+      if (t.contribBoxesPct>0) h += '<div style="font-size:10px;color:var(--mt2);margin-top:8px;text-align:right">কোম্পানির মোট বিক্রির '+t.contribBoxesPct+'% এনেছেন</div>';
     }
     h += '</div>';
   });
@@ -6168,7 +6224,7 @@ function _renderTargetList(canEdit) {
   if (canEdit) {
     h += '<div class="ct" style="margin-top:16px">🏆 টার্গেট বোনাস (মালিক কর্তৃক নিষ্পত্তিযোগ্য)</div>';
     h += '<div style="font-size:11px;color:var(--mt2);margin:2px 0 10px;text-align:center">যেসব SO তাদের টার্গেট পূর্ণ করেছেন তাদের জন্য এখানে বোনাস পরিমাণ সেট করুন এবং পরিশোধ নিশ্চিত করুন</div>';
-    var tbList = (S.targetBonusList || []).filter(function(b){ return b.targetAmount > 0; });
+    var tbList = (S.targetBonusList || []).filter(function(b){ return b.targetAmount > 0 || b.targetBoxes > 0; });
     if (!tbList.length) {
       h += '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">এই মাসে কোনো SO-এর টার্গেট সেট করা নেই</div>';
     } else {
@@ -6177,7 +6233,7 @@ function _renderTargetList(canEdit) {
         h += '<div class="card" style="margin-bottom:8px;background:'+theme.bg+';border:2px solid '+theme.bd+'">';
         h += '<div style="display:flex;justify-content:space-between;align-items:center">';
         h += '<div style="font-weight:700;font-size:13px">'+esc(b.userName)+'</div>';
-        h += '<div style="font-size:11px;color:var(--mt2)">অর্জিত: ৳'+fm(b.achieved)+' / ৳'+fm(b.targetAmount)+'</div>';
+        h += '<div style="font-size:11px;color:var(--mt2)">'+(b.targetBoxes>0 ? 'অর্জিত: '+_fbox(b.achievedBoxes)+' / '+_fbox(b.targetBoxes)+' বক্স' : 'অর্জিত: ৳'+fm(b.achieved)+' / ৳'+fm(b.targetAmount))+'</div>';
         h += '</div>';
         if (!b.eligible) {
           h += '<div style="font-size:11px;color:var(--mt2);margin-top:4px">লক্ষ্য এখনো পূর্ণ হয়নি</div></div>';
@@ -6201,6 +6257,8 @@ function _renderTargetList(canEdit) {
 
   h += '<div style="text-align:center;font-size:10px;color:var(--mt2);padding:8px">'+esc(S.shopName||'AXIION DMS')+' · Powered by <span style="color:#FBBF24;font-weight:700">AXIION DMS</span></div>';
   el.innerHTML = h;
+  _tgtAnimateBars();
+  if (canEdit) _tgtRecalc();
 }
 // V56 §3.5 — Owner sets the bonus amount for a person who hit their
 // target (does not mark it paid — see settleTargetBonus below).
@@ -6256,51 +6314,56 @@ async function saveProductTarget(productId, productName) {
   toast('✅ '+productName+' — টার্গেট সংরক্ষিত হয়েছে');
   renderTargetTab();
 }
-async function saveTarget(userKey, userName) {
-  var inp = document.getElementById('tgt-inp-'+userKey); if (!inp) return;
-  var amt = num(inp.value);
-  var pinOk = await confirmOwnerPin(esc(userName)+' — টার্গেট সংরক্ষণ করতে Owner PIN দিন');
+// Live allocation summary for the owner's split editor.
+function _tgtVal(id) { var e = document.getElementById(id); return e ? (Number(e.value)||0) : 0; }
+function _tgtRecalc() {
+  var list = S.targetList || [];
+  var cb = _tgtVal('tp-cbox'), ca = _tgtVal('tp-camt'), sb = 0, sa = 0;
+  list.forEach(function(t){ sb += _tgtVal('tp-box-'+t.userKey); sa += _tgtVal('tp-amt-'+t.userKey); });
+  list.forEach(function(t){
+    var el = document.getElementById('tp-sh-'+t.userKey); if (!el) return;
+    var b = _tgtVal('tp-box-'+t.userKey), a = _tgtVal('tp-amt-'+t.userKey);
+    var bits = [];
+    if (cb>0 && b>0) bits.push((Math.round(b/cb*1000)/10)+'% বক্স');
+    if (ca>0 && a>0) bits.push((Math.round(a/ca*1000)/10)+'% টাকা');
+    el.textContent = bits.join(' · ');
+  });
+  var overB = sb > cb + 0.0001, overA = sa > ca + 0.5;
+  var sum = document.getElementById('tp-sum'), save = document.getElementById('tp-save');
+  if (sum) {
+    sum.innerHTML =
+      '<div style="color:'+(overB?'var(--re)':'var(--txt)')+'">📦 ভাগ হয়েছে <b>'+_fbox(sb)+'</b> / '+_fbox(cb)+' বক্স — '
+        +(overB ? '<b>'+_fbox(sb-cb)+' বেশি!</b>' : 'বাকি '+_fbox(cb-sb))+'</div>'
+      +'<div style="color:'+(overA?'var(--re)':'var(--txt)')+'">💰 ভাগ হয়েছে <b>৳'+fm(sa)+'</b> / ৳'+fm(ca)+' — '
+        +(overA ? '<b>৳'+fm(sa-ca)+' বেশি!</b>' : 'বাকি ৳'+fm(ca-sa))+'</div>';
+  }
+  if (save) { save.disabled = overB || overA; save.style.opacity = (overB||overA) ? '.5' : '1'; }
+}
+// Fill the inputs with an equal split of the entered totals (nothing is saved until 💾).
+function _tgtFillEven() {
+  var list = S.targetList || []; if (!list.length) return;
+  var n = list.length, cb = _tgtVal('tp-cbox'), ca = _tgtVal('tp-camt');
+  list.forEach(function(t){
+    var b = document.getElementById('tp-box-'+t.userKey), a = document.getElementById('tp-amt-'+t.userKey);
+    if (b) b.value = cb>0 ? Math.floor(cb/n*100)/100 : '';
+    if (a) a.value = ca>0 ? Math.floor(ca/n*100)/100 : '';
+  });
+  _tgtRecalc();
+}
+async function saveTargetPlan() {
+  var list = S.targetList || [];
+  var cb = _tgtVal('tp-cbox'), ca = _tgtVal('tp-camt');
+  var splits = list.map(function(t){ return { userKey: t.userKey, boxes: _tgtVal('tp-box-'+t.userKey), amount: _tgtVal('tp-amt-'+t.userKey) }; });
+  var pinOk = await confirmOwnerPin('টার্গেট ও SO-ভিত্তিক ভাগ সংরক্ষণ করতে Owner PIN দিন');
   if (!pinOk) return;
   showOvl('সংরক্ষণ হচ্ছে...');
   var r = await apiPost('/api/attendance', {
-    action: 'target-set', userKey: userKey, userName: userName, role: 'so',
-    period: S.targetPeriod, targetAmount: amt, setBy: S.userName || S.role,
-    requesterRole: S.role, ownerPin: window._lastOwnerPin
-  });
-  hideOvl();
-  if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
-  toast('✅ টার্গেট সংরক্ষিত হয়েছে');
-  renderTargetTab();
-}
-async function saveCompanyTarget() {
-  var inp = document.getElementById('tgt-inp-COMPANY_TOTAL'); if (!inp) return;
-  var amt = num(inp.value);
-  var pinOk = await confirmOwnerPin('সর্বমোট টার্গেট সংরক্ষণ করতে Owner PIN দিন');
-  if (!pinOk) return;
-  showOvl('সংরক্ষণ হচ্ছে...');
-  var r = await apiPost('/api/attendance', {
-    action: 'target-set', userKey: 'COMPANY_TOTAL', userName: 'COMPANY_TOTAL', role: 'company',
-    period: S.targetPeriod, targetAmount: amt, setBy: S.userName || S.role,
-    requesterRole: S.role, ownerPin: window._lastOwnerPin
-  });
-  hideOvl();
-  if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
-  toast('✅ সর্বমোট টার্গেট সংরক্ষিত হয়েছে');
-  renderTargetTab();
-}
-async function splitTargetEven() {
-  var inp = document.getElementById('tgt-inp-COMPANY_TOTAL');
-  var totalAmt = inp ? num(inp.value) : 0;
-  var pinOk = await confirmOwnerPin('সব SO-এর মধ্যে ভাগ করতে Owner PIN দিন');
-  if (!pinOk) return;
-  showOvl('ভাগ করা হচ্ছে...');
-  var r = await apiPost('/api/attendance', {
-    action: 'target-split-even', period: S.targetPeriod, totalAmount: totalAmt,
+    action: 'target-split-save', period: S.targetPeriod, companyBoxes: cb, companyAmount: ca, splits: splits,
     setBy: S.userName || S.role, requesterRole: S.role, ownerPin: window._lastOwnerPin
   });
   hideOvl();
   if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
-  toast('✅ '+r.count+' জন SO-এর মধ্যে ৳'+fm(r.share)+' করে ভাগ করা হয়েছে');
+  toast('✅ টার্গেট ও ভাগ সংরক্ষিত হয়েছে');
   renderTargetTab();
 }
 

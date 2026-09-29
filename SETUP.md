@@ -99,3 +99,6 @@ Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-ca
 - **Owner/Manager → দিনশেষ হিসাব → 📥 বাকি পেমেন্ট:** every due collection now shows the **time** (Bangladesh time), shop, amount and a **📞 কল** button, grouped by DSR with a shop count and total ("N টি দোকান থেকে M বার আদায়").
 - **Owner/Manager dashboard → 🏅 সেরা ৫০ দোকান:** top 50 shops by buying and payment behaviour (period + sort selectable), each with a one-tap call button. Loads only when the card is opened. Backed by `api/shops.js?action=top-shops`.
 - Still 12 API files; `schema.sql` unchanged from 4.9.0.
+
+## 6. Box-based sales targets
+Sales targets are BOX-based (1 box = 1 full case of any SKU) alongside the money target. The `targets` table in `schema.sql` already includes the `target_boxes` column — running `schema.sql` once (section 1) is all that is needed. No separate migration file.

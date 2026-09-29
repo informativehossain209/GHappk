@@ -50,7 +50,7 @@
 //  cyclePeriodForDate in _lib/db.js.
 
 const {
-  supabase, cors, now_, safeErr, bdtToday,
+  supabase, cors, now_, safeErr, bdtToday, fetchAll,
   cyclePeriodBounds, cyclePeriodForDate, cyclePeriodToday, cyclePeriodDates
 } = require('./_lib/db');
 
@@ -531,21 +531,72 @@ module.exports = async (req, res) => {
       const userKey = String(d.userKey || ''), period = String(d.period || '');
       if (!userKey || !/^\d{4}-\d{2}$/.test(period)) return res.json({ ok: false, error: 'ভুল ইনপুট' });
       const role = userKey === 'COMPANY_TOTAL' ? 'company' : 'so'; // DSR no longer gets its own target row
+      // Box target (company's real policy) + money target. A field that is
+      // not sent keeps its stored value, so saving one never wipes the other.
+      const { data: ex, error: exErr } = await supabase.from('targets').select('target_amount,target_boxes')
+        .eq('user_key', userKey).eq('period', period).maybeSingle();
+      if (exErr) return res.json({ ok: false, error: _boxMigrationHint(exErr) });
+      const amt = d.targetAmount !== undefined ? Number(d.targetAmount) : (ex ? Number(ex.target_amount) : 0);
+      const box = d.targetBoxes  !== undefined ? Number(d.targetBoxes)  : (ex ? Number(ex.target_boxes)  : 0);
+      if (!(amt >= 0) || !(box >= 0)) return res.json({ ok: false, error: 'টার্গেট ঋণাত্মক হতে পারে না' });
       const row = {
         user_key: userKey, period,
         user_name: d.userName || (userKey === 'COMPANY_TOTAL' ? 'COMPANY_TOTAL' : ''),
-        role,
-        target_amount: Number(d.targetAmount) || 0,
+        role, target_amount: amt, target_boxes: box,
         set_by: d.setBy || '', set_at: now_()
       };
       const { error } = await supabase.from('targets').upsert(row, { onConflict: 'user_key,period' });
-      if (error) throw error;
+      if (error) return res.json({ ok: false, error: _boxMigrationHint(error) });
       return res.json({ ok: true });
     }
 
-    // POST ?action=target-split-even — OWNER ONLY. Splits the company-wide
-    // total target evenly across every SO for the period (one tap), while
-    // individual SO figures can still be hand-edited afterwards.
+    // POST ?action=target-split-save — OWNER ONLY. ONE save for the whole
+    // plan: the company total (boxes + money) and every SO's share as REAL
+    // NUMBERS (e.g. 4000 / 3000 / 3000 boxes — not percentages, not forced
+    // equal). The SO shares may not add up to MORE than the company total
+    // (they may add up to less — the rest simply stays unallocated).
+    if (req.method === 'POST' && action === 'target-split-save') {
+      const d = req.body || {};
+      if ((d.requesterRole || '') !== 'owner') {
+        return res.json({ ok: false, error: 'শুধুমাত্র মালিক এই কাজ করতে পারবেন' });
+      }
+      if (!(await _verifyOwnerPin(d.ownerPin))) {
+        return res.json({ ok: false, error: 'ভুল Owner PIN' });
+      }
+      const period = String(d.period || '');
+      if (!/^\d{4}-\d{2}$/.test(period)) return res.json({ ok: false, error: 'ভুল ইনপুট' });
+      const cBox = Number(d.companyBoxes) || 0, cAmt = Number(d.companyAmount) || 0;
+      const splits = Array.isArray(d.splits) ? d.splits : [];
+      if (cBox < 0 || cAmt < 0) return res.json({ ok: false, error: 'টার্গেট ঋণাত্মক হতে পারে না' });
+      if (splits.some(x => !x.userKey || !(Number(x.boxes) >= 0) || !(Number(x.amount) >= 0)))
+        return res.json({ ok: false, error: 'SO-এর টার্গেটে ভুল সংখ্যা আছে' });
+      const sumBox = splits.reduce((t, x) => t + (Number(x.boxes) || 0), 0);
+      const sumAmt = splits.reduce((t, x) => t + (Number(x.amount) || 0), 0);
+      if (sumBox > cBox + 0.0001)
+        return res.json({ ok: false, error: 'SO-দের বক্স টার্গেটের যোগফল (' + sumBox + ') সর্বমোট বক্স টার্গেট (' + cBox + ') ছাড়িয়ে গেছে' });
+      if (sumAmt > cAmt + 0.5)
+        return res.json({ ok: false, error: 'SO-দের টাকার টার্গেটের যোগফল সর্বমোট টাকার টার্গেট ছাড়িয়ে গেছে' });
+
+      // only real SOs may receive a share
+      const { data: sos, error: sosErr } = await supabase.from('srs').select('id,name').eq('role', 'so');
+      if (sosErr) throw sosErr;
+      const soMap = {}; (sos || []).forEach(x => { soMap[String(x.id)] = x.name; });
+      if (splits.some(x => !soMap[String(x.userKey)])) return res.json({ ok: false, error: 'অজানা SO' });
+
+      const by = d.setBy || '', at = now_();
+      const rows = [{ user_key: 'COMPANY_TOTAL', period, user_name: 'COMPANY_TOTAL', role: 'company', target_amount: cAmt, target_boxes: cBox, set_by: by, set_at: at }]
+        .concat(splits.map(x => ({
+          user_key: String(x.userKey), period, user_name: soMap[String(x.userKey)] || '', role: 'so',
+          target_amount: Number(x.amount) || 0, target_boxes: Number(x.boxes) || 0, set_by: by, set_at: at
+        })));
+      const { error } = await supabase.from('targets').upsert(rows, { onConflict: 'user_key,period' });
+      if (error) return res.json({ ok: false, error: _boxMigrationHint(error) });
+      return res.json({ ok: true, saved: rows.length, allocatedBoxes: sumBox, allocatedAmount: sumAmt });
+    }
+
+    // POST ?action=target-split-even — OWNER ONLY. Convenience: splits the
+    // company total (boxes AND money) equally across every SO in one tap.
+    // Real-number editing per SO (target-split-save) is the normal way.
     if (req.method === 'POST' && action === 'target-split-even') {
       const d = req.body || {};
       if ((d.requesterRole || '') !== 'owner') {
@@ -562,22 +613,24 @@ module.exports = async (req, res) => {
       const soList = sos || [];
       if (!soList.length) return res.json({ ok: false, error: 'কোনো SO পাওয়া যায়নি' });
 
-      let total = Number(d.totalAmount);
-      if (!isFinite(total) || total <= 0) {
-        const { data: companyRow } = await supabase.from('targets').select('target_amount')
-          .eq('user_key', 'COMPANY_TOTAL').eq('period', period).maybeSingle();
-        total = companyRow ? Number(companyRow.target_amount) : 0;
-      }
-      if (!(total > 0)) return res.json({ ok: false, error: 'আগে সর্বমোট টার্গেট সেট করুন' });
+      const { data: companyRow, error: cErr } = await supabase.from('targets').select('target_amount,target_boxes')
+        .eq('user_key', 'COMPANY_TOTAL').eq('period', period).maybeSingle();
+      if (cErr) return res.json({ ok: false, error: _boxMigrationHint(cErr) });
+      let totalAmt = Number(d.totalAmount), totalBox = Number(d.totalBoxes);
+      if (!isFinite(totalAmt) || totalAmt < 0 || d.totalAmount === undefined) totalAmt = companyRow ? Number(companyRow.target_amount) : 0;
+      if (!isFinite(totalBox) || totalBox < 0 || d.totalBoxes === undefined)  totalBox = companyRow ? Number(companyRow.target_boxes) : 0;
+      if (!(totalAmt > 0) && !(totalBox > 0)) return res.json({ ok: false, error: 'আগে সর্বমোট টার্গেট (বক্স/টাকা) সেট করুন' });
 
-      const share = Math.round((total / soList.length) * 100) / 100;
-      const rows = soList.map(s => ({
-        user_key: s.id, period, user_name: s.name, role: 'so',
-        target_amount: share, set_by: d.setBy || '', set_at: now_()
+      const n = soList.length;
+      const shareAmt = Math.floor((totalAmt / n) * 100) / 100;
+      const shareBox = Math.floor((totalBox / n) * 100) / 100;
+      const rows = soList.map(x => ({
+        user_key: x.id, period, user_name: x.name, role: 'so',
+        target_amount: shareAmt, target_boxes: shareBox, set_by: d.setBy || '', set_at: now_()
       }));
       const { error } = await supabase.from('targets').upsert(rows, { onConflict: 'user_key,period' });
-      if (error) throw error;
-      return res.json({ ok: true, share, count: soList.length });
+      if (error) return res.json({ ok: false, error: _boxMigrationHint(error) });
+      return res.json({ ok: true, share: shareAmt, shareBoxes: shareBox, count: n });
     }
 
     // GET ?action=target-get&userKey=&period=YYYY-MM — one person's target + live progress
@@ -585,24 +638,21 @@ module.exports = async (req, res) => {
       const userKey = req.query.userKey;
       const period = req.query.period || cyclePeriodToday();
       if (!userKey) return res.json({ ok: false, error: 'userKey প্রয়োজন' });
-      const [achieved, tRes] = await Promise.all([
-        _achievedForUser(userKey, period),
+      const [st, tRes] = await Promise.all([
+        _targetStats(period),
         supabase.from('targets').select('*').eq('user_key', userKey).eq('period', period).maybeSingle()
       ]);
       if (tRes.error) throw tRes.error;
       const t = tRes.data;
-      const targetAmount = t ? Number(t.target_amount) : 0;
-      return res.json({
-        ok: true, period, userKey,
-        targetAmount, achieved,
-        pct: targetAmount > 0 ? Math.round((achieved / targetAmount) * 1000) / 10 : null,
-        remaining: Math.max(0, targetAmount - achieved),
-        setBy: t ? t.set_by : '', setAt: t ? t.set_at : null
-      });
+      const e = st.bySo[String(userKey)] || st.byId[String(userKey)] || { rev: 0, boxes: 0 };
+      return res.json({ ok: true, period, userKey, ..._progress(t, e), setBy: t ? t.set_by : '', setAt: t ? t.set_at : null });
     }
 
     // GET ?action=target-list&period=&viewerRole=&viewerId=
     //  owner/manager → every SO ; so → self only ; dsr → their paired SO's target (read-only, no row of their own)
+    //  Each row carries BOTH measures: boxes (the company's real target)
+    //  and money. `company` also carries how much of it is already
+    //  allocated to SOs, and each SO's share of the company target.
     if (req.method === 'GET' && action === 'target-list') {
       const period = req.query.period || cyclePeriodToday();
       const viewerRole = req.query.viewerRole || '';
@@ -616,8 +666,6 @@ module.exports = async (req, res) => {
       if (viewerRole === 'so') {
         list = list.filter(s => s.id === viewerId);
       } else if (viewerRole === 'dsr') {
-        // A DSR has no target of their own — show only their paired SO's
-        // target/progress (auto-connected via srs.so_id), read-only.
         const { data: meRow } = await supabase.from('srs').select('so_id').eq('id', viewerId).maybeSingle();
         const mySoId = meRow ? String(meRow.so_id || '') : '';
         list = list.filter(s => String(s.id) === mySoId);
@@ -628,31 +676,26 @@ module.exports = async (req, res) => {
       if (tErr) throw tErr;
       const tMap = {};
       (targetsData || []).forEach(t => { tMap[t.user_key] = t; });
+      const st = await _targetStats(period);
 
-      const results = await Promise.all(list.map(async s => {
-        const achieved = await _achievedForUser(s.id, period);
-        const t = tMap[s.id];
-        const targetAmount = t ? Number(t.target_amount) : 0;
-        return {
-          userKey: s.id, userName: s.name, role: s.role, displayNo: s.display_no,
-          period, targetAmount, achieved,
-          pct: targetAmount > 0 ? Math.round((achieved / targetAmount) * 1000) / 10 : null,
-          remaining: Math.max(0, targetAmount - achieved)
-        };
-      }));
-
-      // Company-wide total target — one figure set by Owner only, visible to
-      // every role, computed against total company revenue for the period
-      // (same give/point_sale − return/point_damage_return pattern as everywhere else).
       const companyRow = tMap['COMPANY_TOTAL'];
-      const companyTargetAmount = companyRow ? Number(companyRow.target_amount) : 0;
-      const companyAchieved = await _achievedCompanyTotal(period);
-      const company = {
-        userKey: 'COMPANY_TOTAL', period,
-        targetAmount: companyTargetAmount, achieved: companyAchieved,
-        pct: companyTargetAmount > 0 ? Math.round((companyAchieved / companyTargetAmount) * 1000) / 10 : null,
-        remaining: Math.max(0, companyTargetAmount - companyAchieved)
-      };
+      const company = { userKey: 'COMPANY_TOTAL', period, ..._progress(companyRow, st.company) };
+
+      const results = list.map(s => {
+        const t = tMap[s.id];
+        const pr = _progress(t, st.bySo[String(s.id)] || { rev: 0, boxes: 0 });
+        return {
+          userKey: s.id, userName: s.name, role: s.role, displayNo: s.display_no, period, ...pr,
+          shareBoxesPct: company.targetBoxes > 0 ? Math.round((pr.targetBoxes / company.targetBoxes) * 1000) / 10 : null,
+          shareAmountPct: company.targetAmount > 0 ? Math.round((pr.targetAmount / company.targetAmount) * 1000) / 10 : null,
+          contribBoxesPct: st.company.boxes > 0 ? Math.round((pr.achievedBoxes / st.company.boxes) * 1000) / 10 : 0
+        };
+      });
+      // Allocation over ALL SOs (not just the viewer's slice).
+      const allocBoxes = (allSos || []).reduce((t, s) => t + (tMap[s.id] ? Number(tMap[s.id].target_boxes) || 0 : 0), 0);
+      const allocAmount = (allSos || []).reduce((t, s) => t + (tMap[s.id] ? Number(tMap[s.id].target_amount) || 0 : 0), 0);
+      company.allocatedBoxes = Math.round(allocBoxes * 100) / 100;
+      company.allocatedAmount = Math.round(allocAmount * 100) / 100;
 
       return res.json({ ok: true, period, company, list: results });
     }
@@ -733,19 +776,19 @@ module.exports = async (req, res) => {
       const { data: bonusData } = await supabase.from('target_bonuses').select('*').eq('period', period);
       const bMap = {}; (bonusData || []).forEach(b => { bMap[b.user_key] = b; });
 
-      const results = await Promise.all((allSos || []).map(async s => {
+      const st = await _targetStats(period);
+      const results = (allSos || []).map(s => {
         const t = tMap[s.id];
-        const targetAmount = t ? Number(t.target_amount) : 0;
-        const achieved = targetAmount > 0 ? await _achievedForUser(s.id, period) : 0;
+        const pr = _progress(t, st.bySo[String(s.id)] || { rev: 0, boxes: 0 });
         const b = bMap[s.id];
         return {
-          userKey: s.id, userName: s.name, displayNo: s.display_no, period,
-          targetAmount, achieved, eligible: targetAmount > 0 && achieved >= targetAmount,
+          userKey: s.id, userName: s.name, displayNo: s.display_no, period, ...pr,
+          eligible: _targetMet(pr),
           bonusAmount: b ? Number(b.amount) : 0,
           status: b ? b.status : 'unset',
           settledAt: b ? b.settled_at : null
         };
-      }));
+      });
       return res.json({ ok: true, period, list: results });
     }
 
@@ -831,9 +874,21 @@ module.exports = async (req, res) => {
         .from('product_targets').select('product_id,target_qty').eq('period', period);
       if (tErr) throw tErr;
 
-      const totalTargetCases = (rows || []).reduce((s, r) => s + (Number(r.target_qty) || 0), 0);
-      const achievedMap = await _achievedCasesByProduct(period, prods || []);
-      const totalAchievedCases = Object.values(achievedMap).reduce((s, v) => s + v, 0);
+      // The company's real target is in BOXES (one box = one full case of
+      // any SKU). When an overall box target is set, RADT is driven by it;
+      // otherwise fall back to the per-product case targets.
+      let totalTargetCases = (rows || []).reduce((s, r) => s + (Number(r.target_qty) || 0), 0);
+      let totalAchievedCases, source = 'product';
+      const { data: cRow } = await supabase.from('targets').select('target_boxes')
+        .eq('user_key', 'COMPANY_TOTAL').eq('period', period).maybeSingle();
+      if (cRow && Number(cRow.target_boxes) > 0) {
+        totalTargetCases = Number(cRow.target_boxes);
+        totalAchievedCases = (await _targetStats(period)).company.boxes;
+        source = 'company-boxes';
+      } else {
+        const achievedMap = await _achievedCasesByProduct(period, prods || []);
+        totalAchievedCases = Object.values(achievedMap).reduce((s, v) => s + v, 0);
+      }
       const remaining = Math.max(0, Math.round((totalTargetCases - totalAchievedCases) * 100) / 100);
 
       // Working days left in the cycle = today → period end, excluding
@@ -853,7 +908,7 @@ module.exports = async (req, res) => {
         : Math.ceil(remaining);
 
       return res.json({
-        ok: true, period, totalTargetCases,
+        ok: true, period, totalTargetCases, source,
         totalAchievedCases: Math.round(totalAchievedCases * 100) / 100,
         remaining, workingDaysLeft, dailyTarget
       });
@@ -886,20 +941,111 @@ module.exports = async (req, res) => {
 // nowhere in target-set today, but kept safe for future use) this simply
 // resolves to just that one id, unchanged from before.
 async function _achievedForUser(userKey, period) {
+  const st = await _targetStats(period);
+  const e = st.bySo[String(userKey)] || st.byId[String(userKey)];
+  return e ? e.rev : 0;
+}
+
+// Builds the progress block for a target row `t` (may be null) against
+// an achieved entry {rev, boxes}. Money keeps its original field names
+// (targetAmount / achieved / pct / remaining) so older screens keep
+// working; boxes get their own set.
+function _progress(t, e) {
+  const tAmt = t ? Number(t.target_amount) || 0 : 0;
+  const tBox = t ? Number(t.target_boxes)  || 0 : 0;
+  const rev = e ? e.rev : 0, box = e ? e.boxes : 0;
+  const r1 = x => Math.round(x * 10) / 10, r2 = x => Math.round(x * 100) / 100;
+  return {
+    targetAmount: tAmt, achieved: rev,
+    pct: tAmt > 0 ? r1((rev / tAmt) * 100) : null,
+    remaining: Math.max(0, r2(tAmt - rev)),
+    targetBoxes: tBox, achievedBoxes: box,
+    pctBoxes: tBox > 0 ? r1((box / tBox) * 100) : null,
+    remainingBoxes: Math.max(0, r2(tBox - box))
+  };
+}
+// A target counts as MET on boxes when a box target exists (the company's
+// real measure), otherwise on money — used by target bonus + salary view.
+function _targetMet(pr) {
+  if (pr.targetBoxes > 0) return pr.achievedBoxes >= pr.targetBoxes;
+  return pr.targetAmount > 0 && pr.achieved >= pr.targetAmount;
+}
+function _boxMigrationHint(err) {
+  const m = String((err && err.message) || err || '');
+  if (/target_boxes/i.test(m)) return 'ডাটাবেসে target_boxes কলাম নেই — সর্বশেষ schema.sql Supabase SQL editor-এ চালান';
+  return safeErr(err);
+}
+
+// ══════════════════════════════════════════════════
+//  BOX-BASED TARGET STATS — the single source of truth for every target
+//  figure (company, each SO, salary target-bonus, RADT).
+//
+//  Company policy: the company gives its distributor a BOX target (one
+//  box = one full case of ANY SKU — 6, 24, 40 pieces… it does not matter),
+//  alongside a money target. So achieved boxes =
+//        Σ over products ( net pieces sold ÷ that product's case_size )
+//  where net pieces = (give + point_sale) − (return + point_damage_return)
+//  — the same sign rule every other sales figure in the app uses.
+//  Boxes are kept fractional (14 pcs of a 12-pc case = 1.17 boxes) and
+//  rounded to 2 decimals only at the end; a product whose net is negative
+//  for the period counts 0, never a minus.
+//
+//  Everything comes from ONE paginated read of the period's transactions
+//  (fetchAll) — the old per-SO queries were bare selects that PostgREST
+//  silently truncates at 1000 rows, which made progress wrong on a busy
+//  month — and is then split per SO in memory:
+//     SO total = the SO's own id + every DSR paired to that SO (srs.so_id)
+//     company  = every transaction (no sr_id filter)
+// ══════════════════════════════════════════════════
+async function _targetStats(period) {
   const { start: from, end: to } = cyclePeriodBounds(period);
-  let ids = [userKey];
-  const { data: dsrs } = await supabase.from('srs').select('id').eq('so_id', userKey);
-  if (dsrs && dsrs.length) ids = ids.concat(dsrs.map(x => x.id));
-  const { data, error } = await supabase
-    .from('transactions').select('type,total_revenue').in('sr_id', ids).gte('date', from).lte('date', to);
-  if (error) throw error;
-  let rev = 0;
-  (data || []).forEach(r => {
-    const v = Number(r.total_revenue) || 0;
-    if (r.type === 'give' || r.type === 'point_sale') rev += v;
-    if (r.type === 'return' || r.type === 'point_damage_return') rev -= v;
+  const [srs, prods, txs] = await Promise.all([
+    fetchAll(() => supabase.from('srs').select('id,role,so_id')),
+    fetchAll(() => supabase.from('products').select('id,case_size')),
+    fetchAll(() => supabase.from('transactions')
+      .select('sr_id,type,product_id,total_units,total_revenue')
+      .in('type', ['give', 'return', 'point_sale', 'point_damage_return'])
+      .gte('date', from).lte('date', to))
+  ]);
+  const cs = {};
+  (prods || []).forEach(p => { cs[String(p.id)] = Math.max(1, Number(p.case_size) || 1); });
+
+  // per sr_id → { rev, pcs:{productId: netPieces} }
+  const per = {}, all = { rev: 0, pcs: {} };
+  (txs || []).forEach(r => {
+    const sign = (r.type === 'give' || r.type === 'point_sale') ? 1 : -1;
+    const u = (Number(r.total_units) || 0) * sign, v = (Number(r.total_revenue) || 0) * sign;
+    const pid = String(r.product_id || '');
+    const sid = String(r.sr_id || '');
+    all.rev += v; if (pid) all.pcs[pid] = (all.pcs[pid] || 0) + u;
+    if (!sid) return;
+    const e = per[sid] || (per[sid] = { rev: 0, pcs: {} });
+    e.rev += v; if (pid) e.pcs[pid] = (e.pcs[pid] || 0) + u;
   });
-  return Math.round(rev * 100) / 100;
+  const toBoxes = pcs => {
+    let b = 0;
+    Object.keys(pcs).forEach(pid => { b += Math.max(0, pcs[pid]) / (cs[pid] || 1); });
+    return Math.round(b * 100) / 100;
+  };
+  const fin = e => ({ rev: Math.round(e.rev * 100) / 100, boxes: toBoxes(e.pcs) });
+  const merge = ids => {
+    const m = { rev: 0, pcs: {} };
+    ids.forEach(id => {
+      const e = per[String(id)]; if (!e) return;
+      m.rev += e.rev;
+      Object.keys(e.pcs).forEach(pid => { m.pcs[pid] = (m.pcs[pid] || 0) + e.pcs[pid]; });
+    });
+    return m;
+  };
+
+  const byId = {}; Object.keys(per).forEach(k => { byId[k] = fin(per[k]); });
+  const dsrsBySo = {};
+  (srs || []).forEach(x => { if (x.role === 'dsr' && x.so_id) (dsrsBySo[String(x.so_id)] = dsrsBySo[String(x.so_id)] || []).push(String(x.id)); });
+  const bySo = {};
+  (srs || []).filter(x => x.role === 'so').forEach(x => {
+    bySo[String(x.id)] = fin(merge([String(x.id)].concat(dsrsBySo[String(x.id)] || [])));
+  });
+  return { company: fin(all), bySo, byId };
 }
 
 // V43 update #5 — re-verifies an Owner PIN server-side (never trust the
@@ -912,20 +1058,9 @@ async function _verifyOwnerPin(pin) {
   return !!(data && data.length);
 }
 
-// Same revenue formula as _achievedForUser but company-wide (no sr_id filter) —
-// backs the single overall "total sell target" figure shown to every role.
+// Company-wide achieved money (same formula, no sr_id filter).
 async function _achievedCompanyTotal(period) {
-  const { start: from, end: to } = cyclePeriodBounds(period);
-  const { data, error } = await supabase
-    .from('transactions').select('type,total_revenue').gte('date', from).lte('date', to);
-  if (error) throw error;
-  let rev = 0;
-  (data || []).forEach(r => {
-    const v = Number(r.total_revenue) || 0;
-    if (r.type === 'give' || r.type === 'point_sale') rev += v;
-    if (r.type === 'return' || r.type === 'point_damage_return') rev -= v;
-  });
-  return Math.round(rev * 100) / 100;
+  return (await _targetStats(period)).company.rev;
 }
 
 // V43 update #1: sums total_units (raw pieces) per product_id for the
@@ -939,9 +1074,8 @@ async function _achievedCompanyTotal(period) {
 // (already fetched by the caller) so this never re-queries products.
 async function _achievedCasesByProduct(period, prods) {
   const { start: from, end: to } = cyclePeriodBounds(period);
-  const { data, error } = await supabase
-    .from('transactions').select('type,product_id,total_units').gte('date', from).lte('date', to);
-  if (error) throw error;
+  const data = await fetchAll(() => supabase
+    .from('transactions').select('type,product_id,total_units').gte('date', from).lte('date', to));
   const pieceMap = {};
   (data || []).forEach(r => {
     const v = Number(r.total_units) || 0;
@@ -1067,14 +1201,16 @@ async function computeSalary(userKey, month) {
   // (target-bonus-settle) is a fully separate, manual, Owner-confirmed
   // action tracked in its own `target_bonuses` ledger.
   const [{ data: targetRow }, { data: tbRow }] = await Promise.all([
-    supabase.from('targets').select('target_amount').eq('user_key', userKey).eq('period', month).maybeSingle(),
+    supabase.from('targets').select('target_amount,target_boxes').eq('user_key', userKey).eq('period', month).maybeSingle(),
     supabase.from('target_bonuses').select('*').eq('user_key', userKey).eq('period', month).maybeSingle()
   ]);
-  const tgtAmount = targetRow ? Number(targetRow.target_amount) : 0;
-  const tgtAchieved = tgtAmount > 0 ? await _achievedForUser(userKey, month) : 0;
+  const hasTgt = targetRow && (Number(targetRow.target_amount) > 0 || Number(targetRow.target_boxes) > 0);
+  const stT = hasTgt ? await _targetStats(month) : null;
+  const tgtProg = _progress(targetRow, stT ? (stT.bySo[String(userKey)] || stT.byId[String(userKey)]) : null);
   const targetBonus = {
-    targetAmount: tgtAmount, achieved: tgtAchieved,
-    eligible: tgtAmount > 0 && tgtAchieved >= tgtAmount,
+    targetAmount: tgtProg.targetAmount, achieved: tgtProg.achieved,
+    targetBoxes: tgtProg.targetBoxes, achievedBoxes: tgtProg.achievedBoxes,
+    eligible: _targetMet(tgtProg),
     amount: tbRow ? Number(tbRow.amount) : 0,
     status: tbRow ? tbRow.status : 'unset', // 'unset' | 'pending' | 'settled'
     settledAt: tbRow ? tbRow.settled_at : null
