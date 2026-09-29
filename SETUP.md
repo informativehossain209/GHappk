@@ -102,3 +102,18 @@ Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-ca
 
 ## 6. Box-based sales targets
 Sales targets are BOX-based (1 box = 1 full case of any SKU) alongside the money target. The `targets` table in `schema.sql` already includes the `target_boxes` column — running `schema.sql` once (section 1) is all that is needed. No separate migration file.
+
+## 10. What's new in 5.0.0 — Shop Ledger (📒 লেনদেন খাতা)
+Every shop now has a full transaction page. Open any shop (Owner / Manager / SO: **দোকান ও লোকেশন → shop**; DSR: **shop → detail**) and press **📒 লেনদেন খাতা**.
+
+- **Top card:** current due, total given, total paid, number of memos.
+- **চলমান মেমো (live memo):** starts with the first sale after the due was zero. It lists, in time order, every bill (date + time, slip, who delivered, total, cash paid, due added) and every later due collection (date + time, collector, which bill it paid) with the running due after each line.
+- **Tap a bill** → every product with cases/pieces, price, line total, commission/discount, the bill's payable, and that bill's own due breakdown (total → cash at delivery → collected later → still due).
+- **Due reaches zero → the memo closes automatically** (however many days it took) and moves to **📚 আগের মেমো**. The next sale opens a fresh memo. Tap any old memo to see its whole timeline.
+- Damaged goods taken back (money/exchange) and point-sale returns appear as information lines and never change the due.
+- The ledger's final due always equals the "মোট বাকি" shown everywhere else.
+
+**Database:** run the full `schema.sql` in the Supabase SQL editor. The only changes in 5.0 are one new column (`due_calendar.tx_id`) and a few indexes (bottom of the file). Note: `schema.sql` drops and recreates tables, so it wipes existing data.
+Older dues without `tx_id` are matched to their sale automatically (same shop + date + amount), so existing history appears in the ledger immediately.
+
+Still 12 API files — the ledger lives inside `api/shops.js` (`action=ledger`, `action=ledger-sale`).

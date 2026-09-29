@@ -1,4 +1,4 @@
-// shops.js — AXIION Blueprint §3 (new file, 11/12 slot) + §11 route surface
+// shops.js — AXIION Blueprint §3 + §11 route surface (v5.0: + shop ledger / memo history)
 //
 // Backend surface for the Shop Registry / Point-of-Sale module. This
 // file wires up every action listed in §3's API map so the 12-file
@@ -39,6 +39,174 @@ async function _isDuplicateShopName(name, excludeId) {
   const { data, error } = await supabase.from('shops').select('id,name').ilike('name', '%' + esc + '%').limit(500);
   if (error) throw error;
   return (data || []).some(s => String(s.id) !== String(excludeId || '') && String(s.name || '').trim().toLowerCase() === needle);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v5.0 — SHOP LEDGER (লেনদেন খাতা)
+//  One running "khata" per shop, built purely from data that already
+//  exists (transactions + due_calendar + due_collections + damage_collections):
+//    • sale   — goods given (total, discount/commission, paid now, due added)
+//    • pay    — a later due collection
+//    • dmg/ret— damaged goods taken back (information only, never moves the due)
+//  Events are replayed oldest → newest with a running balance. A "memo"
+//  (cycle) OPENS on the first sale after the balance was zero and CLOSES
+//  the moment the balance returns to zero — however many days that takes.
+//  Closed memos become history; the open memo is the live one.
+//  The final balance always equals Σ(amount − paid) of the shop's open
+//  dues — the same number the rest of the app shows as "মোট বাকি".
+// ══════════════════════════════════════════════════════════════════════
+const _r2 = (n) => Math.round(num(n) * 100) / 100;
+const _ms = (v) => { const t = new Date(v).getTime(); return isFinite(t) ? t : 0; };
+const _d10 = (v) => (v ? String(v).slice(0, 10) : '');
+function _dayDiff(a, b) {
+  const x = new Date(_d10(a) + 'T00:00:00Z').getTime(), y = new Date(_d10(b) + 'T00:00:00Z').getTime();
+  return (isFinite(x) && isFinite(y)) ? Math.max(0, Math.round((y - x) / 86400000)) : 0;
+}
+
+async function _buildShopLedger(shopId) {
+  const sid = String(shopId);
+  const [txRows, dueRows, colRows, dmgRows] = await Promise.all([
+    fetchAll(() => supabase.from('transactions')
+      .select('id,tx_id,type,date,created_at,sr_name,slip_no,total_units,total_revenue,commission_amt,discount_amt,note')
+      .eq('shop_id', sid).in('type', ['dsr_sale', 'point_sale', 'point_damage_return'])),
+    fetchAll(() => supabase.from('due_calendar').select('*').eq('shop_id', sid).eq('client_type', 'shop')),
+    fetchAll(() => supabase.from('due_collections').select('*').eq('shop_id', sid)),
+    fetchAll(() => supabase.from('damage_collections').select('*').eq('shop_id', sid))
+  ]);
+
+  // 1) group transaction rows into bills (one bill = one tx_id)
+  const bills = {};
+  (txRows || []).forEach(r => {
+    const k = String(r.tx_id || r.id);
+    const b = bills[k] || (bills[k] = { txId: k, type: r.type, date: _d10(r.date), at: r.created_at, dsrName: r.sr_name || '',
+      slipNo: r.slip_no || '', note: r.note || '', rev: 0, comm: 0, disc: 0, units: 0, lines: 0 });
+    b.rev += num(r.total_revenue); b.comm += num(r.commission_amt); b.disc += num(r.discount_amt);
+    b.units += num(r.total_units); b.lines += 1;
+    if (_ms(r.created_at) && _ms(r.created_at) < _ms(b.at)) b.at = r.created_at;
+  });
+
+  // 2) link each bill to its due row — by tx_id (v5.0+) or, for older
+  //    data, by same shop + same date + same payable amount.
+  const dues = (dueRows || []).map(r => ({ ...r, _used: false }));
+  const dueByTx = {};
+  dues.forEach(d => { if (d.tx_id) dueByTx[String(d.tx_id)] = d; });
+  const colByDue = {};
+  (colRows || []).forEach(c => { const k = String(c.due_id); (colByDue[k] = colByDue[k] || []).push(c); });
+  const loggedFor = (d) => (colByDue[String(d.id)] || []).reduce((t, c) => t + num(c.amount), 0);
+
+  const billList = Object.values(bills).sort((a, b) => _ms(a.at) - _ms(b.at));
+  billList.forEach(b => {
+    b.payable = _r2(b.rev - b.comm - b.disc);
+    if (b.type !== 'dsr_sale') return;
+    let d = dueByTx[b.txId];
+    if (!d) {
+      let best = null, bestGap = Infinity;
+      dues.forEach(x => {
+        if (x._used || x.tx_id) return;
+        if (_d10(x.due_date) !== b.date) return;
+        if (Math.abs(num(x.amount) - b.payable) > 0.02) return;
+        const gap = Math.abs(_ms(x.created_at) - _ms(b.at));
+        if (gap < bestGap) { best = x; bestGap = gap; }
+      });
+      d = best;
+    }
+    if (d) { d._used = true; b.due = d; }
+  });
+
+  // 3) build events
+  const ev = [];
+  billList.forEach(b => {
+    if (b.type === 'point_damage_return') {
+      ev.push({ kind: 'ret', key: b.txId, txId: b.txId, at: b.at, date: b.date, dsrName: b.dsrName, value: _r2(b.rev), units: b.units, note: b.note });
+      return;
+    }
+    let billed = b.payable, paid = b.payable;         // counter sales are settled on the spot
+    if (b.type === 'dsr_sale') {
+      if (b.due) {
+        billed = _r2(num(b.due.amount));
+        paid = _r2(Math.min(billed, Math.max(0, num(b.due.paid_amount) - loggedFor(b.due))));
+      } else { paid = b.payable; }                     // no due row was ever opened → fully paid
+    }
+    ev.push({ kind: 'sale', key: b.txId, txId: b.txId, dueId: b.due ? String(b.due.id) : '', saleType: b.type,
+      at: b.at, date: b.date, slipNo: b.slipNo, dsrName: b.dsrName,
+      gross: _r2(b.rev), discount: _r2(b.disc), commission: _r2(b.comm), billed, paid, dueAdded: _r2(billed - paid),
+      units: b.units, itemCount: b.lines, note: b.note, affects: true });
+  });
+  // due rows that belong to no bill (manually added dues, or very old data)
+  dues.filter(d => !d._used).forEach(d => {
+    const billed = _r2(num(d.amount));
+    const paid = _r2(Math.min(billed, Math.max(0, num(d.paid_amount) - loggedFor(d))));
+    ev.push({ kind: 'sale', key: 'due:' + d.id, txId: '', dueId: String(d.id), saleType: 'manual',
+      at: d.created_at, date: _d10(d.due_date), slipNo: '', dsrName: d.dsr_name || '',
+      gross: billed, discount: 0, commission: 0, billed, paid, dueAdded: _r2(billed - paid),
+      units: 0, itemCount: 0, note: d.note || 'হাতে লেখা বাকি', affects: true });
+  });
+  const keyOfDue = {};
+  ev.forEach(e => { if (e.kind === 'sale' && e.dueId) keyOfDue[e.dueId] = e; });
+  (colRows || []).forEach(c => {
+    const sale = keyOfDue[String(c.due_id)];
+    ev.push({ kind: 'pay', key: 'c:' + c.id, at: c.created_at, date: _d10(c.date), amount: _r2(c.amount), byName: c.dsr_name || '',
+      forKey: sale ? sale.key : '', forDate: sale ? sale.date : '', forSlip: sale ? sale.slipNo : '', affects: !!sale });
+  });
+  const dmgGroups = {};
+  (dmgRows || []).forEach(r => {
+    const g = dmgGroups[r.col_id] || (dmgGroups[r.col_id] = { kind: 'dmg', key: 'g:' + r.col_id, at: r.created_at, date: _d10(r.date),
+      dsrName: r.dsr_name || '', lines: [], value: 0, refund: 0, exch: 0 });
+    g.lines.push({ productName: r.product_name || '', units: num(r.units), value: _r2(r.damaged_value), resolution: r.resolution,
+      refund: _r2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exchValue: _r2(r.exch_value) });
+    g.value += num(r.damaged_value); g.refund += num(r.refund_amt); g.exch += num(r.exch_value);
+  });
+  Object.values(dmgGroups).forEach(g => { g.value = _r2(g.value); g.refund = _r2(g.refund); g.exch = _r2(g.exch); ev.push(g); });
+
+  const rank = { sale: 0, pay: 1, ret: 2, dmg: 3 };
+  ev.sort((a, b) => (_ms(a.at) - _ms(b.at)) || (rank[a.kind] - rank[b.kind]) || String(a.key).localeCompare(String(b.key)));
+
+  // 4) replay → running balance → memos
+  const cycles = [];
+  let cur = null, bal = 0, pendingInfo = [];
+  const open = (e) => {
+    cur = { no: cycles.length + 1, status: 'open', startAt: e.at, startDate: e.date, endAt: '', endDate: '',
+      events: [], given: 0, paidNow: 0, collected: 0, saleCount: 0, payCount: 0, due: 0 };
+    cycles.push(cur);
+    if (pendingInfo.length) { cur.events.push(...pendingInfo); pendingInfo = []; }
+  };
+  ev.forEach(e => {
+    if (e.kind === 'ret' || e.kind === 'dmg') {          // information only
+      if (cur) cur.events.push(e);
+      else if (cycles.length) cycles[cycles.length - 1].events.push(e);
+      else pendingInfo.push(e);
+      return;
+    }
+    if (e.kind === 'sale') {
+      if (!cur) open(e);
+      bal = _r2(bal + e.dueAdded);
+      cur.given = _r2(cur.given + e.billed); cur.paidNow = _r2(cur.paidNow + e.paid); cur.saleCount += 1;
+    } else { // pay
+      if (!cur) { e.affects = false; (cycles.length ? cycles[cycles.length - 1] : (open(e), cur)).events.push(e); return; }
+      if (e.affects) { bal = _r2(bal - e.amount); cur.collected = _r2(cur.collected + e.amount); cur.payCount += 1; }
+    }
+    e.balance = bal;
+    cur.events.push(e);
+    if (bal <= 0.009) {                                    // due hit zero → memo closes
+      cur.status = 'closed'; cur.endAt = e.at; cur.endDate = e.date; cur.due = 0; cur = null; bal = 0;
+    }
+  });
+  if (cur) cur.due = _r2(bal);
+  cycles.forEach(c => { c.days = _dayDiff(c.startDate, c.endDate || bdtToday()); });
+
+  const sum = (f) => _r2(cycles.reduce((t, c) => t + f(c), 0));
+  const allPay = ev.filter(e => e.kind === 'pay' && e.affects);
+  const currentDue = cur ? _r2(bal) : 0;
+  return {
+    cycles: cycles.slice().reverse(),                      // newest first (open memo on top)
+    summary: {
+      totalGiven: sum(c => c.given), paidAtDelivery: sum(c => c.paidNow), collectedLater: sum(c => c.collected),
+      currentDue, memoCount: cycles.length, closedCount: cycles.filter(c => c.status === 'closed').length,
+      hasOpen: !!cur, saleCount: sum(c => c.saleCount),
+      firstAt: ev.length ? ev[0].at : '', lastAt: ev.length ? ev[ev.length - 1].at : '',
+      lastPayAt: allPay.length ? allPay[allPay.length - 1].at : ''
+    }
+  };
 }
 
 module.exports = async (req, res) => {
@@ -322,6 +490,39 @@ module.exports = async (req, res) => {
     }
 
     // ══════════════════════════════════════════════════
+    //  v5.0 — LEDGER: the shop's full lenden khata, grouped into memos
+    //  GET /api/shops?action=ledger&shopId=…
+    //  GET /api/shops?action=ledger-sale&shopId=…&txId=…  (item detail of one bill)
+    //  Read-only; every role (Owner / Manager / SO / DSR) can open it.
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'ledger') {
+      const { shopId } = req.query;
+      if (!shopId) return res.json({ ok: false, error: 'shopId প্রয়োজন' });
+      const { data: shopRow, error: shopErr } = await supabase.from('shops').select('*').eq('id', shopId).maybeSingle();
+      if (shopErr) throw shopErr;
+      if (!shopRow) return res.json({ ok: false, error: 'দোকান পাওয়া যায়নি' });
+      const L = await _buildShopLedger(shopId);
+      return res.json({ ok: true, shop: mapShop(shopRow), ...L });
+    }
+
+    if (req.method === 'GET' && action === 'ledger-sale') {
+      const { shopId, txId } = req.query;
+      if (!shopId || !txId) return res.json({ ok: false, error: 'shopId ও txId প্রয়োজন' });
+      const rows = await fetchAll(() => supabase.from('transactions').select('*').eq('tx_id', String(txId)).eq('shop_id', String(shopId)));
+      if (!rows.length) return res.json({ ok: false, error: 'বিল পাওয়া যায়নি' });
+      const items = rows.map(r => ({
+        productName: r.product_name || '', sku: r.sku || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units),
+        price: num(r.selling_price), total: _r2(r.total_revenue), commission: _r2(r.commission_amt), discount: _r2(r.discount_amt)
+      }));
+      const gross = _r2(items.reduce((t, i) => t + i.total, 0));
+      const commission = _r2(items.reduce((t, i) => t + i.commission, 0));
+      const discount = _r2(items.reduce((t, i) => t + i.discount, 0));
+      return res.json({ ok: true, txId: String(txId), type: rows[0].type, date: _d10(rows[0].date), at: rows[0].created_at,
+        slipNo: rows[0].slip_no || '', dsrName: rows[0].sr_name || '', items, gross, commission, discount,
+        payable: _r2(gross - commission - discount) });
+    }
+
+    // ══════════════════════════════════════════════════
     //  DETAIL — full shop profile: due history + sales history
     // ══════════════════════════════════════════════════
     if (req.method === 'GET' && action === 'detail') {
@@ -441,7 +642,7 @@ module.exports = async (req, res) => {
         const { data: shopRow } = await supabase.from('shops').select('name').eq('id', d.shopId).single();
         const isCleared = shortfall <= 0;
         const { data: dueRow, error: dueErr } = await supabase.from('due_calendar').insert({
-          id: randomUUID(), dsr_id: String(d.dsrId), dsr_name: d.dsrName || '',
+          id: randomUUID(), tx_id: txId, dsr_id: String(d.dsrId), dsr_name: d.dsrName || '',
           client_type: 'shop', shop_id: String(d.shopId), shop_name: shopRow ? shopRow.name : '',
           due_date: date, amount: payable, paid_amount: isCleared ? payable : Math.max(0, paidNow),
           note: 'দোকান বিক্রয়' + (isCleared ? ' (সম্পূর্ণ পরিশোধিত)' : ' বাকি'),

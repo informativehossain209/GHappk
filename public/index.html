@@ -4693,6 +4693,7 @@ function _renderShopsMapDetail() {
     h += '<a href="https://www.google.com/maps/dir/?api=1&destination='+shop.lat+','+shop.lng+'" target="_blank" class="btn btn-bl btn-sm" style="margin-top:8px;text-decoration:none;display:inline-block">🧭 নেভিগেট করুন</a>';
   }
   h += '<div style="font-size:14px;font-weight:700;margin-top:10px;color:'+(num(d.totalDue)>0?'var(--re)':'var(--gr)')+'">মোট বাকি: ৳'+fm(d.totalDue||0)+'</div>';
+  h += '<button class="btn btn-bl btn-w" style="margin-top:10px" onclick="openShopLedger(\''+shop.id+'\')">📒 লেনদেন খাতা (মেমো ও ইতিহাস)</button>';
   if (isOwner) {
     h += '<div style="display:flex;gap:7px;margin-top:10px">'
       + '<button class="btn btn-gh btn-sm" style="flex:1" onclick="S.shopEditMode=true;_paintShopsMapTab()">✏️ সম্পাদনা</button>'
@@ -4717,6 +4718,186 @@ function _renderShopsMapDetail() {
     h += '<div style="font-size:13px;font-weight:700">৳'+fm(s.totalRevenue)+'</div></div>';
   });
   el.innerHTML = h;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  v5.0 — দোকানের লেনদেন খাতা (Shop Ledger) — Owner / Manager / SO / DSR
+//  One page per shop: the live memo (চলমান মেমো) on top, every earlier
+//  memo underneath. A memo closes the moment the shop's due reaches zero
+//  and the next sale starts a fresh one. Tap a bill → products; tap a
+//  memo → its whole timeline. Data: /api/shops?action=ledger (+ ledger-sale).
+// ══════════════════════════════════════════════════════════════════════
+var _LDG = { shopId: '', data: null, items: {}, openMemos: {}, openEv: {}, histOpen: false, histLimit: 15, byNo: {} };
+
+function _ldgDT(dateStr, iso) {
+  var t = iso ? _fmtHM(iso) : '';
+  return fmtBn(dateStr || (iso ? String(iso).slice(0, 10) : '')) + (t ? ' · ' + t : '');
+}
+function _ldgEl() {
+  var el = document.getElementById('ldg-pg');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'ldg-pg';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:900;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 90px';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'block'; document.body.style.overflow = 'hidden';
+  return el;
+}
+function closeShopLedger() {
+  var el = document.getElementById('ldg-pg'); if (el) el.style.display = 'none';
+  document.body.style.overflow = '';
+}
+async function openShopLedger(shopId) {
+  _LDG = { shopId: String(shopId), data: null, items: {}, openMemos: {}, openEv: {}, histOpen: false, histLimit: 15, byNo: {} };
+  var el = _ldgEl(); el.scrollTop = 0;
+  el.innerHTML = '<div style="max-width:680px;margin:0 auto"><button class="btn btn-gh btn-sm" onclick="closeShopLedger()">◀ ফিরুন</button><div class="card" style="text-align:center;padding:30px;margin-top:12px;color:var(--mt2)">📒 খাতা লোড হচ্ছে...</div></div>';
+  var r = await apiGet('/api/shops?action=ledger&shopId=' + encodeURIComponent(shopId));
+  if (!r || !r.ok) {
+    el.innerHTML = '<div style="max-width:680px;margin:0 auto"><button class="btn btn-gh btn-sm" onclick="closeShopLedger()">◀ ফিরুন</button><div class="card" style="text-align:center;padding:24px;margin-top:12px;color:var(--re)">' + esc((r && r.error) || 'লোড ব্যর্থ') + '</div></div>';
+    return;
+  }
+  _LDG.data = r;
+  (r.cycles || []).forEach(function(c) { _LDG.byNo[c.no] = c; if (c.status === 'open') _LDG.openMemos[c.no] = true; });
+  _ldgRender();
+}
+function _ldgRender() {
+  var el = document.getElementById('ldg-pg'); if (!el || !_LDG.data) return;
+  var st = el.scrollTop, r = _LDG.data, shop = r.shop || {}, sm = r.summary || {}, cycles = r.cycles || [];
+  var openC = cycles.filter(function(c) { return c.status === 'open'; })[0];
+  var closed = cycles.filter(function(c) { return c.status === 'closed'; });
+  var h = '<div style="max-width:680px;margin:0 auto">';
+  h += '<button class="btn btn-gh btn-sm" style="margin-bottom:10px" onclick="closeShopLedger()">◀ ফিরুন</button>';
+  h += '<div class="ct" style="margin-bottom:4px">📒 লেনদেন খাতা — ' + esc(shop.name) + ' <span style="font-size:11px;color:var(--mt2)">(' + esc(shop.shopNo) + ')</span></div>';
+  h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:10px">🚚 ' + esc(shop.assignedDsrName || '—') + (shop.roadName ? ' · 🛣️ ' + esc(shop.roadName) : '')
+    + (shop.phone ? ' · <a href="tel:' + esc(shop.phone) + '" style="color:var(--bl);font-weight:700;text-decoration:none">📞 ' + esc(shop.phone) + '</a>' : '') + '</div>';
+
+  // ── summary ──
+  var due = num(sm.currentDue);
+  h += '<div class="card" style="text-align:center;border-top:3px solid ' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">';
+  h += '<div style="font-size:11px;color:var(--mt2)">বর্তমান মোট বাকি</div>';
+  h += '<div style="font-size:26px;font-weight:800;color:' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">৳' + fm(due) + '</div>';
+  if (due <= 0 && sm.memoCount) h += '<div style="font-size:12px;color:var(--gr);font-weight:700">✅ সব হিসাব পরিষ্কার — কোনো বাকি নেই</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px">';
+  h += _ldgChip('মোট দেওয়া', sm.totalGiven, 'var(--txt)') + _ldgChip('মোট পরিশোধ', num(sm.paidAtDelivery) + num(sm.collectedLater), 'var(--gr)') + _ldgChip('মেমো', (sm.memoCount || 0) + ' টি', 'var(--bl)', true);
+  h += '</div>';
+  if (sm.lastPayAt) h += '<div style="font-size:10px;color:var(--mt2);margin-top:8px">💵 সর্বশেষ আদায়: ' + _ldgDT('', sm.lastPayAt) + '</div>';
+  h += '</div>';
+
+  if (!cycles.length) {
+    h += '<div class="card" style="text-align:center;padding:26px;color:var(--mt2)">এই দোকানে এখনো কোনো লেনদেন হয়নি</div>';
+  }
+  // ── live memo ──
+  if (openC) h += _ldgMemoCard(openC);
+  // ── history ──
+  if (closed.length) {
+    h += '<div class="ct" style="margin-top:6px;cursor:pointer" onclick="_LDG.histOpen=!_LDG.histOpen;_ldgRender()">📚 আগের মেমো (' + closed.length + ' টি — বাকি শূন্য হয়ে বন্ধ) <span style="margin-left:auto;font-size:12px;color:var(--mt2)">' + (_LDG.histOpen ? '▲ লুকান' : '▼ দেখুন') + '</span></div>';
+    if (_LDG.histOpen) {
+      closed.slice(0, _LDG.histLimit).forEach(function(c) { h += _ldgMemoCard(c); });
+      if (closed.length > _LDG.histLimit) h += '<button class="btn btn-bl btn-w btn-sm" onclick="_LDG.histLimit+=15;_ldgRender()">আরও দেখান (' + (closed.length - _LDG.histLimit) + 'টি বাকি)</button>';
+    }
+  }
+  h += '</div>';
+  el.innerHTML = h; el.scrollTop = st;
+}
+function _ldgChip(lb, val, color, raw) {
+  return '<div style="background:var(--bg);border:1px solid var(--bdr);border-radius:12px;padding:7px 4px"><div style="font-size:10px;color:var(--mt2)">' + lb + '</div><div style="font-size:13px;font-weight:800;color:' + color + '">' + (raw ? val : '৳' + fm(val)) + '</div></div>';
+}
+function _ldgMemoCard(c) {
+  var isOpen = c.status === 'open', expanded = !!_LDG.openMemos[c.no];
+  var paid = num(c.paidNow) + num(c.collected);
+  var h = '<div class="card" style="padding:0;overflow:hidden;border-left:4px solid ' + (isOpen ? 'var(--re)' : 'var(--gr)') + '">';
+  h += '<div style="padding:11px 12px;cursor:pointer" onclick="_ldgToggleMemo(' + c.no + ')">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px">' + (isOpen ? '🔴 চলমান মেমো' : '✅ পরিশোধিত মেমো') + ' #' + c.no + '</b><span style="font-size:12px;color:var(--mt2)">' + (expanded ? '▲' : '▼') + '</span></div>';
+  h += '<div style="font-size:11px;color:var(--mt2);margin:3px 0 8px">' + fmtBn(c.startDate) + (isOpen ? ' থেকে চলছে' : ' → ' + fmtBn(c.endDate)) + ' · ' + fn(c.days) + ' দিন · ' + c.saleCount + 'টি বিল' + (c.payCount ? ' · ' + c.payCount + 'বার আদায়' : '') + '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">' + _ldgChip('মোট দেওয়া', c.given, 'var(--txt)') + _ldgChip('পরিশোধ', paid, 'var(--gr)') + _ldgChip('বাকি', c.due, num(c.due) > 0 ? 'var(--re)' : 'var(--gr)') + '</div>';
+  h += '</div>';
+  if (expanded) {
+    h += '<div style="border-top:1px solid var(--bdr)">';
+    (c.events || []).forEach(function(e, i) { h += _ldgEventRow(c, e, i); });
+    if (!isOpen) h += '<div style="padding:9px 12px;font-size:11px;font-weight:700;color:var(--gr);background:var(--grl)">🟢 বাকি শূন্য হয়েছে — ' + _ldgDT(c.endDate, c.endAt) + '</div>';
+    else h += '<div style="padding:9px 12px;font-size:12px;font-weight:700;color:var(--re);background:var(--rel)">এখন পর্যন্ত বাকি: ৳' + fm(c.due) + '</div>';
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+function _ldgToggleMemo(no) { _LDG.openMemos[no] = !_LDG.openMemos[no]; _ldgRender(); }
+function _ldgEventRow(c, e, i) {
+  var k = c.no + '-' + i, open = !!_LDG.openEv[k];
+  var row = 'padding:10px 12px;border-bottom:1px solid var(--bdr);';
+  var h = '';
+  if (e.kind === 'sale') {
+    var lbl = e.saleType === 'point_sale' ? '🧾 কাউন্টার বিক্রয়' : (e.saleType === 'manual' ? '📝 হাতে লেখা বাকি' : '📦 পণ্য দেওয়া');
+    h += '<div style="' + row + 'cursor:pointer" onclick="_ldgToggleEv(' + c.no + ',' + i + ')">';
+    h += '<div style="display:flex;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:12px;font-weight:700">' + lbl + '</div>';
+    h += '<div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + (e.slipNo ? ' · স্লিপ ' + esc(e.slipNo) : '') + (e.dsrName ? ' · ' + esc(e.dsrName) : '') + '</div></div>';
+    h += '<div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:800">৳' + fm(e.billed) + '</div><div style="font-size:10px;color:var(--mt2)">' + (num(e.paid) > 0 ? 'নগদ ৳' + fm(e.paid) + ' · ' : '') + (num(e.dueAdded) > 0 ? '<span style="color:var(--re);font-weight:700">বাকি ৳' + fm(e.dueAdded) + '</span>' : '<span style="color:var(--gr);font-weight:700">নগদ পরিশোধ</span>') + '</div></div></div>';
+    h += '<div style="font-size:10px;color:var(--mt2);margin-top:3px;display:flex;justify-content:space-between"><span>' + (open ? '▲ বন্ধ করুন' : '▼ পণ্যের বিস্তারিত ও বাকির হিসাব দেখুন') + '</span><span>চলমান বাকি ৳' + fm(e.balance) + '</span></div>';
+    h += '</div>';
+    if (open) h += '<div style="padding:10px 12px;background:var(--bg);border-bottom:1px solid var(--bdr)">' + _ldgSaleDetail(c, e) + '</div>';
+  } else if (e.kind === 'pay') {
+    h += '<div style="' + row + '"><div style="display:flex;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:12px;font-weight:700;color:var(--gr)">💵 বাকি আদায়</div>';
+    h += '<div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + (e.byName ? ' · আদায়কারী: ' + esc(e.byName) : '') + (e.forDate ? ' · ' + fmtBn(e.forDate) + ' তারিখের বিল বাবদ' : '') + '</div></div>';
+    h += '<div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:800;color:var(--gr)">−৳' + fm(e.amount) + '</div>';
+    h += e.affects ? '<div style="font-size:10px;color:var(--mt2)">বাকি ৳' + fm(e.balance) + '</div>' : '<div style="font-size:10px;color:#B45309">বিল মেলেনি — হিসাবে ধরা হয়নি</div>';
+    h += '</div></div></div>';
+  } else if (e.kind === 'dmg') {
+    h += '<div style="' + row + 'cursor:pointer" onclick="_ldgToggleEv(' + c.no + ',' + i + ')"><div style="display:flex;justify-content:space-between;gap:8px"><div><div style="font-size:12px;font-weight:700;color:#B45309">⚠️ ড্যামেজ ফেরত</div><div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + (e.dsrName ? ' · ' + esc(e.dsrName) : '') + ' · বাকির হিসাবে প্রভাব নেই</div></div>';
+    h += '<div style="text-align:right"><div style="font-size:12px;font-weight:700">৳' + fm(e.value) + '</div><div style="font-size:10px;color:var(--mt2)">' + (num(e.refund) > 0 ? 'টাকা ফেরত ৳' + fm(e.refund) : '') + (num(e.exch) > 0 ? (num(e.refund) > 0 ? ' · ' : '') + 'বদল ৳' + fm(e.exch) : '') + '</div></div></div>';
+    if (open) {
+      h += '<div style="margin-top:6px;font-size:11px">';
+      (e.lines || []).forEach(function(l) { h += '<div style="display:flex;justify-content:space-between;padding:2px 0"><span>' + esc(l.productName) + ' × ' + fn(l.units) + '</span><span style="color:var(--mt2)">' + (l.resolution === 'money' ? 'টাকা ফেরত ৳' + fm(l.refund) : 'বদল: ' + esc(l.exchProductName) + ' × ' + fn(l.exchUnits)) + '</span></div>'; });
+      h += '</div>';
+    } else h += '<div style="font-size:10px;color:var(--mt2);margin-top:3px">▼ বিস্তারিত</div>';
+    h += '</div>';
+  } else if (e.kind === 'ret') {
+    h += '<div style="' + row + '"><div style="display:flex;justify-content:space-between"><div><div style="font-size:12px;font-weight:700;color:#B45309">↩️ পয়েন্ট সেল ড্যামেজ/ফেরত</div><div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + ' · বাকির হিসাবে প্রভাব নেই</div></div><div style="font-size:12px;font-weight:700">৳' + fm(e.value) + '</div></div></div>';
+  }
+  return h;
+}
+function _ldgToggleEv(no, i) {
+  var k = no + '-' + i; _LDG.openEv[k] = !_LDG.openEv[k];
+  var e = (_LDG.byNo[no] || {}).events; e = e && e[i];
+  _ldgRender();
+  if (_LDG.openEv[k] && e && e.kind === 'sale' && e.txId && !_LDG.items[e.txId]) _ldgLoadItems(e.txId);
+}
+async function _ldgLoadItems(txId) {
+  _LDG.items[txId] = { loading: true }; _ldgRender();
+  var r = await apiGet('/api/shops?action=ledger-sale&shopId=' + encodeURIComponent(_LDG.shopId) + '&txId=' + encodeURIComponent(txId));
+  _LDG.items[txId] = (r && r.ok) ? r : { error: (r && r.error) || 'লোড ব্যর্থ' };
+  _ldgRender();
+}
+function _ldgSaleDetail(c, e) {
+  var h = '';
+  if (e.txId) {
+    var it = _LDG.items[e.txId];
+    if (!it || it.loading) h += '<div style="font-size:11px;color:var(--mt2);padding:6px 0">⏳ পণ্যের তালিকা লোড হচ্ছে...</div>';
+    else if (it.error) h += '<div style="font-size:11px;color:var(--re);padding:6px 0">' + esc(it.error) + '</div>';
+    else {
+      h += '<div style="font-size:11px;font-weight:700;margin-bottom:4px">🛍️ কোন পণ্য কতটি দেওয়া হয়েছে</div>';
+      h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:var(--mt2);text-align:left"><th style="padding:3px 4px">পণ্য</th><th style="padding:3px 4px;text-align:right">পরিমাণ</th><th style="padding:3px 4px;text-align:right">দর</th><th style="padding:3px 4px;text-align:right">মোট</th></tr></thead><tbody>';
+      (it.items || []).forEach(function(p) {
+        var q = fn(p.units) + ' পিস' + ((num(p.cases) > 0 || num(p.pcs) > 0) ? ' <span style="color:var(--mt2)">(' + (num(p.cases) > 0 ? fn(p.cases) + ' কেস' : '') + (num(p.cases) > 0 && num(p.pcs) > 0 ? ' + ' : '') + (num(p.pcs) > 0 ? fn(p.pcs) + ' পিস' : '') + ')</span>' : '');
+        h += '<tr style="border-top:1px solid var(--bdr)"><td style="padding:4px">' + esc(p.productName) + ((num(p.commission) > 0 || num(p.discount) > 0) ? '<div style="font-size:10px;color:var(--gr)">' + (num(p.commission) > 0 ? 'কমিশন ৳' + fm(p.commission) : '') + (num(p.commission) > 0 && num(p.discount) > 0 ? ' · ' : '') + (num(p.discount) > 0 ? 'ডিসকাউন্ট ৳' + fm(p.discount) : '') + '</div>' : '') + '</td><td style="padding:4px;text-align:right">' + q + '</td><td style="padding:4px;text-align:right">৳' + fm(p.price) + '</td><td style="padding:4px;text-align:right;font-weight:700">৳' + fm(p.total) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      h += '<div style="font-size:11px;margin-top:6px">' + _ldgKv('পণ্যের মোট মূল্য', '৳' + fm(it.gross));
+      if (num(it.commission) > 0) h += _ldgKv('− কমিশন (বোনাস)', '৳' + fm(it.commission), 'var(--gr)');
+      if (num(it.discount) > 0) h += _ldgKv('− ডিসকাউন্ট', '৳' + fm(it.discount), 'var(--gr)');
+      h += _ldgKv('বিলের প্রদেয়', '৳' + fm(it.payable), 'var(--txt)', true) + '</div>';
+    }
+  } else if (e.note) h += '<div style="font-size:11px;color:var(--mt)">📝 ' + esc(e.note) + '</div>';
+  // due breakdown for THIS bill
+  var later = (c.events || []).filter(function(x) { return x.kind === 'pay' && x.affects && x.forKey === e.key; });
+  var laterSum = later.reduce(function(t, x) { return t + num(x.amount); }, 0);
+  var rem = num(e.dueAdded) - laterSum;
+  h += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bdr);font-size:11px"><div style="font-weight:700;margin-bottom:3px">💰 এই বিলের বাকির হিসাব</div>';
+  h += _ldgKv('বিলের মোট', '৳' + fm(e.billed)) + _ldgKv('ডেলিভারির সময় নগদ', '৳' + fm(e.paid), 'var(--gr)');
+  later.forEach(function(x) { h += _ldgKv('পরে আদায় · ' + fmtBn(x.date), '৳' + fm(x.amount), 'var(--gr)'); });
+  h += _ldgKv('এই বিলের এখনো বাকি', '৳' + fm(Math.max(0, rem)), rem > 0.009 ? 'var(--re)' : 'var(--gr)', true) + '</div>';
+  return h;
+}
+function _ldgKv(k, v, color, bold) {
+  return '<div style="display:flex;justify-content:space-between;padding:1px 0' + (bold ? ';font-weight:800;border-top:1px solid var(--bdr);margin-top:2px;padding-top:3px' : '') + '"><span style="color:var(--mt)">' + k + '</span><span style="' + (color ? 'color:' + color : '') + '">' + v + '</span></div>';
 }
 
 // ── Register a shop — captures GPS on the spot, generates a QR ─────
@@ -5029,6 +5210,7 @@ function _renderDsrShopDetail() {
   // ডেলিভারি (নতুন বিক্রয়) দিয়ে এগিয়ে যাওয়া যায় ("move further")। ──
   if (hasDue) h += '<div style="font-size:11px;color:var(--mt2);margin:2px 0 6px">নিচে থেকে বাকি আদায় করুন, অথবা সরাসরি ডেলিভারি দিয়ে এগিয়ে যান।</div>';
   h += '<button class="btn btn-gr btn-w" onclick="dsrStartSale()">🚚 ডেলিভারি দিন (নতুন বিক্রয়)</button>';
+  h += '<button class="btn btn-bl btn-w" style="margin-top:8px" onclick="openShopLedger(\''+shop.id+'\')">📒 লেনদেন খাতা (মেমো ও ইতিহাস)</button>';
   h += '<div class="ct" style="margin-top:12px">💰 বাকির ইতিহাস' + (hasDue ? ' — আদায় করুন' : '') + '</div>';
   var dues = d.dues || [];
   if (!dues.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px">কোনো বাকি রেকর্ড নেই</div>';

@@ -187,6 +187,7 @@ CREATE TABLE due_calendar (
   note         TEXT        DEFAULT '',
   status       TEXT        DEFAULT 'pending' CHECK (status IN ('pending','partial','cleared')),
   cleared_date DATE,
+  tx_id        TEXT        DEFAULT '',      -- v5.0: the sale (transactions.tx_id) this due came from — feeds the shop ledger
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_due_date    ON due_calendar(due_date);
@@ -967,3 +968,14 @@ CREATE INDEX IF NOT EXISTS idx_due_created       ON due_calendar(created_at);
 CREATE INDEX IF NOT EXISTS idx_shops_created     ON shops(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shops_name_lower  ON shops(lower(name));
 CREATE INDEX IF NOT EXISTS idx_tx_created        ON transactions(created_at);
+
+-- ═══ v5.0 — Shop ledger (লেনদেন খাতা) ═══
+-- 1) each shop due remembers which sale created it, so a memo can list the products.
+--    Older dues without it are still matched automatically by shop + date + amount.
+ALTER TABLE due_calendar ADD COLUMN IF NOT EXISTS tx_id TEXT DEFAULT '';
+-- 2) indexes so opening one shop's ledger stays fast with years of history
+CREATE INDEX IF NOT EXISTS idx_due_tx            ON due_calendar(tx_id);
+CREATE INDEX IF NOT EXISTS idx_tx_shop_type      ON transactions(shop_id, type, created_at);
+CREATE INDEX IF NOT EXISTS idx_tx_txid           ON transactions(tx_id);
+CREATE INDEX IF NOT EXISTS idx_duecol_shop       ON due_collections(shop_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_dmgcol_shop       ON damage_collections(shop_id, created_at);

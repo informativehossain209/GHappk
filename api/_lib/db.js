@@ -430,7 +430,8 @@ function mapDue(r) {
     note: r.note || '',
     status: r.status || 'pending',
     clearedDate: r.cleared_date ? String(r.cleared_date).slice(0,10) : '',
-    createdAt: r.created_at || ''
+    createdAt: r.created_at || '',
+    txId: String(r.tx_id || '')
   };
 }
 
