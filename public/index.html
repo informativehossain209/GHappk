@@ -2810,20 +2810,39 @@ function openSalarySlipModal(scopeId) {
   h += '<div class="due-modal-title">🧾 বেতন স্লিপ</div>';
   h += '<div class="card" id="salary-slip-card">'+_salarySlipCardHtml(v)+'</div>';
   h += '<div class="g2" style="margin-top:10px">';
-  h += '<button class="btn btn-bl btn-w" onclick="printSalarySlip()">🖨️ প্রিন্ট/ডাউনলোড</button>';
+  h += '<button class="btn btn-bl btn-w" onclick="printSalarySlip(\''+scopeId+'\')">📄 A4 স্লিপ — ডাউনলোড / প্রিন্ট / WhatsApp</button>';
   h += '<button class="btn btn-gh btn-w" onclick="document.body.removeChild(document.querySelector(\'.due-modal-bg\'))">বন্ধ</button>';
   h += '</div></div>';
   modal.innerHTML = h;
   document.body.appendChild(modal);
 }
-function printSalarySlip() {
-  var card = document.getElementById('salary-slip-card'); if (!card) return;
-  var w = window.open('', '_blank');
-  if (!w) { toast('পপ-আপ ব্লক করা আছে — অনুমতি দিন'); return; }
-  w.document.write('<html><head><title>বেতন স্লিপ</title><meta charset="utf-8">'
-    + '<style>body{font-family:sans-serif;padding:16px;max-width:340px;margin:0 auto}div{font-size:13px}</style></head><body>' + card.innerHTML + '</body></html>');
-  w.document.close();
-  setTimeout(function(){ w.focus(); w.print(); }, 200);
+function printSalarySlip(scopeId) {
+  var v = ATT_VIEWS[scopeId]; if (!v || !v.salary) return;
+  var M = MEMO, s = v.salary, rows = [], sign = function (n) { return (n < 0 ? '− ' : '+ ') + '৳ ' + M.money(Math.abs(n)); };
+  rows.push(['প্রতি দিনের বেতন', '৳ ' + M.money(s.dailyRate)]);
+  rows.push(['উপস্থিত (গণনাযোগ্য) দিন', M.dg(s.validDays + ' / ' + s.workingDays)]);
+  rows.push(['অর্জিত বেতন', '৳ ' + M.money(s.salaryEarned)]);
+  if (s.bonusEnabled) {
+    if (s.dailyBonus) rows.push(['অন-টাইম বোনাস', sign(s.dailyBonus)]);
+    if (s.perfectMonth) rows.push(['পারফেক্ট মান্থ বোনাস', sign(s.perfectBonus)]);
+    if (s.penalty) rows.push(['লেট পেনাল্টি', sign(s.penalty)]);
+  }
+  if (s.fridayBonusDays > 0) rows.push(['শুক্রবার উপস্থিতি বোনাস (' + M.dg(s.fridayBonusDays) + ' দিন)', sign(s.fridayBonusAmount)]);
+  if (s.noGapBonus > 0) rows.push(['নো-গ্যাপ উপস্থিতি বোনাস', sign(s.noGapBonus)]);
+  if (s.targetBonus && s.targetBonus.status === 'settled') rows.push(['টার্গেট বোনাস', sign(s.targetBonus.amount)]);
+  rows.push(['সর্বমোট', '৳ ' + M.money(s.total)]);
+  if (s.advanceApproved > 0) rows.push(['অগ্রিম কর্তন', '− ৳ ' + M.money(s.advanceApproved)]);
+  var paidTxt = s.paid ? 'পরিশোধিত — ৳' + M.money(s.paidAmount) + ' (' + M.dmy(_isoOnly(s.paidAt)) + ')' : 'এই মাসের বেতন বাকি';
+  _memoShow({ title: 'বেতন স্লিপ', en: 'SALARY SLIP', no: 'SAL-' + String(v.month || '').replace(/\D/g, '') + '-' + String(v.userName || '').length, date: iso(new Date()), phone: _srPhone(v.userName),
+    file: 'salary_' + String(v.month || '') + '_' + String(v.userName || '').replace(/\s+/g, '_'),
+    blocks: [
+      M.kv('কর্মীর তথ্য', [['নাম:', '<b>' + esc(v.userName || '') + '</b>'], ['পদ:', esc(_ROLE_LABEL_BN[v.role] || v.role || '')], ['বেতনের মাস:', esc(_monthLabelBn(v.month))]]),
+      M.T([{ h: '#', w: '7%' }, { h: 'বিবরণ', a: 'l', w: '63%' }, { h: 'পরিমাণ', a: 'r', w: '30%' }],
+        rows.map(function (x, i) { return [M.dg(String(i + 1).padStart(2, '0')), { h: x[0], al: 'left', cls: 'l' }, { h: x[1], cls: 'r amt', al: 'right' }]; }),
+        [{ h: 'পরিশোধযোগ্য বেতন:', span: 2, al: 'right' }, { h: '৳ ' + M.money(s.payable), al: 'right' }])
+    ],
+    closing: { verify: true, total: s.payable, words: s.payable, wordsLabel: 'কথায় (পরিশোধযোগ্য):', summary: [['সর্বমোট', '৳ ' + M.money(s.total)], s.advanceApproved > 0 ? ['অগ্রিম কর্তন', '− ৳ ' + M.money(s.advanceApproved), 'a'] : ['অগ্রিম কর্তন', '৳ 0.00'], ['পরিশোধযোগ্য', '৳ ' + M.money(s.payable), 'big'], [s.paid ? 'অবস্থা' : 'অবস্থা', paidTxt, s.paid ? 'g' : 'r']],
+      sigs: [['প্রদানকারী', 'মালিক / ম্যানেজার'], ['গ্রহণকারী', v.userName || '']] } });
 }
 
 // ── Advance salary request modal (self-service, Manager/DSR/SO/Driver) ──
@@ -5184,10 +5203,14 @@ async function dsrSubmitSale() {
     shopName: shop.name || '', shopNo: shop.shopNo || '', shopPhone: shop.phone || '',
     date: iso(new Date()), items: items, subtotal: bill.subtotal, discount: bill.discount,
     commission: bill.commission, payable: bill.payable, paid: paidNow,
-    due: Math.max(0, bill.payable - paidNow), dsrName: S.userName
+    due: Math.max(0, bill.payable - paidNow), dsrName: S.userName,
+    no: genUID('ME-CM'), prevDue: num((S.dsrShopSel || {}).totalDue), owner: shop.keeperName || shop.ownerName || '',
+    shopAddr: shop.address || '', route: shop.roadName || ''
   };
   S.dsrShopMode = 'slip'; S.dsrShopSel = null;
-  return _renderDsrSaleSlip();
+  _renderDsrSaleSlip();
+  setTimeout(dsrPrintSlip, 150);   // open the A4 cash memo straight away (download / print / WhatsApp)
+  return;
 }
 
 // ── §12/§20 — ডেলিভারির পর বিলের স্লিপ। দোকানদারকে সরাসরি স্ক্রিনে
@@ -5218,21 +5241,18 @@ function _renderDsrSaleSlip() {
   h += '</div>';
   h += '</div>';
   h += '<div class="g2" style="margin-top:8px">';
-  h += '<button class="btn btn-bl btn-w" onclick="dsrPrintSlip()">🖨️ প্রিন্ট/ডাউনলোড</button>';
+  h += '<button class="btn btn-bl btn-w" onclick="dsrPrintSlip()">📄 A4 মেমো — ডাউনলোড / প্রিন্ট / WhatsApp</button>';
   h += '<button class="btn btn-gr btn-w" onclick="S.dsrShopMode=\'list\';_loadDsrShopView()">✅ সম্পন্ন — তালিকায় ফিরুন</button>';
   h += '</div>';
   el.innerHTML = h;
   setTimeout(_tickerStart, 50);
 }
 function dsrPrintSlip() {
-  var card = document.getElementById('dsr-slip-card'); if (!card) return;
-  var w = window.open('', '_blank');
-  if (!w) { toast('পপ-আপ ব্লক করা আছে — অনুমতি দিন'); return; }
-  w.document.write('<html><head><title>বিক্রয় স্লিপ</title><meta charset="utf-8">'
-    + '<style>body{font-family:sans-serif;padding:16px;max-width:340px;margin:0 auto}'
-    + 'div{font-size:13px}</style></head><body>' + card.innerHTML + '</body></html>');
-  w.document.close();
-  setTimeout(function(){ w.focus(); w.print(); }, 200);
+  var x = S.dsrLastSlip; if (!x) return;
+  if (!x.no) x.no = genUID('ME-CM');
+  _memoShow(MEMO.sale({ no: x.no, date: x.date, shopName: x.shopName, shopNo: x.shopNo, owner: x.owner, shopPhone: x.shopPhone, shopAddr: x.shopAddr,
+    route: x.route, dsrName: x.dsrName, items: (x.items || []).map(_memoItem), gross: x.subtotal, payable: x.payable,
+    commission: x.commission, discount: x.discount, prevDue: x.prevDue, paid: x.paid }));
 }
 
 // ── DSR: বাকি আদায় (আগের "ক্লিয়ার প্লেট") — এখন শপ ডেলিভারি তালিকার
@@ -5316,6 +5336,19 @@ function _dcListHtml() {
   });
   return h;
 }
+function _dueReceiptMemo(s, r) {
+  var M = MEMO, prev = num(s.totalDue), got = num(r.collected), rem = Math.max(0, num(r.remaining));
+  _memoShow({ title: 'বাকি আদায় রশিদ', en: 'DUE COLLECTION RECEIPT', no: genUID('ME-DC'), date: iso(new Date()), phone: s.phone,
+    blocks: [
+      M.kv('দোকানের বিবরণ', [['দোকানের নাম:', '<b>' + esc(s.shopName) + '</b>'], s.shopNo ? ['দোকান নং:', esc(s.shopNo)] : ['—', ''], ['স্বত্বাধিকারী:', esc(s.keeperName || '—')], ['মোবাইল:', esc(s.phone || '—')], ['ঠিকানা:', esc(s.address || '—')], ['আদায়কারী (DSR):', esc(S.userName || '')]]),
+      M.T([{ h: '#', w: '6%' }, { h: 'বিবরণ', a: 'l', w: '64%' }, { h: 'টাকা (৳)', a: 'r', w: '30%' }],
+        [['01', { h: 'আদায়ের আগে মোট বকেয়া', al: 'left', cls: 'l' }, { h: M.money(prev), cls: 'r amt', al: 'right' }],
+         ['02', { h: 'আজকের আদায়কৃত টাকা', al: 'left', cls: 'l' }, { h: M.money(got), cls: 'r amt', al: 'right' }]],
+        [{ h: 'আদায়ের পর অবশিষ্ট বকেয়া:', span: 2, al: 'right' }, { h: '৳ ' + M.money(rem), al: 'right' }])
+    ],
+    closing: { total: got, words: got, wordsLabel: 'কথায় (আদায়কৃত টাকা):', summary: [['আগের বকেয়া', '৳ ' + M.money(prev)], ['আজকের আদায়', '৳ ' + M.money(got), 'g'], rem > 0 ? ['অবশিষ্ট বকেয়া', '৳ ' + M.money(rem), 'r'] : ['অবশিষ্ট বকেয়া', '৳ 0.00 ✔ পরিশোধিত', 'g']],
+      sigs: [['দোকানদারের স্বাক্ষর', 'Customer'], ['আদায়কারীর স্বাক্ষর', 'DSR: ' + (S.userName || '')]], terms: 'এই রশিদ শুধুমাত্র উল্লিখিত টাকা প্রাপ্তির প্রমাণ। ধন্যবাদ।' } });
+}
 var _dcBusy = false;
 async function dsrDueCollect(shopId) {
   if (_dcBusy) return;
@@ -5328,6 +5361,7 @@ async function dsrDueCollect(shopId) {
   hideOvl(); _dcBusy = false;
   if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
   toast(r.remaining <= 0.005 ? '✅ ৳' + fm(r.collected) + ' আদায় — এই দোকানের সব বাকি পরিশোধিত' : '✅ ৳' + fm(r.collected) + ' আদায় — এখনো বাকি ৳' + fm(r.remaining));
+  _dueReceiptMemo(s, r);
   _loadDsrDueColView();
 }
 
@@ -5622,8 +5656,25 @@ async function settleConfirm() {
     return;
   }
   var a = r.applied || {};
+  _settleMemo(d, a, r);
   toast('✅ হিসাব সম্পন্ন — নগদ ৳' + fm(a.cash) + (a.returnLines ? ' · ফেরত ৳' + fm(a.returnValue) : '') + ' · বকেয়া এখন ৳' + fm(r.lifetimeDue) + (r.cashShort > 0 ? ' (৳' + fm(r.cashShort) + ' কম নেওয়া হয়েছে)' : ''));
   loadSettlement();
+}
+function _settleMemo(d, a, r) {
+  var M = MEMO, sm = d.summary || {}, cash = num(a.cash), life = num(r.lifetimeDue);
+  var rows = [['সেদিন গাড়িতে দেওয়া হয়েছে', num(sm.givenToday)], ['দোকানে বিক্রি (বিল)', num(sm.soldValue)], ['বিক্রির সময় নগদ পেয়েছে', num(sm.cashAtSale)], ['দোকানে বাকি দিয়েছে', num(sm.creditToday)]];
+  if (a.returnLines) rows.push(['ফেরত পণ্যের মূল্য (' + a.returnLines + ' লাইন)', num(a.returnValue)]);
+  rows.push(['আজকের হিসাবে নগদ জমা নেওয়া হয়েছে', cash]);
+  _memoShow({ title: 'দিনশেষ হিসাব মেমো', en: 'DAY-END SETTLEMENT MEMO', no: genUID('ME-ST'), date: d.date, phone: _srPhone(d.dsrName),
+    blocks: [
+      M.kv('DSR ও হিসাবের তথ্য', [['DSR-এর নাম:', '<b>' + esc(d.dsrName || '') + '</b>'], ['হিসাবের তারিখ:', M.dmy(d.date)], ['হিসাব গ্রহণকারী:', esc(_memoBy())]]),
+      M.T([{ h: '#', w: '6%' }, { h: 'বিবরণ', a: 'l', w: '64%' }, { h: 'টাকা (৳)', a: 'r', w: '30%' }],
+        rows.map(function (x, i) { return [M.dg(String(i + 1).padStart(2, '0')), { h: x[0], al: 'left', cls: 'l' }, { h: M.money(x[1]), cls: 'r amt', al: 'right' }]; }),
+        [{ h: 'হিসাবের পর মোট বকেয়া (এখন):', span: 2, al: 'right' }, { h: '৳ ' + M.money(life), al: 'right' }]),
+      num(r.cashShort) > 0 ? M.note('<b>সতর্কতা:</b> ৳' + M.money(r.cashShort) + ' কম নগদ নেওয়া হয়েছে।') : M.html('')
+    ],
+    closing: { total: cash, words: cash, wordsLabel: 'কথায় (জমা নগদ):', summary: [['বিক্রি (বিল)', '৳ ' + M.money(sm.soldValue)], ['নগদ জমা', '৳ ' + M.money(cash), 'g'], life > 0 ? ['বর্তমান মোট বকেয়া', '৳ ' + M.money(life), 'r'] : ['বর্তমান মোট বকেয়া', '৳ 0.00 ✔', 'g']],
+      sigs: [['DSR-এর স্বাক্ষর', d.dsrName || ''], ['হিসাব গ্রহণকারী', _memoBy()], ['অনুমোদনকারী', 'মালিক']] } });
 }
 async function saveQuickCash() {
   var srId = v('pf-sr'); if (!srId) return toast('উপরে DSR/SO বাছাই করুন');
@@ -6216,45 +6267,14 @@ async function ordSubmit() {
 //  Update #29 — Auto-Generated Order Memo
 //  When an SO completes (submits) an order, build a timestamped memo —
 //  Product → Quantity (case+piece) → Rate/case → Total, with a footer
-//  of total case count + grand total — and hand it to the app's
-//  existing html2canvas-based share panel (_showSlipSharePanel), which
-//  already gives print/save-as-JPG/share for free.
+//  of total case count + grand total — and hand it to the shared A4 MEMO
+//  engine (MEMO.show), which gives PDF/JPG download, print and WhatsApp.
 // ══════════════════════════════════════════════════
 function _renderOrderMemo(items) {
   var now = new Date();
   var memoNo = 'ORD-' + iso(now).replace(/-/g,'') + '-' + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
-  var totalCases = 0, grand = 0;
-  var rows = items.map(function(it){
-    var p = S.products.find(function(x){return x.id===it.productId;});
-    var cs = (p ? num(p.caseSize) : 0) || 1;
-    var caseRate = num(it.sellingPrice) * cs;
-    var lineTotal = num(it.totalUnits) * num(it.sellingPrice);
-    var ca = num(it.cases) || Math.floor(num(it.totalUnits)/cs);
-    totalCases += ca; grand += lineTotal;
-    return '<tr>'
-      + '<td style="padding:6px 8px;border-bottom:1px solid #E6ECE8;font-size:12px">' + esc(it.productName) + '</td>'
-      + '<td style="padding:6px 8px;border-bottom:1px solid #E6ECE8;font-size:12px;text-align:center">' + fmtCasePcs(it.totalUnits, cs) + '</td>'
-      + '<td style="padding:6px 8px;border-bottom:1px solid #E6ECE8;font-size:12px;text-align:right">৳' + fm(caseRate) + '</td>'
-      + '<td style="padding:6px 8px;border-bottom:1px solid #E6ECE8;font-size:12px;text-align:right;font-weight:700">৳' + fm(lineTotal) + '</td>'
-      + '</tr>';
-  }).join('');
-  var html = ''
-    + '<div style="font-family:sans-serif;background:#fff;padding:18px;max-width:420px">'
-    + '<div style="text-align:center;margin-bottom:10px"><div style="font-size:16px;font-weight:700;color:#06B6D4">AXIION — অর্ডার মেমো</div>'
-    + '<div style="font-size:11px;color:#666">'+esc(S.shopName||'AXIION DMS')+'</div>'
-    + '<div style="font-size:10px;color:#999;margin-top:4px">মেমো নং: ' + memoNo + ' · ' + fmtBn(iso(now)) + ' ' + _fmtHM(now.toISOString()) + '</div></div>'
-    + '<div style="font-size:11px;margin-bottom:6px"><b>SO:</b> ' + esc(S.userName || '') + '</div>'
-    + '<table style="width:100%;border-collapse:collapse">'
-    + '<thead><tr style="background:#F3F4F6">'
-    + '<th style="padding:6px 8px;font-size:11px;text-align:left">পণ্য</th>'
-    + '<th style="padding:6px 8px;font-size:11px;text-align:center">পরিমাণ</th>'
-    + '<th style="padding:6px 8px;font-size:11px;text-align:right">রেট/কেস</th>'
-    + '<th style="padding:6px 8px;font-size:11px;text-align:right">মোট</th>'
-    + '</tr></thead><tbody>' + rows + '</tbody></table>'
-    + '<div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:2px solid #06B6D4;font-size:12px;font-weight:700">'
-    + '<span>মোট কেস: ' + totalCases + '</span><span>সর্বমোট: ৳' + fm(grand) + '</span></div>'
-    + '</div>';
-  _showSlipSharePanel(memoNo, html);
+  _memoStock('order', { no: memoNo, date: iso(now), partyName: S.userName || '', partyPhone: _srPhone(S.userName), items: items,
+    meta: [['প্রস্তুতকারী:', _memoBy()]] });
 }
 async function loadMySOOrders() {
   var body = document.getElementById('ord-body'); if (!body) return;
@@ -7362,6 +7382,10 @@ async function saveGive(){
     hideOvl();
     if (!rD||!rD.ok) return toast(rD&&rD.error||'ব্যর্থ');
     toast('✅ '+S.giveSRName+' এর ভ্যান-লোড তালিকায় পাঠানো হয়েছে — DSR লোড করে "সম্পন্ন" চাপলে স্টক বিয়োগ হবে');
+    // FIX: owner/manager giving stock to a DSR never produced a memo — now it does
+    var dSlip={slipNo:genUID('ME-GV'),date:S.giveDate,srName:S.giveSRName,srArea:S.giveArea,phone:recipient&&recipient.phone||'',items:items,
+      banner:'ভ্যান-লোড তালিকায় পাঠানো হয়েছে — DSR লোড সম্পন্ন করলে স্টক বিয়োগ হবে',meta:[['প্রদানকারী:',_memoBy()]]};
+    S.lastSlip=dSlip; openSlipWin(dSlip);
     S.giveStep=1;S.giveSRId='';S.giveSRName='';S.giveArea='';S.giveSelProd={};S.giveItems=[];
     renderTx();
     return;
@@ -7451,13 +7475,16 @@ async function saveTx(){
       if (items[q].totalUnits > have) return toast(items[q].productName+' — স্টকে আছে '+fn(have)+' পিস, ফেরত দিতে চাইছেন '+fn(items[q].totalUnits)+' পিস');
     }
   }
-  var txPayload={type:t,srId:'',srName:'',date:v('tx-dt')||iso(new Date()),note:v('tx-nt'),items:items};
+  var txNo=genUID(t==='return_company'?'ME-RC':'ME-BY'), txDate=v('tx-dt')||iso(new Date()), txNote=v('tx-nt');
+  var txPayload={type:t,srId:'',srName:'',date:txDate,slipNo:txNo,note:txNote,items:items};
+  var txMemo=function(pend){_memoStock(t,{no:txNo,date:txDate,partyName:S.distributorName||'কোম্পানি',items:items,note:txNote,banner:pend?'⏳ অনুমোদন পেন্ডিং — মালিকের অনুমোদনের অপেক্ষায়':'',meta:[['প্রস্তুতকারী:',_memoBy()]]});};
   showOvl('সংরক্ষণ হচ্ছে...');
   var r=await mgrPost('transaction','/api/transactions',txPayload);
   hideOvl();
   if(!r.ok)return toast(r.error||'ব্যর্থ');
-  if(r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');S.txItems=[{productId:'',cases:'',pcs:''}];renderTx();return;}
+  if(r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');txMemo(true);S.txItems=[{productId:'',cases:'',pcs:''}];renderTx();return;}
   _dashCache=null;
+  txMemo(false);
   toast(t==='return_company' ? '↩️ কোম্পানিতে ফেরত রেকর্ড হয়েছে — স্টক কমানো হয়েছে' : '🛒 ক্রয় রেকর্ড হয়েছে');
   items.forEach(function(i){ S.stockMap[i.productId]=(num(S.stockMap[i.productId])||0)+(t==='return_company'?-1:1)*i.totalUnits; });
   S.txItems=[{productId:'',cases:'',pcs:''}]; renderTx();
@@ -7943,237 +7970,19 @@ function openPointSaleSlip(slip) {
 
 
 function openSlipWin(slip) {
-  var slipTitle=slip.slipTitle||'— স্টক সরবরাহ স্লিপ —';
-  var pendingBanner=slip.pendingApproval
-    ?'<div style="background:#FFFBEB;color:#B45309;border:2px solid #FFCA2C;border-radius:6px;text-align:center;font-size:12px;font-weight:700;padding:7px 10px;margin-bottom:10px;letter-spacing:0.5px">⏳ অনুমোদন পেন্ডিং — মালিকের অনুমোদনের অপেক্ষায়</div>'
-    :'';
-  var total=0;
-  var rows=slip.items.map(function(item){
-    var amt=item.totalUnits*item.sellingPrice; total+=amt;
-    var imgTag=item.thumb&&item.thumb.length>50?'<img src="'+item.thumb+'" width="26" height="26" style="object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:6px;border:1px solid #ddd" onerror="this.remove()">':'';
-    var uLabel=item.unitType||'কেস';
-    return'<tr><td style="padding:6px 8px">'+imgTag+'<span style="vertical-align:middle;font-weight:600">'+esc(item.productName)+'</span><br><span style="font-size:10px;color:#666">'+esc(item.sku)+'</span></td>'
-      +'<td style="text-align:center;padding:6px 8px">'+(item.cases||0)+(item.cases>0?'<br><small style="font-size:9px;color:#777">'+uLabel+'</small>':'')+'</td>'
-      +'<td style="text-align:center;padding:6px 8px">'+(item.pcs||0)+'</td>'
-      +'<td style="text-align:center;font-weight:bold;padding:6px 8px">'+fn(item.totalUnits)+'</td>'
-      +'<td style="text-align:right;padding:6px 8px">৳'+fm(amt)+'</td></tr>';
-  }).join('');
-  // Footer timestamp in D/M/Y format
-  var now=new Date();
-  var nowStr=String(now.getDate()).padStart(2,'0')+'/'+String(now.getMonth()+1).padStart(2,'0')+'/'+now.getFullYear()+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-
-  // ── Slip body HTML (no buttons — rendered to image separately) ──
-  var slipBody='<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8">'
-    +'<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700;900&family=Noto+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">'
-    +'<style>'
-    +'*{margin:0;padding:0;box-sizing:border-box}'
-    +'body{font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif;background:#fff;color:#000;padding:14px;width:420px}'
-    // ── Header matching the letterhead image ──
-    +'.hdr{border:2px solid #000;padding:8px 10px 6px;margin-bottom:10px;text-align:center}'
-    +'.hdr-top{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px}'
-    +'.logo-circle{width:44px;height:44px;border:2px solid #000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;flex-shrink:0}'
-    +'.co-name{font-size:26px;font-weight:900;line-height:1;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif}'
-    +'.hdr-dist{font-size:10.5px;font-weight:600;color:#000;margin-top:2px}'
-    +'.hdr-addr{font-size:9.5px;color:#333;margin-top:1px;line-height:1.5}'
-    +'.hdr-bot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;border-top:1px solid #000;padding-top:4px}'
-    +'.hdr-dist-box{background:#000;color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:2px}'
-    +'.hdr-mobile{font-size:9.5px;font-weight:700}'
-    // ── Rest of slip ──
-    +'.slip-t{text-align:center;font-size:12px;font-weight:700;letter-spacing:2px;border:1.5px dashed #555;padding:5px 0;margin-bottom:8px}'
-    +'.meta{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px}.meta td{padding:4px 7px;border:1px solid #999}'
-    +'.mk{background:#E6ECE8;font-weight:700;width:70px;font-size:10px}.mv{font-weight:600}'
-    +'.stbl{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px}'
-    +'.stbl th{border:1.5px solid #333;padding:5px 7px;background:#111;color:#fff;text-align:left;font-size:10px;font-weight:700}'
-    +'.stbl td{border:1px solid #bbb;vertical-align:middle;padding:5px 7px}'
-    +'.stbl tfoot td{border:1.5px solid #333;background:#E6ECE8;font-weight:700;font-size:12px;padding:6px 7px}'
-    +'.sigs{display:flex;justify-content:space-between;margin-top:18px}'
-    +'.sig{text-align:center;font-size:10px;color:#444;width:120px}'
-    +'.sig-line{border-top:1.5px solid #000;padding-top:3px;margin-top:28px}'
-    +'.ftr{text-align:center;font-size:8px;color:#888;margin-top:8px;border-top:1px dotted #bbb;padding-top:4px}'
-    +'</style></head><body>'
-    // Header block matching letterhead — dynamic, from Settings
-    +_letterheadHtml()
-    +'<div class="slip-t">'+slipTitle+'</div>'
-    +pendingBanner
-    +'<table class="meta">'
-    +'<tr><td class="mk">স্লিপ নং</td><td class="mv">'+slip.slipNo+'</td></tr>'
-    +'<tr><td class="mk">তারিখ</td><td class="mv">'+fmtBn(slip.date)+'</td></tr>'
-    +'<tr><td class="mk">'+(slip.custLabel||'DSR/SO নাম')+'</td><td class="mv"><strong>'+esc(slip.srName)+'</strong>'+(slip.srArea?' | '+esc(slip.srArea):'')+'</td></tr>'
-    +'</table>'
-    +'<table class="stbl"><thead><tr>'
-    +'<th style="width:44%">পণ্য / SKU</th>'
-    +'<th style="text-align:center;width:12%">ইউনিট</th>'
-    +'<th style="text-align:center;width:12%">পিস</th>'
-    +'<th style="text-align:center;width:14%">মোট পিস</th>'
-    +'<th style="text-align:right;width:18%">মূল্য</th>'
-    +'</tr></thead>'
-    +'<tbody>'+rows+'</tbody>'
-    +'<tfoot><tr><td colspan="4" style="text-align:right">মোট পরিমাণ →</td>'
-    +'<td style="text-align:right;font-weight:900;font-size:14px">৳'+fm(total)+'</td></tr></tfoot>'
-    +'</table>'
-    +'<div class="sigs">'
-    +'<div class="sig"><div class="sig-line">জারি করেছেন</div></div>'
-    +'<div class="sig"><div class="sig-line">গ্রহণ করেছেন</div></div>'
-    +'</div>'
-    +'<div class="ftr">'+esc(S.shopName||'AXIION DMS')+' · Powered by AXIION DMS | '+nowStr+'</div>'
-    +'</body></html>';
-
-  // ── If Android app, send HTML directly to native bridge ──
-  if(window.AndroidSlip){
-    window.AndroidSlip.receiveSlip(slipBody,'');
-    return;
-  }
-
-  // ── Browser: render in hidden iframe → html2canvas → show share panel ──
-  _showSlipSharePanel(slip.slipNo, slipBody);
+  // Every stock slip (give / return / damage / point-sale / point-return) → one A4 memo
+  var t = slip.slipTitle || '';
+  var kind = slip.kind || (t.indexOf('পয়েন্ট সেল ফেরত') >= 0 ? 'point_return' : t.indexOf('পয়েন্ট সেল') >= 0 ? 'point_sale'
+    : t.indexOf('ড্যামেজ') >= 0 ? 'damage' : t.indexOf('ফেরত') >= 0 ? 'return' : 'give');
+  _memoStock(kind, { no: slip.slipNo, date: slip.date, partyName: slip.srName, partyArea: slip.srArea,
+    partyPhone: slip.phone || _srPhone(slip.srName), items: slip.items,
+    banner: slip.pendingApproval ? '⏳ অনুমোদন পেন্ডিং — মালিকের অনুমোদনের অপেক্ষায়' : slip.banner,
+    meta: slip.meta || [['প্রস্তুতকারী:', _memoBy()]] });
 }
 
-function openReturnSlip(slip){openSlipWin(Object.assign({},slip,{slipTitle:'— পণ্য ফেরত স্লিপ —'}));}
-function openDamageSlip(slip){openSlipWin(Object.assign({},slip,{slipTitle:'— ড্যামেজ পণ্য স্লিপ —'}));}
+function openReturnSlip(slip){openSlipWin(Object.assign({},slip,{slipTitle:'— পণ্য ফেরত স্লিপ —',kind:'return'}));}
+function openDamageSlip(slip){openSlipWin(Object.assign({},slip,{slipTitle:'— ড্যামেজ পণ্য স্লিপ —',kind:'damage'}));}
 
-function _showSlipSharePanel(slipNo, slipBodyHtml) {
-  // Overlay
-  var ov=document.createElement('div');
-  ov.id='slip-overlay';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center';
-
-  // Panel
-  var panel=document.createElement('div');
-  panel.style.cssText='background:#fff;border-radius:14px;width:92%;max-width:420px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif';
-
-  panel.innerHTML=
-    '<div style="padding:14px 16px 10px;border-bottom:1px solid #E6ECE8;display:flex;justify-content:space-between;align-items:center">'
-    +'<span style="font-size:15px;font-weight:700;color:#1a237e">📋 স্লিপ তৈরি হচ্ছে…</span>'
-    +'<button onclick="document.getElementById(\'slip-overlay\').remove()" style="border:none;background:#E6ECE8;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>'
-    +'</div>'
-    +'<div id="slip-preview" style="padding:12px;background:#f5f5f5;text-align:center;min-height:120px">'
-    +'<div style="padding:30px;color:#777">⏳ রেন্ডার হচ্ছে…</div>'
-    +'</div>'
-    +'<div id="slip-actions" style="padding:12px;display:none;flex-direction:column;gap:8px"></div>';
-
-  ov.appendChild(panel);
-  document.body.appendChild(ov);
-
-  // Hidden iframe to render slip
-  var iframe=document.createElement('iframe');
-  iframe.style.cssText='position:fixed;left:-9999px;top:-9999px;width:440px;height:800px;border:none;visibility:hidden';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(slipBodyHtml);
-  iframe.contentDocument.close();
-
-  // Load html2canvas then capture
-  function doCapture(){
-    var sc=document.createElement('script');
-    sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    sc.onload=function(){
-      // Wait for fonts inside iframe
-      setTimeout(function(){
-        html2canvas(iframe.contentDocument.body,{
-          scale:2,useCORS:true,allowTaint:true,
-          backgroundColor:'#ffffff',logging:false,
-          width:420,windowWidth:440
-        }).then(function(canvas){
-          iframe.remove();
-          var jpgDataUrl=canvas.toDataURL('image/jpeg',0.93);
-          var pdfHtml=slipBodyHtml; // for print path
-
-          // Show preview image
-          var prev=document.getElementById('slip-preview');
-          if(!prev)return;
-          var img=document.createElement('img');
-          img.src=jpgDataUrl;
-          img.style.cssText='width:100%;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.15)';
-          prev.innerHTML='';
-          prev.appendChild(img);
-
-          // Update title
-          panel.querySelector('span').textContent='✅ স্লিপ '+slipNo+' তৈরি হয়েছে';
-
-          // Action buttons
-          var acts=document.getElementById('slip-actions');
-          if(!acts)return;
-          acts.style.display='flex';
-
-          function mkBtn(label,color,fn){
-            var b=document.createElement('button');
-            b.innerHTML=label;
-            b.style.cssText='padding:13px;border:none;border-radius:10px;background:'+color+';color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif;width:100%';
-            b.onclick=fn; return b;
-          }
-
-          // JPG Download
-          var base64Only=jpgDataUrl.split(',')[1];
-
-          // JPG Download
-          acts.appendChild(mkBtn('🖼️  JPG ডাউনলোড করুন','#0891B2',function(){
-            if(window.AndroidBridge){
-              window.AndroidBridge.saveJpg(base64Only,'slip_'+slipNo+'.jpg');
-            } else {
-              var a=document.createElement('a');a.href=jpgDataUrl;a.download='slip_'+slipNo+'.jpg';a.click();
-            }
-          }));
-
-          // PDF / Print
-          acts.appendChild(mkBtn('📄  PDF হিসেবে প্রিন্ট করুন','#333',function(){
-            var w=window.open('','_blank','width=480,height=740');
-            if(w){w.document.write(pdfHtml);w.document.close();setTimeout(function(){w.print();},800);}
-          }));
-
-          // WhatsApp
-          acts.appendChild(mkBtn('📲  WhatsApp এ পাঠান','#25D366',function(){
-            if(window.AndroidBridge){
-              window.AndroidBridge.shareWhatsApp(base64Only,'slip_'+slipNo+'.jpg','com.whatsapp');
-            } else if(navigator.share&&navigator.canShare){
-              fetch(jpgDataUrl).then(function(r){return r.blob();}).then(function(blob){
-                var file=new File([blob],'slip_'+slipNo+'.jpg',{type:'image/jpeg'});
-                if(navigator.canShare({files:[file]})) navigator.share({files:[file],title:'স্লিপ '+slipNo});
-                else { var a=document.createElement('a');a.href=jpgDataUrl;a.download='slip_'+slipNo+'.jpg';a.click(); }
-              });
-            } else {
-              var a=document.createElement('a');a.href=jpgDataUrl;a.download='slip_'+slipNo+'.jpg';a.click();
-              setTimeout(function(){window.open('https://web.whatsapp.com/','_blank');},1000);
-            }
-          }));
-
-          // WA Business
-          acts.appendChild(mkBtn('💼  WA Business এ পাঠান','#075E54',function(){
-            if(window.AndroidBridge){
-              window.AndroidBridge.shareWhatsApp(base64Only,'slip_'+slipNo+'.jpg','com.whatsapp.w4b');
-            } else if(navigator.share&&navigator.canShare){
-              fetch(jpgDataUrl).then(function(r){return r.blob();}).then(function(blob){
-                var file=new File([blob],'slip_'+slipNo+'.jpg',{type:'image/jpeg'});
-                if(navigator.canShare({files:[file]})) navigator.share({files:[file],title:'স্লিপ '+slipNo});
-                else { var a=document.createElement('a');a.href=jpgDataUrl;a.download='slip_'+slipNo+'.jpg';a.click(); }
-              });
-            } else {
-              var a=document.createElement('a');a.href=jpgDataUrl;a.download='slip_'+slipNo+'.jpg';a.click();
-            }
-          }));
-
-          // Close
-          acts.appendChild(mkBtn('✕  বন্ধ করুন','#9e9e9e',function(){
-            document.getElementById('slip-overlay').remove();
-          }));
-
-        }).catch(function(e){
-          iframe.remove();
-          var prev=document.getElementById('slip-preview');
-          if(prev) prev.innerHTML='<div style="padding:20px;color:red">ত্রুটি: '+e+'</div>';
-        });
-      }, 1200); // wait for Google Fonts inside iframe
-    };
-    sc.onerror=function(){
-      iframe.remove();
-      var prev=document.getElementById('slip-preview');
-      if(prev) prev.innerHTML='<div style="padding:20px;color:red">html2canvas লোড হয়নি</div>';
-    };
-    document.head.appendChild(sc);
-  }
-
-  // Small delay so iframe renders before we grab it
-  setTimeout(doCapture, 300);
-}
 
 // ════════════════════════════════════════════════════
 //  REPORT
@@ -8300,291 +8109,56 @@ async function soRptOpenView(soId, date) {
   var r = await apiGet('/api/report?action=daily-get&soId=' + soId + '&date=' + date);
   hideOvl();
   if (!r.ok) return toast(r.error || 'পাওয়া যায়নি');
-  var docHtml = buildDailyReportDocHtml(r);
-  _showDailyReportSharePanel(esc(r.soName).replace(/\s+/g, '_') + '_' + r.reportDate, docHtml);
+  _memoShow(_dailyReportSpec(r));
 }
 
 // ── Builds ONE printable document: SO delivery challan (per route)
 //    followed by the Due Report (page-break before, for print) ──────
 var LOAD_LABELS_BN = ['১ম লোডিং', '২য় লোডিং', '৩য় লোডিং', '৪র্থ লোডিং', '৫ম লোডিং', '৬ষ্ঠ লোডিং'];
 
-function buildDailyReportDocHtml(row) {
-  var rd = row.reportData || {}, dd = row.dueData || {};
-  var routes = rd.routes || [];
-  var now = new Date();
-  var nowStr = String(now.getDate()).padStart(2, '0') + '/' + String(now.getMonth() + 1).padStart(2, '0') + '/' + now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  // Update #39: the document must show WHEN it was generated, not just
-  // by whom — prefer the server's actual generation timestamp
-  // (row.generatedAt) over "now" (which is only when this copy is being
-  // rendered/printed, possibly much later).
-  function fmtGenTime(iso) {
-    if (!iso) return nowStr;
-    var d = new Date(iso); if (isNaN(d.getTime())) return nowStr;
-    return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  }
-  var genStr = fmtGenTime(row.generatedAt);
-
-  // V47 update #39: route header now also prints the Road (Update #21/
-  // #22) this SO/DSR is assigned to, when the report was generated after
-  // Roads was set up — older stored snapshots simply have no roadName
-  // and this line is omitted, no backward-compat issue.
-  function routeHdr(route) {
-    return '<div class="rt-hdr"><span>🚐 <b>ডি এস আর / SO নাম:</b> ' + esc(route.routeName) + (route.routePhone ? ' <small>(☎ ' + esc(route.routePhone) + ')</small>' : '') + '</span>'
-      + '<span><b>রুট/এলাকা:</b> ' + esc(route.routeArea || '—') + (route.routeRoadName ? ' &nbsp;|&nbsp; <b>রোড:</b> 🛣️ ' + esc(route.routeRoadName) : '') + '</span></div>';
-  }
-
-  function routeBlock(route) {
-    var hasDamage = (route.products || []).some(function (p) { return p.damage > 0; });
-    if (!route.products || !route.products.length) {
-      return '<div class="route-block">' + routeHdr(route)
-        + '<div class="rt-empty">এই দিনে কোনো লোডিং বা ফেরত হয়নি</div></div>';
-    }
-    var loadHeads = '';
-    for (var i = 0; i < route.loadCount; i++) loadHeads += '<th>' + (LOAD_LABELS_BN[i] || ('লোডিং ' + (i + 1))) + '</th>';
-    // Update #40: every quantity here is printed as "X কেস Y পিস" (using
-    // this product's own case size) instead of a bare piece count — the
-    // one exception is the mixed multi-SKU footer totals row below, where
-    // summing different products' case sizes into one "case" figure
-    // wouldn't be meaningful, so that row stays in plain piece totals.
-    var rowsHtml = route.products.map(function (p) {
-      var cs = p.caseSize || 1;
-      var loadCells = '';
-      for (var i = 0; i < route.loadCount; i++) loadCells += '<td>' + (p.loads[i] ? fmtCasePcs(p.loads[i], cs) : '—') + '</td>';
-      return '<tr><td class="pname">' + esc(p.name) + (p.unitType ? '<br><small>' + esc(p.unitType) + '</small>' : '') + '</td>'
-        + loadCells
-        + '<td class="tot">' + fmtCasePcs(p.totalLoad, cs) + '</td>'
-        + '<td class="c-ret">' + (p.returned ? fmtCasePcs(p.returned, cs) : '—') + '</td>'
-        + (hasDamage ? '<td class="c-dmg">' + (p.damage ? fmtCasePcs(p.damage, cs) : '—') + '</td>' : '')
-        + '<td class="c-sold">' + fmtCasePcs(p.sold, cs) + '</td>'
-        + '<td>৳' + fm(p.casePrice) + '</td>'
-        + '<td class="amt">৳' + fm(p.amount) + '</td></tr>';
-    }).join('');
-    var leadCols = 2 + route.loadCount; // পণ্যের নাম + loading columns
-    var t = route.totals || {};
-    return '<div class="route-block">' + routeHdr(route)
-      + '<table class="chln"><thead><tr><th>পণ্যের নাম</th>' + loadHeads + '<th>মোট লোডিং</th><th class="c-ret">ফেরত</th>' + (hasDamage ? '<th class="c-dmg">নষ্ট</th>' : '') + '<th class="c-sold">বিক্রয়</th><th>কেস দর</th><th>টাকা</th></tr></thead>'
-      + '<tbody>' + rowsHtml + '</tbody>'
-      + '<tfoot><tr><td colspan="' + leadCols + '" style="text-align:right">রুট মোট →</td><td class="c-ret">' + fn(t.returned) + ' পিস</td>' + (hasDamage ? '<td class="c-dmg">' + fn(t.damage) + ' পিস</td>' : '') + '<td class="c-sold">' + fn(t.sold) + ' পিস</td><td></td><td>৳' + fm(t.amount) + '</td></tr></tfoot>'
-      + '</table></div>';
-  }
-
-  var soT = rd.soTotals || {};
-  var routesHtml = routes.map(routeBlock).join('');
-
-  var shopRows = (dd.shops || []).map(function (s) {
-    return '<tr><td>' + esc(s.shopName) + (s.shopNo ? '<br><small>নং: ' + esc(s.shopNo) + '</small>' : '') + '</td>'
-      + '<td>' + esc(s.shopPhone || '—') + '</td>'
-      + '<td>৳' + fm(s.todayDue) + '</td>'
-      + '<td>৳' + fm(s.prevDue) + '</td>'
-      + '<td style="font-weight:800">৳' + fm(s.totalDue) + '</td></tr>';
-  }).join('') || '<tr><td colspan="5" style="text-align:center;color:#777;padding:16px">🎉 কোনো বকেয়া নেই</td></tr>';
-
-  return '<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8">'
-    + '<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700;900&family=Noto+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">'
-    + '<style>'
-    + '*{margin:0;padding:0;box-sizing:border-box}'
-    + 'body{font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif;background:#fff;color:#000;padding:16px;width:800px}'
-    + '.hdr{border:2px solid #000;padding:8px 10px 6px;margin-bottom:10px;text-align:center}'
-    + '.hdr-top{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px}'
-    + '.logo-circle{width:44px;height:44px;border:2px solid #000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;flex-shrink:0}'
-    + '.co-name{font-size:26px;font-weight:900;line-height:1;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif}'
-    + '.hdr-dist{font-size:10.5px;font-weight:600;color:#000;margin-top:2px}'
-    + '.hdr-addr{font-size:9.5px;color:#333;margin-top:1px;line-height:1.5}'
-    + '.hdr-bot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;border-top:1px solid #000;padding-top:4px}'
-    + '.hdr-dist-box{background:#000;color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:2px}'
-    + '.hdr-mobile{font-size:9.5px;font-weight:700}'
-    + '.slip-t{text-align:center;font-size:13px;font-weight:700;letter-spacing:2px;border:1.5px dashed #555;padding:6px 0;margin:10px 0 8px}'
-    + '.meta{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px}.meta td{padding:4px 7px;border:1px solid #999}'
-    + '.mk{background:#E6ECE8;font-weight:700;width:120px;font-size:10px}.mv{font-weight:600}'
-    + '.stat-row{display:flex;gap:8px;margin-bottom:10px}'
-    + '.stat-box{flex:1;border:1.5px solid #333;border-radius:6px;text-align:center;padding:8px 4px;background:#f7f7f7}'
-    + '.stat-box.tot{background:#111;color:#fff;border-color:#111}'
-    + '.stat-box .sv{font-size:16px;font-weight:900}'
-    + '.stat-box .sl{font-size:9.5px;color:#666;margin-top:2px}'
-    + '.stat-box.tot .sl{color:#ccc}'
-    + '.route-block{margin-bottom:16px}'
-    + '.rt-hdr{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;background:linear-gradient(135deg,#eef1ff,#ECFEFF);border:1px solid #b9c4f0;border-left:4px solid #0891B2;border-radius:6px;padding:7px 10px;font-size:11px;margin-bottom:5px}'
-    + '.rt-empty{font-size:11px;color:#999;padding:8px;text-align:center;border:1px dashed #ccc;border-radius:5px}'
-    + 'table.chln,table.due-tbl{width:100%;border-collapse:collapse;margin-bottom:6px;font-size:10.5px;border-radius:4px;overflow:hidden}'
-    + 'table.chln th,table.due-tbl th{border:1.5px solid #222;padding:5px 6px;background:linear-gradient(180deg,#2c2c2c,#111);color:#fff;text-align:center;font-size:9.5px;font-weight:700}'
-    + 'table.chln td,table.due-tbl td{border:1px solid #ccc;padding:5px 6px;text-align:center;vertical-align:middle}'
-    + 'table.chln td.pname,table.due-tbl td:first-child{text-align:left}'
-    + 'table.chln td.amt,table.due-tbl td:last-child{font-weight:800}'
-    + 'table.chln tbody tr:nth-child(even){background:#fafbff}'
-    // Update #39: sale/return/damage each get their own colour so they're
-    // visually distinct at a glance, not just readable via column header.
-    + 'table.chln th.c-sold,table.chln td.c-sold{background:#ECFDF5;color:#1b5e20;font-weight:700}'
-    + 'table.chln th.c-ret,table.chln td.c-ret{background:#FFFBEB;color:#B45309}'
-    + 'table.chln th.c-dmg,table.chln td.c-dmg{background:#FEF2F2;color:#b71c1c}'
-    + 'table.chln th.c-sold{background:#1b5e20;color:#fff}'
-    + 'table.chln th.c-ret{background:#B45309;color:#fff}'
-    + 'table.chln th.c-dmg{background:#b71c1c;color:#fff}'
-    + 'table.chln tfoot td{border:1.5px solid #333;background:#E6ECE8;font-weight:800;font-size:11px}'
-    + 'table.chln tfoot td.c-sold{background:#A7F3D0}'
-    + 'table.chln tfoot td.c-ret{background:#ffe0b2}'
-    + 'table.chln tfoot td.c-dmg{background:#ffcdd2}'
-    + '.grand-tot{text-align:right;font-size:14px;font-weight:900;border-top:2px solid #000;padding-top:8px;margin-top:6px}'
-    + '.sigs{display:flex;justify-content:space-between;margin-top:20px}'
-    + '.sig{text-align:center;font-size:10px;color:#444;width:150px}'
-    + '.sig-line{border-top:1.5px solid #000;padding-top:3px;margin-top:28px}'
-    + '.ftr{text-align:center;font-size:8px;color:#888;margin-top:8px;border-top:1px dotted #bbb;padding-top:4px}'
-    + '.page-break{page-break-before:always;border-top:2px dashed #999;margin:16px 0 12px}'
-    + '@media print{.page-break{border-top:none;margin-top:0}}'
-    + '</style></head><body>'
-    + _letterheadHtml()
-    + '<div class="slip-t">— দৈনিক SO ডেলিভারি রিপোর্ট —</div>'
-    + '<table class="meta">'
-    + '<tr><td class="mk">SO-এর নাম</td><td class="mv">' + esc(row.soName) + (rd.soArea ? ' | ' + esc(rd.soArea) : '') + '</td></tr>'
-    + (rd.soRoadName ? '<tr><td class="mk">রোড</td><td class="mv">🛣️ ' + esc(rd.soRoadName) + '</td></tr>' : '')
-    + '<tr><td class="mk">তারিখ</td><td class="mv">' + fmtBn(row.reportDate) + '</td></tr>'
-    + '<tr><td class="mk">তৈরি হয়েছে</td><td class="mv">' + (row.generatedBy === 'auto' ? 'স্বয়ংক্রিয় (রাত ২টা)' : esc(row.generatedBy || '')) + ' — ' + genStr + '</td></tr>'
-    + '</table>'
-    + '<div class="stat-row">'
-    + '<div class="stat-box"><div class="sv">' + fn(soT.totalLoad) + '</div><div class="sl">মোট লোডিং</div></div>'
-    + '<div class="stat-box"><div class="sv">' + fn(soT.returned) + '</div><div class="sl">মোট ফেরত</div></div>'
-    + '<div class="stat-box"><div class="sv">' + fn(soT.sold) + '</div><div class="sl">মোট বিক্রয়</div></div>'
-    + '<div class="stat-box"><div class="sv">' + fn(soT.skuCount||0) + '</div><div class="sl">বিক্রিত SKU সংখ্যা</div></div>'
-    + '<div class="stat-box tot"><div class="sv">৳' + fm(soT.amount) + '</div><div class="sl">সর্বমোট টাকা</div></div>'
-    + '</div>'
-    + routesHtml
-    + '<div class="sigs"><div class="sig"><div class="sig-line">জারি করেছেন</div></div><div class="sig"><div class="sig-line">যাচাই করেছেন (মালিক)</div></div></div>'
-    + '<div class="ftr">'+esc(S.shopName||'AXIION DMS')+' · Powered by AXIION DMS | তৈরি: ' + genStr + '</div>'
-    + '<div class="page-break"></div>'
-    + '<div class="slip-t">— দৈনিক বকেয়া রিপোর্ট —</div>'
-    + '<table class="meta">'
-    + '<tr><td class="mk">SO-এর নাম</td><td class="mv">' + esc(row.soName) + '</td></tr>'
-    + '<tr><td class="mk">তারিখ</td><td class="mv">' + fmtBn(row.reportDate) + '</td></tr>'
-    + '</table>'
-    + '<div class="stat-row">'
-    + '<div class="stat-box"><div class="sv">৳' + fm(dd.todayTotal) + '</div><div class="sl">আজকের বকেয়া</div></div>'
-    + '<div class="stat-box"><div class="sv">৳' + fm(dd.prevTotal) + '</div><div class="sl">পূর্বের বকেয়া</div></div>'
-    + '<div class="stat-box tot"><div class="sv">৳' + fm(dd.grandTotal) + '</div><div class="sl">সর্বমোট বকেয়া (এই তারিখ পর্যন্ত)</div></div>'
-    + '</div>'
-    + '<table class="due-tbl"><thead><tr><th>দোকানের নাম</th><th>ফোন</th><th>আজকের বকেয়া</th><th>পূর্বের বকেয়া</th><th>সর্বমোট</th></tr></thead><tbody>' + shopRows + '</tbody></table>'
-    + '<div class="ftr">'+esc(S.shopName||'AXIION DMS')+' · Powered by AXIION DMS | তৈরি: ' + genStr + '</div>'
-    + '</body></html>';
+function _dailyReportSpec(row) {
+  var M = MEMO, rd = row.reportData || {}, dd = row.dueData || {}, routes = rd.routes || [], soT = rd.soTotals || {};
+  var gen = row.generatedAt ? new Date(row.generatedAt) : new Date(); if (isNaN(gen.getTime())) gen = new Date();
+  var D = M.dg, blocks = [];
+  var who = [['SO-এর নাম:', '<b>' + esc(row.soName) + '</b>' + (rd.soArea ? ' | ' + esc(rd.soArea) : '')]];
+  if (rd.soRoadName) who.push(['রোড:', esc(rd.soRoadName)]);
+  who.push(['রিপোর্টের তারিখ:', M.dmy(row.reportDate)]);
+  who.push(['তৈরি করেছেন:', (row.generatedBy === 'auto' ? 'স্বয়ংক্রিয় (রাত ২টা)' : esc(row.generatedBy || '')) + ' — ' + M.dmy(gen.toISOString()) + ' ' + M.hm(gen)]);
+  blocks.push(M.kv('দৈনিক ডেলিভারি রিপোর্ট — SO বিবরণ', who));
+  blocks.push(M.stats([['মোট লোডিং', M.int(soT.totalLoad)], ['মোট ফেরত', M.int(soT.returned), 'w'], ['মোট বিক্রয়', M.int(soT.sold)], ['বিক্রিত SKU', M.int(soT.skuCount || 0)], ['সর্বমোট টাকা', '৳' + M.money(soT.amount), 't']]));
+  routes.forEach(function (route) {
+    blocks.push(M.html('<div class="rh"><span><b>ডি এস আর / SO:</b> ' + esc(route.routeName) + (route.routePhone ? ' <small>(☎ ' + esc(route.routePhone) + ')</small>' : '') + '</span><span><b>রুট/এলাকা:</b> ' + esc(route.routeArea || '—') + (route.routeRoadName ? ' &nbsp;|&nbsp; <b>রোড:</b> ' + esc(route.routeRoadName) : '') + '</span></div>'));
+    if (!route.products || !route.products.length) { blocks.push(M.note('এই দিনে কোনো লোডিং বা ফেরত হয়নি')); return; }
+    var hasDmg = route.products.some(function (p) { return p.damage > 0; }), lc = route.loadCount || 0, t = route.totals || {};
+    var cols = [{ h: 'পণ্যের নাম', a: 'l', w: '22%' }];
+    for (var i = 0; i < lc; i++) cols.push({ h: LOAD_LABELS_BN[i] || ('লোডিং ' + (i + 1)) });
+    cols.push({ h: 'মোট লোডিং' }); cols.push({ h: 'ফেরত', c: 'ret' }); if (hasDmg) cols.push({ h: 'নষ্ট', c: 'dmg' });
+    cols.push({ h: 'বিক্রয়', c: 'sold' }); cols.push({ h: 'কেস দর', a: 'r' }); cols.push({ h: 'টাকা', a: 'r' });
+    var rows = route.products.map(function (p) {
+      var cs = p.caseSize || 1, r = [{ h: '<span class="n">' + esc(p.name) + '</span>' + (p.unitType ? '<span class="s">' + esc(p.unitType) + '</span>' : ''), al: 'left', cls: 'l' }];
+      for (var i = 0; i < lc; i++) r.push(p.loads[i] ? D(fmtCasePcs(p.loads[i], cs)) : '—');
+      r.push(D(fmtCasePcs(p.totalLoad, cs))); r.push(p.returned ? D(fmtCasePcs(p.returned, cs)) : '—'); if (hasDmg) r.push(p.damage ? D(fmtCasePcs(p.damage, cs)) : '—');
+      r.push(D(fmtCasePcs(p.sold, cs))); r.push({ h: '৳' + M.money(p.casePrice), cls: 'r', al: 'right' }); r.push({ h: '৳' + M.money(p.amount), cls: 'r amt', al: 'right' });
+      return r;
+    });
+    var foot = [{ h: 'রুট মোট →', span: 2 + lc, al: 'right' }, { h: M.int(t.returned) + ' পিস' }]; if (hasDmg) foot.push({ h: M.int(t.damage) + ' পিস' });
+    foot.push({ h: M.int(t.sold) + ' পিস' }); foot.push({ h: '' }); foot.push({ h: '৳' + M.money(t.amount), al: 'right' });
+    blocks.push(M.T(cols, rows, foot, 'sm'));
+  });
+  // ── due report (flows on; new page automatically when needed) ──
+  blocks.push(M.kv('দৈনিক বকেয়া রিপোর্ট', [['SO-এর নাম:', '<b>' + esc(row.soName) + '</b>'], ['তারিখ (পর্যন্ত):', M.dmy(row.reportDate)]]));
+  blocks.push(M.stats([['আজকের বকেয়া', '৳' + M.money(dd.todayTotal), 'w'], ['পূর্বের বকেয়া', '৳' + M.money(dd.prevTotal)], ['সর্বমোট বকেয়া (এই তারিখ পর্যন্ত)', '৳' + M.money(dd.grandTotal), 'd']]));
+  var shops = dd.shops || [];
+  blocks.push(M.T([{ h: 'দোকানের নাম', a: 'l', w: '32%' }, { h: 'ফোন', w: '20%' }, { h: 'আজকের বকেয়া', a: 'r' }, { h: 'পূর্বের বকেয়া', a: 'r' }, { h: 'সর্বমোট', a: 'r' }],
+    shops.length ? shops.map(function (s) {
+      return [{ h: '<span class="n">' + esc(s.shopName) + '</span>' + (s.shopNo ? '<span class="s">নং: ' + esc(s.shopNo) + '</span>' : ''), al: 'left', cls: 'l' }, esc(D(s.shopPhone || '—')),
+        { h: '৳' + M.money(s.todayDue), cls: 'r', al: 'right' }, { h: '৳' + M.money(s.prevDue), cls: 'r', al: 'right' }, { h: '৳' + M.money(s.totalDue), cls: 'r amt', al: 'right' }];
+    }) : [[{ h: 'কোনো বকেয়া নেই', span: 5 }]],
+    shops.length ? [{ h: 'সর্বমোট বকেয়া →', span: 4, al: 'right' }, { h: '৳' + M.money(dd.grandTotal), al: 'right' }] : null, 'sm'));
+  var rid = String(row.reportDate || '').replace(/-/g, '') + '-' + String(row.soId || '').slice(-4).toUpperCase();
+  return { title: 'দৈনিক SO ডেলিভারি রিপোর্ট', en: 'DAILY SO DELIVERY & DUE REPORT', no: 'SO-RPT-' + rid, date: row.reportDate, time: M.hm(gen), file: esc(row.soName).replace(/\s+/g, '_') + '_' + row.reportDate, blocks: blocks,
+    closing: { total: soT.amount, words: soT.amount, wordsLabel: 'কথায় (মোট বিক্রয়):', summary: [['মোট লোডিং', M.int(soT.totalLoad) + ' পিস'], ['মোট ফেরত', M.int(soT.returned) + ' পিস', 'a'], ['মোট বিক্রয়', M.int(soT.sold) + ' পিস'], ['সর্বমোট টাকা', '৳ ' + M.money(soT.amount), 'big'], ['সর্বমোট বকেয়া', '৳ ' + M.money(dd.grandTotal), 'r']], sigs: [['জারি করেছেন', 'SO / অফিস'], ['যাচাই করেছেন', 'মালিক']] } };
 }
-
-// ── Share/Print panel for the (wider, multi-page) daily report doc ──
-// Mirrors _showSlipSharePanel's html2canvas → preview → JPG/PDF/WhatsApp
-// pattern, sized for an 800px-wide, two-page financial document instead
-// of the small 420px delivery slip.
-function _showDailyReportSharePanel(docNo, docHtml) {
-  var ov = document.createElement('div');
-  ov.id = 'so-rpt-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9998;display:flex;align-items:center;justify-content:center';
-
-  var panel = document.createElement('div');
-  panel.style.cssText = 'background:#fff;border-radius:14px;width:95%;max-width:640px;max-height:92vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif';
-
-  panel.innerHTML =
-    '<div style="padding:14px 16px 10px;border-bottom:1px solid #E6ECE8;display:flex;justify-content:space-between;align-items:center">'
-    + '<span style="font-size:15px;font-weight:700;color:#1a237e">📊 রিপোর্ট তৈরি হচ্ছে…</span>'
-    + '<button onclick="document.getElementById(\'so-rpt-overlay\').remove()" style="border:none;background:#E6ECE8;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:14px">✕</button>'
-    + '</div>'
-    + '<div id="so-rpt-preview" style="padding:12px;background:#f5f5f5;text-align:center;min-height:120px">'
-    + '<div style="padding:30px;color:#777">⏳ রেন্ডার হচ্ছে…</div>'
-    + '</div>'
-    + '<div id="so-rpt-actions" style="padding:12px;display:none;flex-direction:column;gap:8px"></div>';
-
-  ov.appendChild(panel);
-  document.body.appendChild(ov);
-
-  var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:820px;height:1400px;border:none;visibility:hidden';
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(docHtml);
-  iframe.contentDocument.close();
-
-  function doCapture() {
-    var sc = document.createElement('script');
-    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    sc.onload = function () {
-      setTimeout(function () {
-        html2canvas(iframe.contentDocument.body, {
-          scale: 2, useCORS: true, allowTaint: true,
-          backgroundColor: '#ffffff', logging: false,
-          width: 800, windowWidth: 820
-        }).then(function (canvas) {
-          iframe.remove();
-          var jpgDataUrl = canvas.toDataURL('image/jpeg', 0.93);
-          var pdfHtml = docHtml;
-
-          var prev = document.getElementById('so-rpt-preview');
-          if (!prev) return;
-          var img = document.createElement('img');
-          img.src = jpgDataUrl;
-          img.style.cssText = 'width:100%;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.15)';
-          prev.innerHTML = '';
-          prev.appendChild(img);
-
-          panel.querySelector('span').textContent = '✅ রিপোর্ট তৈরি হয়েছে';
-
-          var acts = document.getElementById('so-rpt-actions');
-          if (!acts) return;
-          acts.style.display = 'flex';
-
-          function mkBtn(label, color, fn) {
-            var b = document.createElement('button');
-            b.innerHTML = label;
-            b.style.cssText = 'padding:13px;border:none;border-radius:10px;background:' + color + ';color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif;width:100%';
-            b.onclick = fn; return b;
-          }
-
-          var base64Only = jpgDataUrl.split(',')[1];
-
-          acts.appendChild(mkBtn('🖼️  JPG ডাউনলোড করুন', '#0891B2', function () {
-            if (window.AndroidBridge) {
-              window.AndroidBridge.saveJpg(base64Only, 'report_' + docNo + '.jpg');
-            } else {
-              var a = document.createElement('a'); a.href = jpgDataUrl; a.download = 'report_' + docNo + '.jpg'; a.click();
-            }
-          }));
-
-          acts.appendChild(mkBtn('📄  PDF হিসেবে প্রিন্ট করুন (২ পৃষ্ঠা)', '#333', function () {
-            var w = window.open('', '_blank', 'width=880,height=900');
-            if (w) { w.document.write(pdfHtml); w.document.close(); setTimeout(function () { w.print(); }, 900); }
-          }));
-
-          acts.appendChild(mkBtn('📲  WhatsApp এ পাঠান', '#25D366', function () {
-            if (window.AndroidBridge) {
-              window.AndroidBridge.shareWhatsApp(base64Only, 'report_' + docNo + '.jpg', 'com.whatsapp');
-            } else if (navigator.share && navigator.canShare) {
-              fetch(jpgDataUrl).then(function (r) { return r.blob(); }).then(function (blob) {
-                var file = new File([blob], 'report_' + docNo + '.jpg', { type: 'image/jpeg' });
-                if (navigator.canShare({ files: [file] })) navigator.share({ files: [file], title: 'রিপোর্ট ' + docNo });
-                else { var a = document.createElement('a'); a.href = jpgDataUrl; a.download = 'report_' + docNo + '.jpg'; a.click(); }
-              });
-            } else {
-              var a = document.createElement('a'); a.href = jpgDataUrl; a.download = 'report_' + docNo + '.jpg'; a.click();
-              setTimeout(function () { window.open('https://web.whatsapp.com/', '_blank'); }, 1000);
-            }
-          }));
-
-          acts.appendChild(mkBtn('✕  বন্ধ করুন', '#9e9e9e', function () {
-            document.getElementById('so-rpt-overlay').remove();
-          }));
-
-        }).catch(function (e) {
-          iframe.remove();
-          var prev = document.getElementById('so-rpt-preview');
-          if (prev) prev.innerHTML = '<div style="padding:20px;color:red">ত্রুটি: ' + e + '</div>';
-        });
-      }, 1200);
-    };
-    sc.onerror = function () {
-      iframe.remove();
-      var prev = document.getElementById('so-rpt-preview');
-      if (prev) prev.innerHTML = '<div style="padding:20px;color:red">html2canvas লোড হয়নি</div>';
-    };
-    document.head.appendChild(sc);
-  }
-
-  setTimeout(doCapture, 300);
-}
-
-// ════════════════════════════════════════════════════
 
 async function loadReport() {
   var from,to;
@@ -8701,8 +8275,42 @@ function renderRepResult(r) {
       +'<td>৳'+fm(r.byDate.reduce(function(s,d){return s+d.revenue;},0))+'</td>'
       +'<td style="color:'+pc+'">৳'+fm(t.grossProfit)+'</td></tr></tfoot></table></div></div>';
   }
-  h+='<button class="btn btn-bl btn-w" style="margin-top:8px" onclick="window.print()">📄 PDF হিসাবে সেভ করুন</button>';
+  S._lastRep=r;
+  h+='<button class="btn btn-bl btn-w" style="margin-top:8px" onclick="repMemo()">📄 A4 রিপোর্ট — ডাউনলোড / প্রিন্ট / WhatsApp</button>';
   el.innerHTML=h;
+}
+
+function repMemo() {
+  var r = S._lastRep; if (!r || !r.totals) return toast('আগে রিপোর্ট দেখুন');
+  var M = MEMO, t = r.totals, isOwner = S.role === 'owner', blocks = [], profit = t.grossProfit >= 0;
+  var per = r.from === r.to ? M.dmy(r.from) : M.dmy(r.from) + ' → ' + M.dmy(r.to);
+  blocks.push(M.kv('রিপোর্টের সময়কাল', [['সময়কাল:', '<b>' + per + '</b>'], ['প্রস্তুতকারী:', esc(_memoBy())]]));
+  blocks.push(M.stats([['বিক্রয় (পিস)', M.int(t.soldUnits)], ['পেমেন্ট আদায়', '৳' + M.money(t.payments)], ['দেওয়া (পিস)', M.int(t.givenUnits), 'w'], ['ড্যামেজ (পিস)', M.int(t.dmgUnits), 'd']]));
+  blocks.push(M.stats([['মোট বিক্রয় মূল্য', '৳' + M.money(t.netRevenue)], isOwner ? ['মোট খরচ (ক্রয় মূল্যে)', '৳' + M.money(t.netCost)] : ['ফেরত (পিস)', M.int(t.returnUnits)], ['ড্যামেজ লোকসান', '৳' + M.money(t.dmgLoss), 'd'], [profit ? 'মোট লাভ' : 'মোট ক্ষতি', '৳' + M.money(Math.abs(t.grossProfit)), 't']]));
+  if (t.periodDue != null || t.cumulativeDue != null) blocks.push(M.stats([['এই সময়ের বকেয়া', '৳' + M.money(t.periodDue || 0), 'w'], ['সর্বমোট বকেয়া (' + M.dmy(r.to) + ' পর্যন্ত)', '৳' + M.money(t.cumulativeDue || 0), 'd']]));
+  if (r.srPerformance && r.srPerformance.length) {
+    blocks.push(M.sec('DSR/SO পারফরম্যান্স'));
+    blocks.push(M.T([{ h: '#', w: '6%' }, { h: 'নাম', a: 'l', w: '30%' }, { h: 'বিক্রয় (পিস)' }, { h: 'বিক্রয় মূল্য', a: 'r' }, { h: 'দেওয়া' }, { h: 'ফেরত' }, { h: 'বাকি', a: 'r' }],
+      r.srPerformance.map(function (x, i) { return [M.dg(i + 1), { h: '<span class="n">' + esc(x.name) + '</span>', al: 'left', cls: 'l' }, M.int(x.soldUnits), { h: '৳' + M.money(x.netRev), cls: 'r amt', al: 'right' }, M.int(x.givenUnits), M.int(x.returnUnits), { h: '৳' + M.money(x.due), cls: 'r', al: 'right' }]; }), null, 'sm'));
+  }
+  if (r.byProduct && r.byProduct.length) {
+    blocks.push(M.sec('পণ্য ভিত্তিক রিপোর্ট'));
+    var pc = [{ h: 'পণ্য', a: 'l', w: '30%' }, { h: 'দেওয়া' }, { h: 'ফেরত', c: 'ret' }, { h: 'ড্যামেজ', c: 'dmg' }, { h: 'বিক্রয়', c: 'sold' }, { h: 'আয় (৳)', a: 'r' }]; if (isOwner) pc.push({ h: 'লাভ (৳)', a: 'r' });
+    blocks.push(M.T(pc, r.byProduct.map(function (p) {
+      var row = [{ h: '<span class="n">' + esc(p.name) + '</span><span class="s">' + esc(p.sku || '') + '</span>', al: 'left', cls: 'l' }, M.int(p.given), M.int(p.returned), M.int(p.damage), M.int(p.sold), { h: M.money(p.revenue), cls: 'r amt', al: 'right' }];
+      if (isOwner) row.push({ h: M.money(p.profit), cls: 'r', al: 'right' }); return row;
+    }), null, 'sm'));
+  }
+  if (r.byDate && r.byDate.length) {
+    blocks.push(M.sec('তারিখ ভিত্তিক রিপোর্ট'));
+    var sum = function (k) { return r.byDate.reduce(function (a, d) { return a + (Number(d[k]) || 0); }, 0); };
+    blocks.push(M.T([{ h: 'তারিখ', a: 'l' }, { h: 'দেওয়া' }, { h: 'ফেরত' }, { h: 'আয় (৳)', a: 'r' }, { h: 'লাভ (৳)', a: 'r' }],
+      r.byDate.map(function (d) { return [{ h: M.dmy(d.date), al: 'left', cls: 'l' }, M.int(d.givenUnits), M.int(d.returnUnits), { h: M.money(d.revenue), cls: 'r amt', al: 'right' }, { h: M.money(d.profit), cls: 'r', al: 'right' }]; }),
+      [{ h: 'মোট', al: 'left' }, { h: M.int(sum('givenUnits')) }, { h: M.int(sum('returnUnits')) }, { h: M.money(sum('revenue')), al: 'right' }, { h: M.money(t.grossProfit), al: 'right' }], 'sm'));
+  }
+  var g = r.generatedAt ? new Date(r.generatedAt) : new Date(); if (isNaN(g.getTime())) g = new Date();
+  _memoShow({ title: 'ব্যবসায়িক রিপোর্ট', en: 'BUSINESS REPORT', no: 'RPT-' + String(r.from || '').replace(/-/g, '') + (r.from === r.to ? '' : '-' + String(r.to || '').replace(/-/g, '')), date: iso(g), time: M.hm(g), period: per, blocks: blocks,
+    closing: { total: t.netRevenue, words: t.netRevenue, wordsLabel: 'কথায় (মোট বিক্রয় মূল্য):', summary: [['মোট বিক্রয় মূল্য', '৳ ' + M.money(t.netRevenue)], ['ড্যামেজ লোকসান', '৳ ' + M.money(t.dmgLoss), 'a'], [profit ? 'মোট লাভ' : 'মোট ক্ষতি', '৳ ' + M.money(Math.abs(t.grossProfit)), profit ? 'big' : 'r']], sigs: [['প্রস্তুতকারী', ''], ['যাচাইকারী', 'মালিক']] } });
 }
 
 async function loadDmgPage(from, to) {
@@ -9069,6 +8677,25 @@ function _letterheadHtml() {
   }
   h += '</div>';
   return h;
+}
+
+// ══════════════════════════════════════════════════
+//  Unified A4 memo adapters — EVERY memo / challan / slip / report in the
+//  app is now produced by the shared MEMO engine (see <script id="memo-engine">).
+//  One design, fixed A4, auto multi-page, Download PDF/JPG · Print · WhatsApp.
+// ══════════════════════════════════════════════════
+function _srPhone(name) { var x = (S.srs || []).find(function (q) { return q.name === name; }); return x ? (x.phone || '') : ''; }
+function _memoBy() { return ({ owner: 'মালিক', manager: 'ম্যানেজার', so: 'SO', dsr: 'DSR' }[S.role] || '') + ' — ' + (S.userName || ''); }
+function _memoItem(i) {
+  var p = (S.products || []).find(function (x) { return x.id === i.productId; }) || {};
+  return { name: i.productName || p.name || '', sku: i.sku || p.sku || '', cases: num(i.cases), pcs: num(i.pcs), units: num(i.totalUnits),
+    caseSize: num(i.caseSize) || num(p.caseSize) || 0, unitType: i.unitType || p.unitType || 'কেস',
+    sell: num(i.sellingPrice), buy: num(i.purchasePrice), comm: num(i.commission), disc: num(i.discount) };
+}
+function _memoShow(spec) { try { MEMO.show(spec); } catch (e) { console.error(e); toast('মেমো তৈরি ব্যর্থ হয়েছে'); } }
+function _memoStock(kind, o) {
+  _memoShow(MEMO.stock({ kind: kind, no: o.no, date: o.date, partyName: o.partyName, partyArea: o.partyArea, partyPhone: o.partyPhone,
+    items: (o.items || []).map(_memoItem), banner: o.banner, note: o.note, meta: o.meta }));
 }
 function iso(d){if(d instanceof Date){var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}return String(d).slice(0,10);}
 function fmtBn(d){if(!d)return'';try{var p=String(d).slice(0,10).split('-');if(p.length!==3)return String(d).slice(0,10);return p[2]+'/'+p[1]+'/'+p[0];}catch(e){return String(d).slice(0,10);}}
@@ -9696,8 +9323,8 @@ function _depositPeriodLabel(period) {
   return _BN_MONTHS[p[1]-1]+' '+p[0]+' <span style="font-weight:400;color:var(--mt2);font-size:10.5px">('+fmtBn(b.start)+' – '+fmtBn(b.end)+')</span>';
 }
 // ── V55 #55 — client-side monthly PDF/JPG deposit slip, sharing the
-//    same html2canvas → preview → download/print/WhatsApp share panel
-//    already used for the SO daily/period challan slips (_showSlipSharePanel).
+//    same A4 MEMO engine (MEMO.show → PDF/JPG/print/WhatsApp) used by every
+//    other memo in the app.
 //    Reuses the deposit-history data already loaded for the open modal —
 //    no server-side storage, generated fresh from the current breakdown.
 async function _downloadDepositSlip(period) {
@@ -9705,50 +9332,16 @@ async function _downloadDepositSlip(period) {
   var r = await apiGet('/api/expenses?action=deposit-history&period='+encodeURIComponent(period));
   hideOvl();
   if (!r || !r.ok) return toast('স্লিপ তৈরি ব্যর্থ হয়েছে');
-  var rows = r.rows || [];
-  var now = new Date();
-  var nowStr = String(now.getDate()).padStart(2,'0')+'/'+String(now.getMonth()+1).padStart(2,'0')+'/'+now.getFullYear()+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-  var bodyRows = rows.map(function(row){
-    var mLabel = row.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক';
-    return '<tr><td style="padding:6px 8px">'+fmtBn(row.date)+'</td>'
-      +'<td style="text-align:center;padding:6px 8px">'+mLabel+'</td>'
-      +'<td style="text-align:right;padding:6px 8px">৳'+fm(row.amount)+'</td></tr>';
-  }).join('');
-  var slipHtml = '<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8">'
-    +'<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700;900&family=Noto+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">'
-    +'<style>'
-    +'*{margin:0;padding:0;box-sizing:border-box}'
-    +'body{font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif;background:#fff;color:#000;padding:14px;width:420px}'
-    +'.hdr{border:2px solid #000;padding:8px 10px 6px;margin-bottom:10px;text-align:center}'
-    +'.hdr-top{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:4px}'
-    +'.logo-circle{width:44px;height:44px;border:2px solid #000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;flex-shrink:0}'
-    +'.co-name{font-size:26px;font-weight:900;line-height:1;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif}'
-    +'.hdr-dist{font-size:10.5px;font-weight:600;color:#000;margin-top:2px}'
-    +'.hdr-addr{font-size:9.5px;color:#333;margin-top:1px;line-height:1.5}'
-    +'.hdr-bot{display:flex;justify-content:space-between;align-items:center;margin-top:5px;border-top:1px solid #000;padding-top:4px}'
-    +'.hdr-dist-box{background:#000;color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:2px}'
-    +'.hdr-mobile{font-size:9.5px;font-weight:700}'
-    +'.slip-t{text-align:center;font-size:12px;font-weight:700;letter-spacing:2px;border:1.5px dashed #555;padding:5px 0;margin-bottom:8px}'
-    +'.meta{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px}.meta td{padding:4px 7px;border:1px solid #999}'
-    +'.mk{background:#E6ECE8;font-weight:700;width:80px;font-size:10px}.mv{font-weight:600}'
-    +'.stbl{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px}'
-    +'.stbl th{border:1.5px solid #333;padding:5px 7px;background:#111;color:#fff;text-align:left;font-size:10px;font-weight:700}'
-    +'.stbl td{border:1px solid #bbb;vertical-align:middle;padding:5px 7px}'
-    +'.stbl tfoot td{border:1.5px solid #333;background:#E6ECE8;font-weight:700;font-size:12px;padding:6px 7px}'
-    +'.ftr{text-align:center;font-size:8px;color:#888;margin-top:8px;border-top:1px dotted #bbb;padding-top:4px}'
-    +'</style></head><body>'
-    +_letterheadHtml()
-    +'<div class="slip-t">— অনলাইন জমার স্লিপ —</div>'
-    +'<table class="meta"><tr><td class="mk">মাস</td><td class="mv">'+_depositPeriodLabel(period).replace(/<[^>]+>/g,'')+'</td></tr></table>'
-    +'<table class="stbl"><thead><tr><th style="width:34%">তারিখ</th><th style="text-align:center;width:33%">ধরন</th><th style="text-align:right;width:33%">পরিমাণ</th></tr></thead>'
-    +'<tbody>'+(bodyRows||'<tr><td colspan="3" style="text-align:center;padding:14px;color:#777">কোনো জমার রেকর্ড নেই</td></tr>')+'</tbody>'
-    +'<tfoot><tr><td colspan="2" style="text-align:right">সর্বমোট →</td><td style="text-align:right;font-weight:900;font-size:14px">৳'+fm(r.total)+'</td></tr></tfoot>'
-    +'</table>'
-    +'<div class="ftr">'+esc(S.shopName||'AXIION DMS')+' · Powered by AXIION DMS | '+nowStr+'</div>'
-    +'</body></html>';
-
-  if (window.AndroidSlip) { window.AndroidSlip.receiveSlip(slipHtml, ''); return; }
-  _showSlipSharePanel('deposit_'+period, slipHtml);
+  var M = MEMO, rows = r.rows || [], label = _depositPeriodLabel(period).replace(/<[^>]+>/g, '');
+  _memoShow({ title: 'অনলাইন জমার স্লিপ', en: 'ONLINE DEPOSIT SLIP', no: 'DEP-' + String(period).replace(/\D/g, ''), date: iso(new Date()),
+    blocks: [
+      M.kv('জমার বিবরণ', [['মাস (চক্র):', '<b>' + label + '</b>'], ['মোট এন্ট্রি:', M.int(rows.length) + ' টি'], ['মোট জমা:', '<b>৳ ' + M.money(r.total) + '</b>']]),
+      M.T([{ h: '#', w: '7%' }, { h: 'তারিখ', a: 'l', w: '33%' }, { h: 'ধরন', w: '30%' }, { h: 'পরিমাণ (৳)', a: 'r', w: '30%' }],
+        rows.length ? rows.map(function (row, i) { return [M.dg(String(i + 1).padStart(2, '0')), { h: M.dmy(row.date), al: 'left', cls: 'l' }, row.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক', { h: M.money(row.amount), cls: 'r amt', al: 'right' }]; })
+          : [[{ h: 'কোনো জমার রেকর্ড নেই', span: 4 }]],
+        [{ h: 'সর্বমোট →', span: 3, al: 'right' }, { h: '৳ ' + M.money(r.total), al: 'right' }])
+    ],
+    closing: { total: r.total, words: r.total, wordsLabel: 'কথায় (মোট জমা):', summary: [['মোট এন্ট্রি', M.int(rows.length) + ' টি'], ['মোট জমা', '৳ ' + M.money(r.total), 'big']], sigs: [['জমাকারী', ''], ['যাচাইকারী', 'মালিক']] } });
 }
 
 function calAddModal(prefillDate) {
@@ -10404,5 +9997,507 @@ window.onlineDepositSave=async function(){
 })();
 </script>
 
+
+<script id="memo-engine">
+/* ══════════════════════════════════════════════════════════════════
+   AXIION MEMO ENGINE  (v1)
+   ONE document design for every memo / challan / slip / report in the
+   app. Fixed A4 (794 × 1123 px @96dpi). Content that does not fit on
+   one page automatically flows onto page 2, 3, 4 … (table header
+   repeats, totals + signatures stay together on the last page).
+   Output is rendered at ~240 dpi → crisp on screen, print and WhatsApp.
+   Public API:  MEMO.show(spec)   MEMO.stock(o)   MEMO.sale(o)
+                MEMO.T / kv / stats / sec / note   (block helpers)
+   ══════════════════════════════════════════════════════════════════ */
+(function () {
+  var PW = 794, PH = 1123, SCALE = 2.5;
+  var CFG = { bnDigits: false };            // true → ০১২৩ instead of 0123
+  var LIB = {
+    h2c: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    pdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    qr:  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js'
+  };
+  var FONT = 'https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700;800&display=swap';
+
+  /* ── helpers ─────────────────────────────────────────────── */
+  function e(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var BND = '০১২৩৪৫৬৭৮৯';
+  function dg(s) { s = String(s == null ? '' : s); return CFG.bnDigits ? s.replace(/\d/g, function (d) { return BND[d]; }) : s; }
+  function money(n) { return dg((Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })); }
+  function int(n) { return dg(Math.round(Number(n) || 0).toLocaleString('en-IN')); }
+  function dmy(d) { if (!d) return ''; var p = String(d).slice(0, 10).split('-'); return p.length === 3 ? dg(p[2] + '/' + p[1] + '/' + p[0]) : dg(String(d).slice(0, 10)); }
+  function hm(d) { var x = d instanceof Date ? d : new Date(); return dg(String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0')); }
+  var S_ = function () { return window.S || {}; };
+
+  var W99 = 'শূন্য,এক,দুই,তিন,চার,পাঁচ,ছয়,সাত,আট,নয়,দশ,এগারো,বারো,তেরো,চৌদ্দ,পনেরো,ষোলো,সতেরো,আঠারো,ঊনিশ,বিশ,একুশ,বাইশ,তেইশ,চব্বিশ,পঁচিশ,ছাব্বিশ,সাতাশ,আটাশ,ঊনত্রিশ,ত্রিশ,একত্রিশ,বত্রিশ,তেত্রিশ,চৌত্রিশ,পঁয়ত্রিশ,ছত্রিশ,সাঁইত্রিশ,আটত্রিশ,ঊনচল্লিশ,চল্লিশ,একচল্লিশ,বিয়াল্লিশ,তেতাল্লিশ,চুয়াল্লিশ,পঁয়তাল্লিশ,ছেচল্লিশ,সাতচল্লিশ,আটচল্লিশ,ঊনপঞ্চাশ,পঞ্চাশ,একান্ন,বায়ান্ন,তিপ্পান্ন,চুয়ান্ন,পঞ্চান্ন,ছাপ্পান্ন,সাতান্ন,আটান্ন,ঊনষাট,ষাট,একষট্টি,বাষট্টি,তেষট্টি,চৌষট্টি,পঁয়ষট্টি,ছেষট্টি,সাতষট্টি,আটষট্টি,ঊনসত্তর,সত্তর,একাত্তর,বাহাত্তর,তিয়াত্তর,চুয়াত্তর,পঁচাত্তর,ছিয়াত্তর,সাতাত্তর,আটাত্তর,ঊনআশি,আশি,একাশি,বিরাশি,তিরাশি,চুরাশি,পঁচাশি,ছিয়াশি,সাতাশি,আটাশি,ঊননব্বই,নব্বই,একানব্বই,বিরানব্বই,তিরানব্বই,চুরানব্বই,পঁচানব্বই,ছিয়ানব্বই,সাতানব্বই,আটানব্বই,নিরানব্বই'.split(',');
+  function words(n) {
+    n = Math.floor(n); if (n <= 0) return W99[0];
+    var o = [], cr = Math.floor(n / 1e7); n %= 1e7;
+    var lk = Math.floor(n / 1e5); n %= 1e5; var hz = Math.floor(n / 1e3); n %= 1e3; var sh = Math.floor(n / 100); n %= 100;
+    if (cr) o.push(words(cr) + ' কোটি'); if (lk) o.push(W99[lk] + ' লক্ষ'); if (hz) o.push(W99[hz] + ' হাজার');
+    if (sh) o.push(W99[sh] + 'শত'); if (n) o.push(W99[n]);
+    return o.join(' ');
+  }
+  function taka(a) {
+    a = Math.abs(Number(a) || 0); var t = Math.floor(a + 1e-9), p = Math.round((a - t) * 100);
+    if (p >= 100) { t++; p = 0; }
+    return words(t) + ' টাকা' + (p ? ' ' + W99[p] + ' পয়সা' : '') + ' মাত্র।';
+  }
+
+  /* ── Code 128-B barcode (real, scannable) ─────────────────── */
+  var C128 = '212222,222122,222221,121223,121322,131222,122213,122312,132212,221213,221312,231212,112232,122132,122231,113222,123122,123221,223211,221132,221231,213212,223112,312131,311222,321122,321221,312212,322112,322211,212123,212321,232121,111323,131123,131321,112313,132113,132311,211313,231113,231311,112133,112331,132131,113123,113321,133121,313121,211331,231131,213113,213311,213131,311123,311321,331121,312113,312311,332111,314111,221411,431111,111224,111422,121124,121421,141122,141221,112214,112412,122114,122411,142112,142211,241211,221114,413111,241112,134111,111242,121142,121241,114212,124112,124211,411212,421112,421211,212141,214121,412121,111143,111341,131141,114113,114311,411113,411311,113141,114131,311141,411131,211412,211214,211232,2331112'.split(',');
+  function barcodeSvg(text) {
+    var codes = [104], sum = 104, i, c;
+    for (i = 0; i < text.length; i++) { c = text.charCodeAt(i) - 32; if (c < 0 || c > 94) c = 0; codes.push(c); sum += c * (i + 1); }
+    codes.push(sum % 103); codes.push(106);
+    var x = 10, r = '';
+    codes.forEach(function (cd) {
+      C128[cd].split('').forEach(function (w, k) { w = +w; if (k % 2 === 0) r += '<rect x="' + x + '" y="0" width="' + w + '" height="40"/>'; x += w; });
+    });
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (x + 10) + ' 40" width="230" height="38" preserveAspectRatio="none" shape-rendering="crispEdges" fill="#064e3b">' + r + '</svg>';
+  }
+  function qrSvg(text) {
+    if (!window.qrcode) return '';
+    try {
+      var q = window.qrcode(0, 'M'); q.addData(text); q.make(); var n = q.getModuleCount(), d = '';
+      for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) if (q.isDark(r, c)) d += 'M' + c + ' ' + r + 'h1v1h-1z';
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + n + ' ' + n + '" width="78" height="78" shape-rendering="crispEdges"><path d="' + d + '" fill="#064e3b"/></svg>';
+    } catch (x) { return ''; }
+  }
+  function hash(str) {
+    var h = 2166136261; for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    var s = ('00000000' + h.toString(16)).slice(-8).toUpperCase(); return s.slice(0, 4) + '-' + s.slice(4);
+  }
+
+  /* ── CSS (scoped to memo pages) ───────────────────────────── */
+  var CSS = `
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#e5e7eb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45;width:${PW}px}
+.mpg{width:${PW}px;height:${PH}px;position:relative;overflow:hidden;background:#fff;margin:0 0 14px;font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45}
+.mfr{position:absolute;left:14px;right:14px;top:14px;bottom:14px;border:1px solid #a7f3d0;border-radius:10px}
+.mbar{position:absolute;left:14px;right:14px;top:14px;height:5px;border-radius:10px 10px 0 0;background:linear-gradient(90deg,#059669,#10b981 50%,#06b6d4)}
+.wm{position:absolute;left:0;right:0;top:46%;text-align:center;transform:rotate(-30deg);font-size:112px;font-weight:800;color:#059669;opacity:.045;white-space:nowrap;letter-spacing:6px}
+.mbody{position:absolute;left:36px;right:36px;top:34px;bottom:58px;display:flow-root}
+.mft{position:absolute;left:36px;right:36px;bottom:24px;display:flex;justify-content:space-between;align-items:center;font-size:9.5px;color:#64748b;border-top:1px dashed #a7f3d0;padding-top:6px}
+.mft b{color:#065f46}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:6px 0 12px;border-bottom:1px solid #d1fae5}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.c1{background:linear-gradient(90deg,#059669,#0d9488);color:#fff;font-size:10px;font-weight:700;padding:2px 10px;border-radius:99px}
+.c2{background:#f0fdfa;color:#115e59;border:1px solid #99f6e4;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:5px}
+.shn{font-size:26px;font-weight:800;color:#064e3b;line-height:1.2}
+.adr{font-size:11.5px;color:#475569;font-weight:500;margin-top:3px}
+.ctc{font-size:11px;color:#64748b;margin-top:3px}.ctc b{color:#065f46}
+.hr{text-align:right;flex-shrink:0}
+.tb{display:inline-block;text-align:center;border:1px solid #6ee7b7;border-radius:8px;padding:6px 12px;background:linear-gradient(135deg,#ecfdf5,#f0fdfa 60%,#fffbeb)}
+.tb b{display:block;font-size:12.5px;font-weight:800;color:#022c22}
+.tb i{display:inline-block;font-style:normal;font-size:9px;font-weight:700;letter-spacing:.8px;color:#047857;background:#d1fae5;padding:1px 7px;border-radius:4px;margin-top:3px}
+.hm{font-size:11px;color:#475569;margin-top:8px;line-height:1.7}.hm b{color:#064e3b}
+.hm .no{display:inline-block;font-weight:800;color:#047857;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:4px;padding:0 6px}
+.h2{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #d1fae5;padding:6px 0 8px;margin-bottom:10px;font-size:12px}
+.h2 b{font-size:15px;color:#064e3b}.h2 span{color:#475569}
+.ban{margin:10px 0 0;padding:7px 12px;border-radius:8px;background:#fffbeb;border:1.5px solid #fcd34d;color:#92400e;font-weight:700;text-align:center;font-size:11.5px}
+.cards{display:flex;margin:12px 0;border:1px solid #a7f3d0;border-radius:10px;background:linear-gradient(90deg,#f0fdf9,#f7fefc);overflow:hidden}
+.cards>div{flex:1;padding:10px 14px}.cards>div+div{border-left:1px solid #a7f3d0}
+.cards h3{font-size:10.5px;font-weight:700;letter-spacing:.3px;color:#065f46;border-bottom:1px solid #a7f3d0;padding-bottom:5px;margin-bottom:6px}
+.cards h3:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#10b981;margin-right:6px}
+.kv{display:flex;gap:6px;padding:2px 0;font-size:11.5px}.kv span{width:92px;flex-shrink:0;color:#64748b}.kv b{color:#0f172a;font-weight:600;flex:1;word-break:break-word}
+.tw{margin:10px 0 0;border:1px solid #a7f3d0;border-radius:8px;overflow:hidden}
+table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
+.mt th{background:linear-gradient(135deg,#065f46,#059669 55%,#10b981);color:#fff;font-weight:700;font-size:10.5px;padding:8px 7px;border-right:1px solid rgba(255,255,255,.25);text-align:center}
+.mt th:last-child{border-right:0}
+.mt td{padding:7px 7px;border-top:1px solid #d1fae5;border-right:1px solid #ecfdf5;vertical-align:middle;text-align:center}
+.mt td:last-child{border-right:0}
+.mt tbody tr:nth-child(even) td{background:#f5fdf9}
+.mt .l{text-align:left}.mt .r{text-align:right}
+.mt.sm{font-size:10.5px}.mt.sm th{font-size:9.5px;padding:6px 3px}.mt.sm td{padding:5px 4px}.mt.sm td .n{font-size:11px}
+.mt td .n{font-weight:700;color:#0f172a;font-size:12px}.mt td .s{font-size:9.5px;color:#64748b;display:block;margin-top:1px}
+.mt td .o{font-size:9.5px;color:#047857;font-weight:600;display:block;margin-top:1px}
+.mt td .q{font-weight:700;color:#022c22}.mt td .u{font-size:9.5px;color:#64748b;display:block}
+.mt .amt{font-weight:700;color:#022c22}
+.mt tfoot td{background:linear-gradient(90deg,#d1fae5,#ccfbf1 50%,#d1fae5);font-weight:700;color:#064e3b;border-top:2px solid #34d399}
+.mt .sold{background:#ecfdf5!important;color:#166534;font-weight:700}.mt .ret{background:#fffbeb!important;color:#92400e}.mt .dmg{background:#fef2f2!important;color:#991b1b}
+.mt th.sold{background:#166534!important;color:#fff}.mt th.ret{background:#b45309!important;color:#fff}.mt th.dmg{background:#b91c1c!important;color:#fff}
+.stats{display:flex;gap:8px;margin:12px 0 0}
+.stats>div{flex:1;text-align:center;border:1px solid #a7f3d0;border-radius:9px;padding:8px 4px;background:#f0fdf9}
+.stats b{display:block;font-size:15px;font-weight:800;color:#064e3b}.stats span{font-size:9.5px;color:#64748b}
+.stats .t{background:linear-gradient(135deg,#065f46,#059669);border-color:#065f46}.stats .t b,.stats .t span{color:#fff}
+.stats .w{background:#fffbeb;border-color:#fcd34d}.stats .w b{color:#92400e}
+.stats .d{background:#fef2f2;border-color:#fca5a5}.stats .d b{color:#b91c1c}
+.sec{margin:14px 0 0;font-size:12.5px;font-weight:800;color:#065f46;display:flex;align-items:center;gap:7px}
+.sec:before{content:"";width:4px;height:15px;border-radius:2px;background:linear-gradient(#059669,#06b6d4)}
+.rh{margin:12px 0 0;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 11px;font-size:11.5px;background:linear-gradient(90deg,#ecfdf5,#ecfeff);border:1px solid #a7f3d0;border-left:4px solid #0891b2;border-radius:7px}
+.nt{margin:10px 0 0;font-size:11px;color:#475569;padding:7px 11px;border:1px dashed #a7f3d0;border-radius:7px;background:#fafffd}
+.cl{display:flex;gap:16px;margin:14px 0 0;align-items:flex-start}.cl>div{flex:1;min-width:0}
+.vb{display:flex;gap:12px;align-items:flex-start;border:1px solid #a7f3d0;border-radius:10px;padding:10px 12px;background:linear-gradient(135deg,#f0fdf9,#f0fdfa,#ecfeff)}
+.vb .qr{background:#fff;padding:5px;border:1px solid #a7f3d0;border-radius:7px;flex-shrink:0;line-height:0}
+.vb b{font-size:11px;color:#065f46}.vb p{font-size:10px;color:#475569;margin-top:2px}
+.vb code{display:inline-block;margin-top:4px;font-family:monospace;font-size:9.5px;font-weight:700;color:#115e59;background:#fff;border:1px solid #99f6e4;border-radius:4px;padding:0 6px}
+.wd{margin-top:10px;font-size:11.5px;padding:7px 10px;border-left:4px solid #059669;border-radius:0 6px 6px 0;background:linear-gradient(90deg,#ecfdf5,#f0fdfa)}.wd b{color:#065f46}
+.bc{margin-top:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;line-height:0}
+.bc small{display:block;line-height:1.3;margin-top:3px;font-family:monospace;font-size:9.5px;letter-spacing:1.5px;color:#065f46;font-weight:700}
+.sm{border:1px solid #a7f3d0;border-radius:10px;padding:8px 14px;background:linear-gradient(180deg,#fff,#f0fdf9)}
+.sm h4{font-size:10.5px;color:#065f46;border-bottom:1px solid #d1fae5;padding-bottom:4px;margin-bottom:4px}
+.sr{display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:12px;color:#334155}.sr b{font-weight:700;color:#0f172a;white-space:nowrap}
+.sr.g{background:#ecfdf5;border-radius:6px;padding:5px 8px;margin:3px 0;color:#065f46}.sr.g b{color:#065f46}
+.sr.a{background:#fffbeb;border-radius:6px;padding:5px 8px;margin:3px 0;color:#92400e}.sr.a b{color:#92400e}
+.sr.r{background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:6px 8px;margin:4px 0 0;color:#b91c1c;font-size:13px}.sr.r b{color:#b91c1c;font-size:15px}
+.sr.big{font-size:13.5px;font-weight:800;border-top:1px solid #a7f3d0;margin-top:3px;padding-top:6px;color:#064e3b}.sr.big b{font-size:15px}
+.tm{margin-top:12px;font-size:10px;color:#64748b;border-top:1px dashed #a7f3d0;padding-top:7px}.tm b{color:#334155}
+.sg{display:flex;justify-content:space-between;gap:26px;margin-top:38px}
+.sg div{flex:1;text-align:center;font-size:11px;font-weight:700;color:#064e3b;border-top:2px solid #6ee7b7;padding-top:5px}
+.sg small{display:block;font-weight:400;color:#94a3b8;font-size:9.5px}
+`;
+  var PRINT_CSS = '@page{size:A4;margin:0}html,body{background:#fff!important}.mpg{margin:0!important;page-break-after:always;break-after:page}.mpg:last-child{page-break-after:auto;break-after:auto}';
+
+  /* ── block helpers (used by every call-site) ──────────────── */
+  function cell(c, col) {
+    var cls = (col && col.a === 'l' ? 'l ' : col && col.a === 'r' ? 'r ' : '') + ((col && col.c) || '');
+    if (c && typeof c === 'object') { cls += ' ' + (c.cls || ''); return '<td class="' + cls + '"' + (c.span ? ' colspan="' + c.span + '"' : '') + (c.al ? ' style="text-align:' + c.al + '"' : '') + '>' + c.h + '</td>'; }
+    return '<td class="' + cls + '">' + c + '</td>';
+  }
+  /* cols:[{h,w,a:'l|r|c',c:'extra-class'}], rows:[[cell…]], foot:[cell|{h,span,al,cls}] */
+  function T(cols, rows, foot, cls) {
+    return {
+      t: 'tbl', cls: cls || '',
+      head: '<tr>' + cols.map(function (c) { return '<th' + (c.w ? ' style="width:' + c.w + '"' : '') + (c.c ? ' class="' + c.c + '"' : '') + '>' + c.h + '</th>'; }).join('') + '</tr>',
+      rows: rows.map(function (r) { return '<tr>' + r.map(function (c, i) { return cell(c, cols[i]); }).join('') + '</tr>'; }),
+      foot: foot ? '<tr>' + foot.map(function (c) { return cell(c, null); }).join('') + '</tr>' : ''
+    };
+  }
+  function kv(title, rows) { return { t: 'html', html: '<div class="cards"><div><h3>' + title + '</h3>' + rows.map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div></div>' }; }
+  function stats(list) { return { t: 'html', html: '<div class="stats">' + list.map(function (s) { return '<div class="' + (s[2] || '') + '"><b>' + s[1] + '</b><span>' + s[0] + '</span></div>'; }).join('') + '</div>' }; }
+  function sec(t) { return { t: 'html', html: '<div class="sec">' + t + '</div>' }; }
+  function note(h) { return { t: 'html', html: '<div class="nt">' + h + '</div>' }; }
+  function html(h) { return { t: 'html', html: h }; }
+  function brk() { return { t: 'break' }; }
+
+  /* ── page furniture ───────────────────────────────────────── */
+  function shopInfo() {
+    var s = S_(); return { name: s.shopName || 'AXIION DMS', addr: String(s.shopAddress || '').trim(), phone: String(s.shopPhone || '').trim(), dist: String(s.distributorName || '').trim(), tin: String(s.shopTin || '').trim(), logo: String(s.logoText || '').trim() };
+  }
+  function headFull(sp, si) {
+    return '<div class="hd"><div><div class="chips">' + (si.dist ? '<span class="c1">● অনুমোদিত ডিস্ট্রিবিউটর</span><span class="c2">' + e(si.dist) + '</span>' : '') + '</div>'
+      + '<div class="shn">' + e(si.name) + '</div>' + (si.addr ? '<div class="adr">' + e(si.addr) + '</div>' : '')
+      + ((si.phone || si.tin) ? '<div class="ctc">' + (si.phone ? '<b>মোবাইল:</b> ' + e(dg(si.phone)) : '') + (si.phone && si.tin ? ' &nbsp;•&nbsp; ' : '') + (si.tin ? '<b>টি আই এন:</b> ' + e(dg(si.tin)) : '') + '</div>' : '') + '</div>'
+      + '<div class="hr"><div class="tb"><b>' + e(sp.title) + '</b>' + (sp.en ? '<i>' + e(sp.en) + '</i>' : '') + '</div>'
+      + '<div class="hm">' + (sp.no ? '<div><b>মেমো নং:</b> <span class="no">' + e(sp.no) + '</span></div>' : '') + '<div><b>তারিখ ও সময়:</b> ' + dmy(sp.date) + ' • ' + e(sp.time) + '</div>' + (sp.period ? '<div><b>সময়কাল:</b> ' + e(sp.period) + '</div>' : '') + '</div></div></div>'
+      + (sp.banner ? '<div class="ban">' + e(sp.banner) + '</div>' : '');
+  }
+  function headSlim(sp, si) { return '<div class="h2"><b>' + e(si.name) + '</b><span>' + e(sp.title) + (sp.no ? ' · ' + e(sp.no) : '') + ' · ' + dmy(sp.date) + '</span></div>'; }
+
+  function closing(sp, si) {
+    var c = sp.closing || {}, left = '', right = '';
+    var payload = [si.name, sp.no || sp.title, sp.date, c.total != null ? money(c.total) : ''].join(' | ');
+    var qr = qrSvg(payload);
+    if (c.verify !== false) {
+      left += '<div class="vb">' + (qr ? '<div class="qr">' + qr + '</div>' : '') + '<div><b>✔ ডিজিটাল মেমো কোড</b><p>কিউআর স্ক্যান করলে মেমো নং, তারিখ ও মোট পরিমাণ দেখা যাবে।</p><code>HASH: ' + hash(payload + JSON.stringify(sp.blocks || '').length) + '-AXIION</code></div></div>';
+    }
+    if (c.words != null) left += '<div class="wd"><b>' + e(c.wordsLabel || 'কথায়:') + '</b> ' + e(taka(c.words)) + '</div>';
+    if (c.verify !== false && sp.no) left += '<div class="bc">' + barcodeSvg(String(sp.no).replace(/[^\x20-\x7e]/g, '')) + '<small>*' + e(sp.no) + '*</small></div>';
+    if (c.summary && c.summary.length) right = '<div class="sm"><h4>' + e(c.summaryTitle || 'হিসাব ও আর্থিক বিবরণ') + '</h4>' + c.summary.map(function (r) { return '<div class="sr ' + (r[2] || '') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>';
+    var out = '<div class="cl"><div>' + left + '</div>' + (right ? '<div>' + right + '</div>' : '') + '</div>';
+    if (c.terms) out += '<div class="tm"><b>শর্তাবলী:</b> ' + c.terms + '</div>';
+    var sg = c.sigs || ['প্রস্তুতকারী', 'গ্রহণকারী', 'অনুমোদনকারী'];
+    out += '<div class="sg">' + sg.map(function (s) { return '<div>' + e(s[0] || s) + (s[1] ? '<small>' + e(s[1]) + '</small>' : '') + '</div>'; }).join('') + '</div>';
+    return { t: 'html', html: out };
+  }
+
+  /* ── paginate (real DOM measurement → no clipped/overflowing rows) ── */
+  function paginate(doc, sp) {
+    var si = shopInfo(), host = doc.getElementById('host'); host.innerHTML = '';
+    var blocks = (sp.blocks || []).slice(); blocks.push(closing(sp, si));
+    var pages = [], initials = (si.logo || si.name || 'AX').replace(/\s+/g, ' ').substring(0, 14);
+    function newPage() {
+      var pg = doc.createElement('div'); pg.className = 'mpg';
+      pg.innerHTML = '<div class="mfr"></div><div class="mbar"></div><div class="wm">' + e(initials) + '</div><div class="mbody"></div><div class="mft"></div>';
+      host.appendChild(pg); pages.push(pg);
+      var b = pg.querySelector('.mbody'); b.insertAdjacentHTML('beforeend', pages.length === 1 ? headFull(sp, si) : headSlim(sp, si)); b._base = b.children.length; return b;
+    }
+    function over(b) { return b.scrollHeight > b.clientHeight + 1; }
+    var body = newPage();
+    blocks.forEach(function (b) {
+      if (b.t === 'break') { if (body.children.length > body._base) body = newPage(); return; }
+      if (b.t === 'html') {
+        body.insertAdjacentHTML('beforeend', b.html); var el = body.lastElementChild;
+        if (over(body) && body.children.length > body._base + 1) { el.remove(); body = newPage(); body.insertAdjacentHTML('beforeend', b.html); }
+        return;
+      }
+      var tbl, tb;
+      function start() { var w = doc.createElement('div'); w.className = 'tw'; w.innerHTML = '<table class="mt ' + b.cls + '"><thead>' + b.head + '</thead><tbody></tbody></table>'; body.appendChild(w); tbl = w; tb = w.querySelector('tbody'); }
+      function fresh() { tbl.remove(); body = newPage(); start(); }
+      start(); var cnt = 0;
+      b.rows.forEach(function (r) {
+        tb.insertAdjacentHTML('beforeend', r);
+        if (over(body) && (cnt > 0 || body.children.length > body._base + 1)) {
+          tb.lastElementChild.remove();
+          if (cnt === 0) { fresh(); } else { body = newPage(); start(); }
+          tb.insertAdjacentHTML('beforeend', r); cnt = 1;
+        } else cnt++;
+      });
+      if (b.foot) {
+        var tf = doc.createElement('tfoot'); tf.innerHTML = b.foot; tbl.querySelector('table').appendChild(tf);
+        if (over(body) && cnt > 1) {
+          var last = tb.lastElementChild; last.remove(); tf.remove();
+          body = newPage(); start(); tb.appendChild(last); var tf2 = doc.createElement('tfoot'); tf2.innerHTML = b.foot; tbl.querySelector('table').appendChild(tf2);
+        }
+      }
+    });
+    pages.forEach(function (pg, i) {
+      pg.querySelector('.mft').innerHTML = '<span><b>' + e(si.name) + '</b> · ' + e(sp.title) + (sp.no ? ' · ' + e(sp.no) : '') + '</span><span>পৃষ্ঠা <b>' + dg(i + 1) + '</b> / ' + dg(pages.length) + '</span><span>AXIION DMS · ' + dmy(sp.date) + ' ' + e(sp.time) + '</span>';
+    });
+    return pages.length;
+  }
+
+  /* ── lib loader ───────────────────────────────────────────── */
+  var _lib = {};
+  function load(key, test) {
+    if (test()) return Promise.resolve();
+    if (_lib[key]) return _lib[key];
+    return (_lib[key] = new Promise(function (res, rej) {
+      var s = document.createElement('script'); s.src = LIB[key]; s.onload = res; s.onerror = function () { delete _lib[key]; rej(new Error(key + ' load failed')); }; document.head.appendChild(s);
+    }));
+  }
+  var needH2C = function () { return load('h2c', function () { return !!window.html2canvas; }); };
+  var needPDF = function () { return load('pdf', function () { return !!(window.jspdf && window.jspdf.jsPDF); }); };
+  var needQR = function () { return load('qr', function () { return !!window.qrcode; }).catch(function () { }); };
+
+  /* ── rasterisers ──────────────────────────────────────────────
+     1) NATIVE: the browser itself draws the page (SVG foreignObject with
+        the fonts embedded) → perfect Bengali shaping, razor-sharp text.
+     2) html2canvas as a safety-net if the browser refuses (old Safari). */
+  var _fontCss = null;
+  function fontEmbedCss() {
+    if (_fontCss) return _fontCss;
+    return (_fontCss = fetch(FONT).then(function (r) { return r.text(); }).then(function (css) {
+      var blocks = css.match(/@font-face\s*\{[^}]+\}/g) || [];
+      blocks = blocks.filter(function (b) { return /U\+0980/.test(b) || /U\+0000-00FF/.test(b); });
+      return Promise.all(blocks.map(function (b) {
+        var m = b.match(/url\(([^)]+)\)/); if (!m) return '';
+        return fetch(m[1].replace(/["']/g, '')).then(function (r) { return r.blob(); }).then(function (bl) {
+          return new Promise(function (res) { var f = new FileReader(); f.onload = function () { res(b.replace(m[0], 'url(' + f.result + ')')); }; f.readAsDataURL(bl); });
+        }).catch(function () { return ''; });
+      })).then(function (a) { return a.join('\n'); });
+    }).catch(function () { _fontCss = null; return ''; }));
+  }
+  function viaNative(el, fcss) {
+    return new Promise(function (res, rej) {
+      var xml = new XMLSerializer().serializeToString(el);
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + PW + '" height="' + PH + '"><foreignObject x="0" y="0" width="' + PW + '" height="' + PH + '"><style xmlns="http://www.w3.org/1999/xhtml">' + fcss + CSS + '</style>' + xml + '</foreignObject></svg>';
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var cv = document.createElement('canvas'); cv.width = Math.round(PW * SCALE); cv.height = Math.round(PH * SCALE);
+          var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+          var px = cx.getImageData(Math.round(cv.width / 2), Math.round(17 * SCALE), 1, 1).data;   // top accent bar must not be white
+          if (px[0] > 240 && px[1] > 240 && px[2] > 240) return rej(new Error('blank'));
+          cv.toDataURL('image/jpeg', 0.5);                                                          // throws if tainted
+          res(cv);
+        } catch (x) { rej(x); }
+      };
+      img.onerror = function () { rej(new Error('svg-img')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    });
+  }
+  function viaH2C(el) {
+    return needH2C().then(function () { return window.html2canvas(el, { scale: SCALE, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false, width: PW, height: PH, windowWidth: PW + 20 }); });
+  }
+
+  /* ── render spec → {html, pages:[dataURL…]} ───────────────── */
+  function build(sp, wantImages) {
+    return needQR().then(function () {
+      return new Promise(function (resolve, reject) {
+        var fr = document.createElement('iframe');
+        fr.style.cssText = 'position:fixed;left:-9999px;top:0;width:' + (PW + 20) + 'px;height:1200px;border:0;visibility:hidden';
+        document.body.appendChild(fr);
+        var d = fr.contentDocument; d.open();
+        d.write('<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><link href="' + FONT + '" rel="stylesheet"><style>' + CSS + '</style></head><body><div id="host"></div></body></html>'); d.close();
+        var done = false;
+        function go() {
+          if (done) return; done = true;
+          try {
+            paginate(d, sp);                                        // pass 1 → triggers font loading
+            var wait = d.fonts && d.fonts.ready ? Promise.race([d.fonts.ready, new Promise(function (r) { setTimeout(r, 3500); })]) : Promise.resolve();
+            wait.then(function () {
+              var n = paginate(d, sp);                              // pass 2 → final, with real fonts
+              var out = { n: n, html: '<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><link href="' + FONT + '" rel="stylesheet"><style>' + CSS + PRINT_CSS + '</style></head><body>' + d.getElementById('host').innerHTML + '</body></html>', imgs: [] };
+              if (!wantImages) { fr.remove(); return resolve(out); }
+              var els = d.querySelectorAll('.mpg');
+              fontEmbedCss().then(function (fcss) {
+                var i = 0, useH2C = false;
+                (function next() {
+                  if (i >= els.length) { fr.remove(); return resolve(out); }
+                  var p = useH2C ? viaH2C(els[i]) : viaNative(els[i], fcss).catch(function () { useH2C = true; return viaH2C(els[i]); });
+                  p.then(function (cv) { out.imgs.push(cv.toDataURL('image/jpeg', 0.94)); i++; setTimeout(next, 0); }).catch(function (er) { fr.remove(); reject(er); });
+                })();
+              });
+            });
+          } catch (er) { fr.remove(); reject(er); }
+        }
+        setTimeout(go, 350);
+      });
+    });
+  }
+
+  /* ── share panel ──────────────────────────────────────────── */
+  function toastMsg(m) { if (typeof window.toast === 'function') window.toast(m); }
+  function dl(href, name) { var a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+  function waNumber(p) { p = String(p || '').replace(/\D/g, ''); if (!p) return ''; if (p.indexOf('880') === 0) return p; if (p.charAt(0) === '0') return '88' + p; return p.length === 10 ? '880' + p : p; }
+
+  function show(sp) {
+    sp.time = sp.time || hm(new Date()); sp.date = sp.date || new Date().toISOString().slice(0, 10);
+    var file = String(sp.file || sp.no || 'memo').replace(/[^\w\-]+/g, '_');
+    var ov = document.createElement('div'); ov.id = 'memo-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,44,34,.62);z-index:9998;display:flex;align-items:center;justify-content:center;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif';
+    var pn = document.createElement('div');
+    pn.style.cssText = 'background:#f1f5f9;border-radius:14px;width:96%;max-width:640px;height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.35);overflow:hidden';
+    pn.innerHTML = '<div style="padding:12px 16px;background:linear-gradient(90deg,#065f46,#059669);color:#fff;display:flex;justify-content:space-between;align-items:center"><div><div id="mm-t" style="font-size:14.5px;font-weight:700">📋 মেমো তৈরি হচ্ছে…</div><div id="mm-s" style="font-size:10.5px;opacity:.85">A4 সাইজ · হাই-কোয়ালিটি</div></div><button id="mm-x" style="border:none;background:rgba(255,255,255,.2);color:#fff;width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer">✕</button></div>'
+      + '<div id="mm-pv" style="flex:1;overflow-y:auto;padding:12px;text-align:center"><div style="padding:60px 10px;color:#64748b;font-size:13px">⏳ রেন্ডার হচ্ছে…</div></div>'
+      + '<div id="mm-ac" style="display:none;padding:10px 12px;background:#fff;border-top:1px solid #e2e8f0;grid-template-columns:1fr 1fr;gap:8px"></div>';
+    ov.appendChild(pn); document.body.appendChild(ov);
+    document.getElementById('mm-x').onclick = function () { ov.remove(); };
+
+    build(sp, true).then(function (r) {
+      // Native Android wrapper keeps its own print/share UI
+      if (window.AndroidSlip && window.AndroidSlip.receiveSlip) { ov.remove(); window.AndroidSlip.receiveSlip(r.html, ''); return; }
+      var pv = document.getElementById('mm-pv'); pv.innerHTML = '';
+      r.imgs.forEach(function (u, i) {
+        var w = document.createElement('div'); w.style.cssText = 'margin:0 auto 12px;max-width:560px;position:relative';
+        w.innerHTML = '<img src="' + u + '" style="width:100%;display:block;background:#fff;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,.18)"><div style="font-size:10px;color:#64748b;margin-top:3px">পৃষ্ঠা ' + dg(i + 1) + ' / ' + dg(r.n) + '</div>';
+        pv.appendChild(w);
+      });
+      document.getElementById('mm-t').textContent = '✅ ' + sp.title + (sp.no ? ' — ' + sp.no : '');
+      document.getElementById('mm-s').textContent = 'A4 · ' + dg(r.n) + ' পৃষ্ঠা · হাই-কোয়ালিটি';
+      var ac = document.getElementById('mm-ac'); ac.style.display = 'grid';
+      function btn(label, bg, fn, span) { var b = document.createElement('button'); b.innerHTML = label; b.style.cssText = 'padding:12px 6px;border:none;border-radius:10px;color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;background:' + bg + (span ? ';grid-column:1/3' : ''); b.onclick = function () { fn(b); }; ac.appendChild(b); return b; }
+      var pdfBlob = null;
+      function getPdf() {
+        if (pdfBlob) return Promise.resolve(pdfBlob);
+        return needPDF().then(function () {
+          var pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
+          r.imgs.forEach(function (u, i) { if (i) pdf.addPage(); pdf.addImage(u, 'JPEG', 0, 0, 210, 297, undefined, 'FAST'); });
+          pdfBlob = pdf.output('blob'); return pdfBlob;
+        });
+      }
+      function b64(blob) { return new Promise(function (res) { var f = new FileReader(); f.onload = function () { res(String(f.result).split(',')[1]); }; f.readAsDataURL(blob); }); }
+      function busy(b, on) { b.disabled = on; b.style.opacity = on ? .6 : 1; }
+      btn('📄 PDF ডাউনলোড', '#065f46', function (b) { busy(b, true); getPdf().then(function (bl) { var u = URL.createObjectURL(bl); if (window.AndroidBridge && window.AndroidBridge.saveJpg && false) { } dl(u, file + '.pdf'); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }).catch(function () { toastMsg('PDF তৈরি ব্যর্থ — ইন্টারনেট চেক করুন'); }).then(function () { busy(b, false); }); });
+      btn('🖼️ JPG ডাউনলোড', '#0891b2', function () {
+        r.imgs.forEach(function (u, i) {
+          if (window.AndroidBridge && window.AndroidBridge.saveJpg) window.AndroidBridge.saveJpg(u.split(',')[1], file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg');
+          else setTimeout(function () { dl(u, file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg'); }, i * 350);
+        });
+      });
+      btn('🖨️ প্রিন্ট (A4)', '#334155', function () {
+        var f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
+        var d = f.contentDocument; d.open(); d.write(r.html); d.close();
+        var go = function () { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (x) { } setTimeout(function () { f.remove(); }, 60000); };
+        var w = d.fonts && d.fonts.ready ? Promise.race([d.fonts.ready, new Promise(function (z) { setTimeout(z, 3000); })]) : Promise.resolve(); w.then(function () { setTimeout(go, 250); });
+      });
+      function shareWA(pkg) {
+        return function (b) {
+          busy(b, true);
+          var msg = (sp.title || 'মেমো') + (sp.no ? ' — ' + sp.no : '') + '\n' + (si0().name) + (sp.shareText ? '\n' + sp.shareText : '');
+          var p;
+          if (window.AndroidBridge && window.AndroidBridge.shareWhatsApp) {
+            p = r.n === 1 ? Promise.resolve(window.AndroidBridge.shareWhatsApp(r.imgs[0].split(',')[1], file + '.jpg', pkg))
+              : getPdf().then(b64).then(function (s) { window.AndroidBridge.shareWhatsApp(s, file + '.pdf', pkg); });
+          } else {
+            p = getPdf().then(function (bl) {
+              var f = new File([bl], file + '.pdf', { type: 'application/pdf' });
+              if (navigator.canShare && navigator.canShare({ files: [f] })) return navigator.share({ files: [f], title: sp.title, text: msg }).catch(function (er) { if (!er || er.name !== 'AbortError') throw er; });
+              dl(URL.createObjectURL(bl), file + '.pdf');
+              window.open('https://wa.me/' + waNumber(sp.phone) + '?text=' + encodeURIComponent(msg), '_blank');
+              toastMsg('PDF ডাউনলোড হয়েছে — WhatsApp চ্যাটে অ্যাটাচ করে পাঠান');
+            });
+          }
+          p.catch(function () { toastMsg('শেয়ার ব্যর্থ হয়েছে'); }).then(function () { busy(b, false); });
+        };
+      }
+      btn('📲 WhatsApp এ পাঠান', '#25D366', shareWA('com.whatsapp'));
+      btn('💼 WA Business এ পাঠান', '#075E54', shareWA('com.whatsapp.w4b'));
+      btn('✕ বন্ধ করুন', '#94a3b8', function () { ov.remove(); }, true);
+      setTimeout(needPDF, 50);                        // warm-up so PDF is instant on tap
+    }).catch(function (er) {
+      var pv = document.getElementById('mm-pv'); if (pv) pv.innerHTML = '<div style="padding:40px 14px;color:#b91c1c;font-size:13px">মেমো তৈরি ব্যর্থ: ' + e(er && er.message || er) + '<br><small>ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন</small></div>';
+    });
+    function si0() { return shopInfo(); }
+  }
+
+  /* ══ ready-made document types ═════════════════════════════════ */
+  var KIND = {
+    give: { title: 'স্টক সরবরাহ মেমো', en: 'STOCK ISSUE MEMO', party: 'গ্রহণকারী (DSR/SO)', meta: 'সরবরাহ বিবরণ', sigs: [['প্রদানকারী', 'মালিক / ম্যানেজার'], ['গ্রহণকারী', 'DSR / SO'], ['অনুমোদনকারী', 'মালিক']] },
+    return: { title: 'পণ্য ফেরত মেমো', en: 'STOCK RETURN MEMO', party: 'ফেরতদাতা (DSR/SO)', meta: 'ফেরত বিবরণ', sigs: [['গ্রহণকারী', 'গুদাম / অফিস'], ['ফেরতদাতা', 'DSR / SO'], ['অনুমোদনকারী', 'মালিক']] },
+    damage: { title: 'ড্যামেজ পণ্য মেমো', en: 'DAMAGE MEMO', party: 'ড্যামেজ জমাদাতা', meta: 'ড্যামেজ বিবরণ', sigs: [['গ্রহণকারী', 'গুদাম / অফিস'], ['জমাদাতা', 'DSR / SO'], ['অনুমোদনকারী', 'মালিক']] },
+    buy: { title: 'ক্রয় মেমো', en: 'PURCHASE MEMO', party: 'সরবরাহকারী (কোম্পানি)', meta: 'ক্রয় বিবরণ', sigs: [['গ্রহণকারী', 'গুদাম'], ['সরবরাহকারীর প্রতিনিধি', ''], ['অনুমোদনকারী', 'মালিক']], price: 'purchase' },
+    return_company: { title: 'কোম্পানিতে ফেরত মেমো', en: 'RETURN TO COMPANY MEMO', party: 'গ্রহণকারী (কোম্পানি)', meta: 'ফেরত বিবরণ', sigs: [['প্রদানকারী', 'গুদাম'], ['কোম্পানির প্রতিনিধি', ''], ['অনুমোদনকারী', 'মালিক']], price: 'purchase' },
+    point_sale: { title: 'পয়েন্ট সেল মেমো', en: 'POINT SALE MEMO', party: 'ক্রেতা / কাস্টমার', meta: 'বিক্রয় বিবরণ', sigs: [['বিক্রেতা', ''], ['ক্রেতা', 'কাস্টমার'], ['অনুমোদনকারী', 'মালিক']] },
+    point_return: { title: 'পয়েন্ট সেল ফেরত মেমো', en: 'POINT RETURN MEMO', party: 'ফেরতদাতা / কাস্টমার', meta: 'ফেরত বিবরণ', sigs: [['গ্রহণকারী', ''], ['ফেরতদাতা', 'কাস্টমার'], ['অনুমোদনকারী', 'মালিক']] },
+    order: { title: 'অর্ডার মেমো', en: 'SO ORDER MEMO', party: 'অর্ডারকারী (SO)', meta: 'অর্ডার বিবরণ', sigs: [['অর্ডারকারী', 'SO'], ['যাচাইকারী', 'ম্যানেজার'], ['অনুমোদনকারী', 'মালিক']] }
+  };
+
+  /* items: [{name, sku, cases, pcs, units, caseSize, unitType, sell, buy, comm, disc, note}] */
+  function itemRows(items, mode) {
+    var tCases = 0, tUnits = 0, tAmt = 0, tComm = 0, tDisc = 0;
+    var rows = items.map(function (it, i) {
+      var cs = Number(it.caseSize) || 0, u = Number(it.units) || 0, price = Number(mode === 'purchase' ? it.buy : it.sell) || 0;
+      var ca = Number(it.cases) || (cs ? Math.floor(u / cs) : 0), pc = Number(it.pcs) || (cs ? u - ca * cs : u), amt = u * price, ut = it.unitType || 'কেস';
+      tCases += ca; tUnits += u; tAmt += amt; tComm += Number(it.comm) || 0; tDisc += Number(it.disc) || 0;
+      var q = (ca ? '<span class="q">' + int(ca) + ' ' + e(ut) + '</span>' : '') + (pc ? '<span class="q">' + (ca ? ' ' : '') + int(pc) + ' পিস</span>' : '') + (!ca && !pc ? '<span class="q">0</span>' : '') + '<span class="u">(মোট ' + int(u) + ' পিস)</span>';
+      var sub = (it.sku ? 'SKU: ' + e(it.sku) : '');
+      var off = []; if (Number(it.comm) > 0) off.push('কমিশন −৳' + money(it.comm)); if (Number(it.disc) > 0) off.push('ছাড় −৳' + money(it.disc)); if (it.note) off.push(e(it.note));
+      return [dg(String(i + 1).padStart(2, '0')),
+      { h: '<span class="n">' + e(it.name) + '</span>' + (sub ? '<span class="s">' + sub + '</span>' : '') + (off.length ? '<span class="o">' + off.join(' · ') + '</span>' : ''), al: 'left', cls: 'l' },
+      cs ? dg(int(cs)) + ' পিস / ' + e(ut) : '—', q, { h: money(price * (cs || 1)) + (cs ? '<span class="u">(পিস ৳' + money(price) + ')</span>' : ''), cls: 'r', al: 'right' }, { h: money(amt), cls: 'r amt', al: 'right' }];
+    });
+    return { rows: rows, tCases: tCases, tUnits: tUnits, tAmt: tAmt, tComm: tComm, tDisc: tDisc };
+  }
+  var ITEM_COLS = function (mode) {
+    return [{ h: '#', w: '5%' }, { h: 'পণ্যের বিবরণ (Item &amp; SKU)', w: '36%', a: 'l' }, { h: 'প্যাক সাইজ', w: '13%' }, { h: 'পরিমাণ (কেস/পিস)', w: '19%' }, { h: mode === 'purchase' ? 'ক্রয় দর / কেস (৳)' : 'দর / কেস (৳)', w: '13%', a: 'r' }, { h: 'মোট মূল্য (৳)', w: '14%', a: 'r' }];
+  };
+
+  /* Stock movement memo (give / return / damage / buy / return_company / point_* / order) */
+  function stock(o) {
+    var K = KIND[o.kind] || KIND.give, mode = K.price || 'sell', R = itemRows(o.items || [], mode);
+    var party = [];
+    if (o.partyName) party.push([K.party + ':', '<b>' + e(o.partyName) + '</b>']);
+    if (o.partyArea) party.push(['এলাকা / রুট:', e(o.partyArea)]);
+    if (o.partyPhone) party.push(['মোবাইল:', e(dg(o.partyPhone))]);
+    var meta = [['মেমো নং:', e(o.no || '')], ['তারিখ:', dmy(o.date)], ['মোট আইটেম:', int((o.items || []).length) + ' টি']];
+    (o.meta || []).forEach(function (m) { meta.push(m); });
+    var cards = { t: 'html', html: '<div class="cards"><div><h3>' + K.party + '</h3>' + (party.length ? party : [['—', '']]).map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div><div><h3>' + K.meta + '</h3>' + meta.map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div></div>' };
+    var foot = [{ h: 'সর্বমোট পরিমাণ:', span: 3, al: 'right' }, { h: int(R.tCases) + ' কেস (' + int(R.tUnits) + ' পিস)', al: 'center' }, { h: 'সাব-টোটাল:', al: 'right' }, { h: '৳ ' + money(R.tAmt), al: 'right' }];
+    var blocks = [cards, T(ITEM_COLS(mode), R.rows, foot)];
+    if (o.note) blocks.push(note('<b>নোট:</b> ' + e(o.note)));
+    var sum = [['মোট পণ্য (আইটেম)', int((o.items || []).length) + ' টি'], ['মোট পরিমাণ', int(R.tCases) + ' কেস (' + int(R.tUnits) + ' পিস)'], ['মোট মূল্য', '৳ ' + money(R.tAmt), 'big']];
+    return { kind: o.kind, title: K.title, en: K.en, no: o.no, date: o.date, banner: o.banner, phone: o.partyPhone, file: o.no, blocks: blocks, shareText: 'মোট: ৳' + money(R.tAmt), closing: { total: R.tAmt, words: R.tAmt, wordsLabel: 'কথায় (মোট মূল্য):', summary: sum, sigs: K.sigs, terms: o.terms } };
+  }
+
+  /* DSR → shop cash memo (the reference design) */
+  function sale(o) {
+    var R = itemRows(o.items || [], 'sell'), prev = Number(o.prevDue) || 0, payable = Number(o.payable) || 0, paid = Number(o.paid) || 0;
+    var net = payable + prev, remain = Math.max(0, net - paid);
+    var cards = { t: 'html', html: '<div class="cards"><div><h3>ক্রেতা ও প্রতিষ্ঠানের বিবরণ (Bill To)</h3>'
+        + [['দোকানের নাম:', '<b style="font-size:13px">' + e(o.shopName) + '</b>'], o.shopNo ? ['দোকান নং:', e(o.shopNo)] : null, o.owner ? ['স্বত্বাধিকারী:', e(o.owner)] : null, o.shopPhone ? ['মোবাইল:', e(dg(o.shopPhone))] : null, o.shopAddr ? ['ঠিকানা:', e(o.shopAddr)] : null].filter(Boolean).map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('')
+        + '</div><div><h3>ডেলিভারি ও বিক্রয় বিবরণ (Order Meta)</h3>'
+        + [['বিক্রয় প্রতিনিধি (DSR):', e(o.dsrName)], o.route ? ['রুট / এলাকা:', e(o.route)] : null, ['পেমেন্ট মাধ্যম:', remain > 0 ? '<span style="background:#b45309;color:#fff;border-radius:99px;padding:1px 10px;font-size:10.5px">আংশিক / বাকি</span>' : '<span style="background:linear-gradient(90deg,#059669,#0d9488);color:#fff;border-radius:99px;padding:1px 10px;font-size:10.5px">নগদ ক্যাশ (Cash Sale)</span>']].filter(Boolean).map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('')
+        + '</div></div>' };
+    var foot = [{ h: 'সর্বমোট অর্ডারের পরিমাণ:', span: 3, al: 'right' }, { h: int(R.tCases) + ' কেস (' + int(R.tUnits) + ' পিস)', al: 'center' }, { h: 'সাব-টোটাল:', al: 'right' }, { h: '৳ ' + money(R.tAmt), al: 'right' }];
+    var gross = o.gross != null ? Number(o.gross) : R.tAmt;
+    var sum = [['মোট পণ্যের মূল্য (Gross Amount):', '৳ ' + money(gross)]];
+    if ((Number(o.commission) || 0) > 0) sum.push(['বিশেষ বাণিজ্যিক কমিশন:', '− ৳ ' + money(o.commission), 'g']);
+    if ((Number(o.discount) || 0) > 0) sum.push(['ছাড় (Discount):', '− ৳ ' + money(o.discount), 'g']);
+    if (prev > 0) sum.push(['পূর্বের বকেয়া ব্যালেন্স:', '+ ৳ ' + money(prev), 'a']);
+    sum.push(['সর্বমোট প্রদেয় (Net Payable):', '৳ ' + money(net), 'big']);
+    sum.push(['আজকের নগদ জমা (Cash Paid):', '৳ ' + money(paid), 'g']);
+    sum.push(remain > 0 ? ['অবশিষ্ট ডিউ / বর্তমান বকেয়া:', '৳ ' + money(remain), 'r'] : ['অবশিষ্ট ডিউ:', '৳ 0.00 ✔ পরিশোধিত', 'g']);
+    return { kind: 'sale', title: 'ক্যাশ মেমো ও ডেলিভারি চালান', en: 'CASH VOUCHER & DELIVERY MEMO', no: o.no, date: o.date, phone: o.shopPhone, file: o.no, blocks: [cards, T(ITEM_COLS('sell'), R.rows, foot)], shareText: 'মোট প্রদেয়: ৳' + money(net) + ' | জমা: ৳' + money(paid) + (remain > 0 ? ' | বাকি: ৳' + money(remain) : ''),
+      closing: { total: paid, words: paid, wordsLabel: 'কথায় (আদায়কৃত টাকা):', summary: sum, sigs: [['ক্রেতার স্বাক্ষর ও তারিখ', 'Customer / Receiver'], ['বিক্রয় প্রতিনিধির স্বাক্ষর', 'DSR: ' + (o.dsrName || '')], ['অনুমোদিত কর্মকর্তার স্বাক্ষর', 'For ' + shopInfo().name]], terms: 'ডেলিভারির সময় পণ্যের মেয়াদ ও পরিমাণ বুঝিয়া গ্রহণ করুন। সিল বা কার্টন ছেঁড়া থাকিলে তাৎক্ষণিক আপত্তি না জানালে পরবর্তীতে কোনো অভিযোগ গ্রহণযোগ্য হইবে না। ধন্যবাদ, আবার আসবেন।' } };
+  }
+
+  window.MEMO = { show: show, stock: stock, sale: sale, build: build, T: T, kv: kv, stats: stats, sec: sec, note: note, html: html, brk: brk, money: money, int: int, dg: dg, dmy: dmy, hm: hm, e: e, taka: taka, cfg: CFG, _pag: paginate, _css: CSS };
+})();
+
+</script>
 </body>
 </html>

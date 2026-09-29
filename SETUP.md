@@ -58,8 +58,7 @@ columns, and the 35 default products). Nothing else to run.
 - Transactions -> "কোম্পানিতে ফেরত": removes stock only (blocked if it exceeds current stock).
 - Still 12 API files.
 
-## 8. What's new in 4.8.0 — ⚠️ existing deployments must run one SQL file
-**Upgrading:** open the Supabase SQL editor and run `migration_v4_8_settlement.sql` once (safe to re-run).
+## 8. What's new in 4.8.0
 It adds 3 tables (`due_collections`, `damage_collections`, `dsr_settlements`) and allows manager
 settlements in the approval queue. **Fresh installs:** `schema.sql` already contains everything.
 Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-calendar.js`, `_lib/db.js`).
