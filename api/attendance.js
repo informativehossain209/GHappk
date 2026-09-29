@@ -455,7 +455,7 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'advance-list') {
       const userKey = req.query.userKey || '';
       let q = supabase.from('advance_requests').select('*').order('requested_at', { ascending: false });
-      q = userKey ? q.eq('user_key', userKey).limit(30) : q.limit(100);
+      q = userKey ? q.eq('user_key', userKey).limit(30) : q.limit(2000);  // owner: full history per person
       const { data, error } = await q;
       if (error) throw error;
       return res.json({ ok: true, requests: (data || []).map(mapAdvance) });

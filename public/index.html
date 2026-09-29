@@ -1609,15 +1609,18 @@ async function impDel(id, name) {
 var _oaData = [];
 
 var _advData = [];
+var _advStaff = [];
 async function loadOwnerApprovals() {
   var el = document.getElementById('oa-wrap'); if (!el) return;
   el.innerHTML = '<div style="text-align:center;padding:16px;color:var(--mt2)">লোড হচ্ছে...</div>';
   var reqs = await Promise.all([
     apiGet('/api/sr-payments?action=approvals'),
     apiGet('/api/attendance?action=advance-list'),
-    apiGet('/api/sr-payments?action=orders_list')
+    apiGet('/api/sr-payments?action=orders_list'),
+    apiGet('/api/attendance?action=staff-list')
   ]);
   var r = reqs[0], advR = reqs[1];
+  _advStaff = (reqs[3] && reqs[3].ok) ? (reqs[3].staff || []) : [];
   window._oaOrders = (reqs[2] && reqs[2].ok) ? (reqs[2].orders||[]).filter(function(o){return o.status!=='rejected';}) : [];
   if (!r || !r.ok) { el.innerHTML = '<div style="padding:16px;color:var(--re)">লোড ব্যর্থ</div>'; return; }
   _oaData = r.approvals || [];
@@ -1625,60 +1628,124 @@ async function loadOwnerApprovals() {
   renderOwnerApprovals();
 }
 
-function _advOwnerHtml() {
-  var pending = _advData.filter(function(a){ return a.status === 'pending'; });
-  var done    = _advData.filter(function(a){ return a.status !== 'pending'; }).slice(0, 15);
-  var h = '<div class="ct" style="font-size:12px">💵 অগ্রিম টাকার আবেদন <span style="font-weight:400;color:var(--mt2)">('+pending.length+'টি পেন্ডিং)</span></div>';
+// ── Advance payments — one card per salaried employee ──────────────
+// Red card = has pending request(s). Tap → that person's pending
+// requests (approve / reject) + their complete request history.
+function _advPeople() {
+  var by = {};
+  _advStaff.forEach(function(s){
+    by[String(s.user_key)] = { key:String(s.user_key), name:s.user_name||s.user_key, role:s.role, thumb:s.thumb||'', reqs:[] };
+  });
+  _advData.forEach(function(a){
+    var k = String(a.userKey);
+    if (!by[k]) by[k] = { key:k, name:a.userName||k, role:a.role, thumb:'', reqs:[] };
+    by[k].reqs.push(a);
+  });
+  return Object.keys(by).map(function(k){
+    var x = by[k];
+    var pend = x.reqs.filter(function(a){return a.status==='pending';});
+    x.pendCount = pend.length;
+    x.pendAmt = pend.reduce(function(t,a){return t+Number(a.amount||0);},0);
+    x.apprAmt = x.reqs.filter(function(a){return a.status==='approved';}).reduce(function(t,a){return t+Number(a.amount||0);},0);
+    return x;
+  }).sort(function(a,b){
+    if ((b.pendCount>0)-(a.pendCount>0)) return (b.pendCount>0)-(a.pendCount>0);
+    return String(a.name).localeCompare(String(b.name),'bn');
+  });
+}
 
-  if (!pending.length && !done.length) {
-    h += '<div class="card" style="text-align:center;padding:16px;color:var(--mt2);font-size:12px">কোনো অগ্রিম আবেদন নেই</div>';
+function _advOwnerHtml() {
+  var people = _advPeople();
+  var totalPend = people.reduce(function(t,x){return t+x.pendCount;},0);
+  var h = '<div class="ct" style="font-size:12px">💵 অগ্রিম টাকা <span style="font-weight:400;color:var(--mt2)">('+totalPend+'টি পেন্ডিং আবেদন)</span></div>';
+  if (!people.length) {
+    h += '<div class="card" style="text-align:center;padding:16px;color:var(--mt2);font-size:12px">কোনো স্টাফ পাওয়া যায়নি</div>';
     return h;
   }
-  if (pending.length) {
-    h += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:8px">';
-    pending.forEach(function(a) {
-      h += '<div style="padding:10px 12px;border-bottom:1px solid var(--grl);display:flex;align-items:center;justify-content:space-between;gap:8px">';
-      h += '<div style="flex:1;min-width:0">';
-      h += '<div style="font-weight:700;font-size:12px">'+(ROLE_ICONS[a.role]||'')+' '+esc(a.userName||a.userKey)+' <span style="font-size:10px;color:var(--mt2)">· '+_monthLabelBn(a.month)+'</span></div>';
-      h += '<div style="font-size:10px;color:var(--mt2);margin-top:1px">📅 আবেদনের তারিখ: '+fmtBn(a.requestedAt)+'</div>';
-      h += '<div style="font-size:13px;font-weight:700;color:var(--bl);margin-top:2px">৳'+fm(a.amount)+'</div>';
-      if (a.note) h += '<div style="font-size:11px;color:var(--mt2);font-style:italic;margin-top:2px">'+esc(a.note)+'</div>';
-      h += '</div>';
-      h += '<div style="display:flex;gap:6px;flex-shrink:0">';
-      h += '<button class="btn btn-sm" style="background:var(--gr);color:#fff;font-size:11px;padding:4px 10px" onclick="advApprove(\''+a.id+'\')">✅ অনুমোদন</button>';
-      h += '<button class="btn btn-sm" style="background:var(--re);color:#fff;font-size:11px;padding:4px 10px" onclick="advReject(\''+a.id+'\')">❌ বাতিল</button>';
-      h += '</div></div>';
-    });
-    h += '</div>';
-  }
-  if (done.length) {
-    h += '<div class="card" style="padding:0;overflow:hidden">';
-    done.forEach(function(a) {
-      var isApproved = a.status === 'approved';
-      h += '<div style="padding:8px 12px;border-bottom:1px solid var(--grl);display:flex;align-items:center;justify-content:space-between">';
-      h += '<div><div style="font-size:12px;font-weight:600">'+esc(a.userName||a.userKey)+' · ৳'+fm(a.amount)+'</div>';
-      h += '<div style="font-size:10px;color:var(--mt2)">'+_monthLabelBn(a.month)+' · 📅 '+fmtBn(a.requestedAt)+'</div></div>';
-      h += '<span style="font-size:11px;font-weight:700;color:'+(isApproved?'var(--gr)':'var(--re)')+'">'+(isApproved?'✅ অনুমোদিত':'❌ বাতিল')+'</span>';
-      h += '</div>';
-    });
-    h += '</div>';
-  }
+  h += '<div class="card" style="padding:0;overflow:hidden">';
+  people.forEach(function(x){
+    var red = x.pendCount > 0;
+    h += '<div onclick="openAdvPerson(\''+encodeURIComponent(x.key)+'\')" style="padding:10px 12px;border-bottom:1px solid var(--grl);display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;'
+      + (red ? 'background:var(--rel);border-left:4px solid var(--re)' : 'border-left:4px solid transparent') + '">';
+    h += '<div style="display:flex;align-items:center;gap:9px;min-width:0">'+personAvatar(x.thumb, x.role, 34)+'<div style="min-width:0">';
+    h += '<div style="font-weight:700;font-size:13px;'+(red?'color:var(--re)':'')+'">'+esc(x.name)+'</div>';
+    h += '<div style="font-size:10px;color:var(--mt2)">'+(ROLE_LABELS[x.role]||x.role||'')+(x.reqs.length?' · মোট '+x.reqs.length+'টি আবেদন':' · কোনো আবেদন নেই')+'</div>';
+    h += '</div></div>';
+    h += '<div style="text-align:right;flex-shrink:0">';
+    if (red) h += '<div style="font-size:12px;font-weight:800;color:var(--re)">⏳ '+x.pendCount+'টি · ৳'+fm(x.pendAmt)+'</div>';
+    else if (x.apprAmt>0) h += '<div style="font-size:11px;color:var(--gr);font-weight:700">✅ ৳'+fm(x.apprAmt)+'</div>';
+    h += '<div style="color:var(--mt2);font-size:11px">▶</div></div></div>';
+  });
+  h += '</div>';
   return h;
 }
 
-async function advApprove(id) {
-  showOvl('অনুমোদন হচ্ছে...');
-  var r = await apiPost('/api/attendance?action=advance-approve', { id: id, approvedBy: S.userName || 'owner' });
-  hideOvl();
-  if (r && r.ok) { toast('✅ অনুমোদন হয়েছে'); await loadOwnerApprovals(); }
-  else toast((r&&r.error)||'ব্যর্থ');
+function openAdvPerson(enc) {
+  var key = decodeURIComponent(enc);
+  var x = _advPeople().filter(function(p){return p.key===key;})[0]; if (!x) return;
+  var old = document.getElementById('adv-person-modal'); if (old) document.body.removeChild(old);
+  var modal = document.createElement('div');
+  modal.id = 'adv-person-modal'; modal.className = 'due-modal-bg';
+  modal.onclick = function(e){ if (e.target===modal) document.body.removeChild(modal); };
+  var pend = x.reqs.filter(function(a){return a.status==='pending';});
+  var hist = x.reqs.filter(function(a){return a.status!=='pending';});
+  var apprN = x.reqs.filter(function(a){return a.status==='approved';}).length;
+  var rejN  = x.reqs.filter(function(a){return a.status==='rejected';}).length;
+
+  var h = '<div class="due-modal">';
+  h += '<div class="due-modal-title">'+(ROLE_ICONS[x.role]||'')+' '+esc(x.name)+' — অগ্রিম টাকা</div>';
+  h += '<div style="display:flex;gap:6px;margin-bottom:12px;font-size:11px;text-align:center">'
+    +'<div style="flex:1;background:var(--aml);border-radius:8px;padding:6px"><div style="color:var(--mt2)">পেন্ডিং</div><b>৳'+fm(x.pendAmt)+'</b></div>'
+    +'<div style="flex:1;background:var(--grl);border-radius:8px;padding:6px"><div style="color:var(--mt2)">অনুমোদিত ('+apprN+')</div><b style="color:var(--gr)">৳'+fm(x.apprAmt)+'</b></div>'
+    +'<div style="flex:1;background:var(--rel);border-radius:8px;padding:6px"><div style="color:var(--mt2)">বাতিল</div><b style="color:var(--re)">'+rejN+'টি</b></div></div>';
+
+  if (pend.length) {
+    h += '<div style="font-weight:700;font-size:12px;color:var(--re);margin-bottom:6px">⏳ অনুমোদনের অপেক্ষায়</div>';
+    pend.forEach(function(a){
+      h += '<div style="border:1.5px solid var(--re);background:var(--rel);border-radius:10px;padding:10px;margin-bottom:8px">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:16px;color:var(--re)">৳'+fm(a.amount)+'</b>'
+        +'<span style="font-size:10px;color:var(--mt2)">'+_monthLabelBn(a.month)+' বেতন থেকে কর্তন</span></div>';
+      h += '<div style="font-size:10px;color:var(--mt2);margin-top:2px">📅 আবেদন: '+fmtBn(a.requestedAt)+'</div>';
+      if (a.note) h += '<div style="font-size:11px;font-style:italic;margin-top:3px">'+esc(a.note)+'</div>';
+      h += '<div style="display:flex;gap:8px;margin-top:8px">'
+        +'<button class="btn btn-sm" style="flex:1;background:var(--gr);color:#fff" onclick="advDecide(\''+a.id+'\',\'approve\',\''+encodeURIComponent(x.key)+'\')">✅ অনুমোদন</button>'
+        +'<button class="btn btn-sm" style="flex:1;background:var(--re);color:#fff" onclick="advDecide(\''+a.id+'\',\'reject\',\''+encodeURIComponent(x.key)+'\')">❌ বাতিল</button></div></div>';
+    });
+  } else {
+    h += '<div style="text-align:center;color:var(--mt2);font-size:12px;padding:8px 0 12px">✓ কোনো পেন্ডিং আবেদন নেই</div>';
+  }
+
+  h += '<div style="font-weight:700;font-size:12px;margin:8px 0 6px">📜 আগের সব আবেদন ও সিদ্ধান্ত</div>';
+  if (!hist.length) h += '<div style="color:var(--mt2);font-size:12px;padding:6px 0">এখনো কোনো পুরনো আবেদন নেই</div>';
+  else {
+    h += '<div style="border:1px solid var(--grl);border-radius:10px;overflow:hidden">';
+    hist.forEach(function(a){
+      var ok = a.status==='approved';
+      h += '<div style="padding:8px 10px;border-bottom:1px solid var(--grl)">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:13px">৳'+fm(a.amount)+'</b>'
+        +'<span style="font-size:11px;font-weight:700;color:'+(ok?'var(--gr)':'var(--re)')+'">'+(ok?'✅ অনুমোদিত':'❌ বাতিল')+'</span></div>';
+      h += '<div style="font-size:10px;color:var(--mt2);margin-top:1px">'+_monthLabelBn(a.month)+' · আবেদন 📅 '+fmtBn(a.requestedAt)
+        +(a.decidedAt?' · সিদ্ধান্ত 📅 '+fmtBn(a.decidedAt):'')+(a.decidedBy?' · '+esc(a.decidedBy):'')+'</div>';
+      if (a.note) h += '<div style="font-size:11px;font-style:italic;color:var(--mt2);margin-top:2px">'+esc(a.note)+'</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+  h += '<button class="btn btn-gh btn-w" style="margin-top:12px" onclick="document.body.removeChild(document.getElementById(\'adv-person-modal\'))">বন্ধ করুন</button></div>';
+  modal.innerHTML = h;
+  document.body.appendChild(modal);
 }
-async function advReject(id) {
-  showOvl('বাতিল হচ্ছে...');
-  var r = await apiPost('/api/attendance?action=advance-reject', { id: id, approvedBy: S.userName || 'owner' });
+
+async function advDecide(id, act, enc) {
+  var approve = act === 'approve';
+  if (!confirm(approve ? 'এই অগ্রিম অনুমোদন করবেন? বেতন থেকে কেটে নেওয়া হবে।' : 'এই আবেদন বাতিল করবেন?')) return;
+  showOvl(approve ? 'অনুমোদন হচ্ছে...' : 'বাতিল হচ্ছে...');
+  var r = await apiPost('/api/attendance?action=advance-' + (approve ? 'approve' : 'reject'), { id: id, approvedBy: S.userName || 'owner' });
   hideOvl();
-  if (r && r.ok) { toast('❌ বাতিল হয়েছে'); await loadOwnerApprovals(); }
-  else toast((r&&r.error)||'ব্যর্থ');
+  if (!r || !r.ok) return toast((r&&r.error)||'ব্যর্থ');
+  toast(approve ? '✅ অনুমোদন হয়েছে' : '❌ বাতিল হয়েছে');
+  await loadOwnerApprovals();
+  openAdvPerson(enc);   // stay inside the same person's sheet
 }
 
 function renderOwnerApprovals() {
