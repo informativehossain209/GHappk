@@ -8145,7 +8145,7 @@ function _dailyReportSpec(row) {
     foot.push({ h: M.int(t.sold) + ' পিস' }); foot.push({ h: '' }); foot.push({ h: '৳' + M.money(t.amount), al: 'right' });
     blocks.push(M.T(cols, rows, foot, 'sm'));
   });
-  // ── due report (flows on; new page automatically when needed) ──
+  // ── due report on its own page ──
   blocks.push(M.kv('দৈনিক বকেয়া রিপোর্ট', [['SO-এর নাম:', '<b>' + esc(row.soName) + '</b>'], ['তারিখ (পর্যন্ত):', M.dmy(row.reportDate)]]));
   blocks.push(M.stats([['আজকের বকেয়া', '৳' + M.money(dd.todayTotal), 'w'], ['পূর্বের বকেয়া', '৳' + M.money(dd.prevTotal)], ['সর্বমোট বকেয়া (এই তারিখ পর্যন্ত)', '৳' + M.money(dd.grandTotal), 'd']]));
   var shops = dd.shops || [];
@@ -8681,7 +8681,7 @@ function _letterheadHtml() {
 
 // ══════════════════════════════════════════════════
 //  Unified A4 memo adapters — EVERY memo / challan / slip / report in the
-//  app is now produced by the shared MEMO engine (see <script id="memo-engine">).
+//  app is now produced by the shared MEMO engine (see the memo-engine block at the end of this file).
 //  One design, fixed A4, auto multi-page, Download PDF/JPG · Print · WhatsApp.
 // ══════════════════════════════════════════════════
 function _srPhone(name) { var x = (S.srs || []).find(function (q) { return q.name === name; }); return x ? (x.phone || '') : ''; }
@@ -10010,11 +10010,10 @@ window.onlineDepositSave=async function(){
                 MEMO.T / kv / stats / sec / note   (block helpers)
    ══════════════════════════════════════════════════════════════════ */
 (function () {
-  var PW = 794, PH = 1123, SCALE = 2.5;
+  var PW = 794, PH = 1123, SCALE = 3;
   var CFG = { bnDigits: false };            // true → ০১২৩ instead of 0123
   var LIB = {
     h2c: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-    pdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
     qr:  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js'
   };
   var FONT = 'https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700;800&display=swap';
@@ -10259,7 +10258,6 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
     }));
   }
   var needH2C = function () { return load('h2c', function () { return !!window.html2canvas; }); };
-  var needPDF = function () { return load('pdf', function () { return !!(window.jspdf && window.jspdf.jsPDF); }); };
   var needQR = function () { return load('qr', function () { return !!window.qrcode; }).catch(function () { }); };
 
   /* ── rasterisers ──────────────────────────────────────────────
@@ -10324,11 +10322,11 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
               if (!wantImages) { fr.remove(); return resolve(out); }
               var els = d.querySelectorAll('.mpg');
               fontEmbedCss().then(function (fcss) {
-                var i = 0, useH2C = false;
+                var i = 0, useH2C = false; out.renderer = 'native';
                 (function next() {
                   if (i >= els.length) { fr.remove(); return resolve(out); }
-                  var p = useH2C ? viaH2C(els[i]) : viaNative(els[i], fcss).catch(function () { useH2C = true; return viaH2C(els[i]); });
-                  p.then(function (cv) { out.imgs.push(cv.toDataURL('image/jpeg', 0.94)); i++; setTimeout(next, 0); }).catch(function (er) { fr.remove(); reject(er); });
+                  var p = useH2C ? viaH2C(els[i]) : viaNative(els[i], fcss).catch(function () { useH2C = true; out.renderer = 'fallback'; return viaH2C(els[i]); });
+                  p.then(function (cv) { out.imgs.push(cv.toDataURL('image/jpeg', 0.96)); i++; setTimeout(next, 0); }).catch(function (er) { fr.remove(); reject(er); });
                 })();
               });
             });
@@ -10339,9 +10337,42 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
     });
   }
 
+  /* ── tiny PDF writer: one A4 page per JPEG, no external library ── */
+  function makePdf(imgs) {
+    var enc = new TextEncoder(), parts = [], off = 0, xref = [];
+    function push(x) { var b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); off += b.length; }
+    function obj(n, head, stream) {
+      xref[n] = off; push(n + ' 0 obj\n' + head + (stream ? '\nstream\n' : '\n')); if (stream) { push(stream); push('\nendstream\n'); } push('endobj\n');
+    }
+    var N = imgs.length, W = Math.round(PW * SCALE), H = Math.round(PH * SCALE), kids = [], k;
+    push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    for (k = 0; k < N; k++) kids.push((3 + k * 3) + ' 0 R');
+    obj(2, '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + N + ' >>');
+    imgs.forEach(function (u, i) {
+      var bin = atob(u.split(',')[1]), jb = new Uint8Array(bin.length); for (var j = 0; j < bin.length; j++) jb[j] = bin.charCodeAt(j);
+      var pg = 3 + i * 3, ct = pg + 1, im = pg + 2, content = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q';
+      obj(pg, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ' + im + ' 0 R >> >> /Contents ' + ct + ' 0 R >>');
+      obj(ct, '<< /Length ' + content.length + ' >>', enc.encode(content));
+      obj(im, '<< /Type /XObject /Subtype /Image /Width ' + W + ' /Height ' + H + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jb.length + ' >>', jb);
+    });
+    var total = 3 + N * 3, start = off, x = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+    for (k = 1; k < total; k++) x += ('0000000000' + xref[k]).slice(-10) + ' 00000 n \n';
+    push(x + 'trailer\n<< /Size ' + total + ' /Root 1 0 R >>\nstartxref\n' + start + '\n%%EOF');
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+
   /* ── share panel ──────────────────────────────────────────── */
   function toastMsg(m) { if (typeof window.toast === 'function') window.toast(m); }
   function dl(href, name) { var a = document.createElement('a'); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+  function saveBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (ios) { window.open(url, '_blank'); }                       // iOS: opens viewer → Share ▸ Save to Files
+    else { var a = document.createElement('a'); a.href = url; a.download = name; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function dataToBlob(u) { var b = atob(u.split(',')[1]), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return new Blob([a], { type: 'image/jpeg' }); }
   function waNumber(p) { p = String(p || '').replace(/\D/g, ''); if (!p) return ''; if (p.indexOf('880') === 0) return p; if (p.charAt(0) === '0') return '88' + p; return p.length === 10 ? '880' + p : p; }
 
   function show(sp) {
@@ -10363,30 +10394,32 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
       var pv = document.getElementById('mm-pv'); pv.innerHTML = '';
       r.imgs.forEach(function (u, i) {
         var w = document.createElement('div'); w.style.cssText = 'margin:0 auto 12px;max-width:560px;position:relative';
-        w.innerHTML = '<img src="' + u + '" style="width:100%;display:block;background:#fff;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,.18)"><div style="font-size:10px;color:#64748b;margin-top:3px">পৃষ্ঠা ' + dg(i + 1) + ' / ' + dg(r.n) + '</div>';
+        w.innerHTML = '<img src="' + u + '" style="width:100%;display:block;background:#fff;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,.18)"><div style="font-size:10.5px;color:#64748b;margin-top:4px">পৃষ্ঠা ' + dg(i + 1) + ' / ' + dg(r.n) + ' &nbsp;·&nbsp; <a href="#" data-p="' + i + '" style="color:#0891b2;font-weight:700;text-decoration:none">⬇ এই পৃষ্ঠা JPG</a></div>';
+        w.querySelector('a').onclick = function (ev) { ev.preventDefault(); saveBlob(dataToBlob(u), file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg'); };
         pv.appendChild(w);
       });
       document.getElementById('mm-t').textContent = '✅ ' + sp.title + (sp.no ? ' — ' + sp.no : '');
-      document.getElementById('mm-s').textContent = 'A4 · ' + dg(r.n) + ' পৃষ্ঠা · হাই-কোয়ালিটি';
+      document.getElementById('mm-s').textContent = 'A4 · ' + dg(r.n) + ' পৃষ্ঠা · ' + (r.renderer === 'fallback' ? '⚠ এই ব্রাউজারে ছবি কম স্পষ্ট — সেরা মানের জন্য "প্রিন্ট" থেকে PDF সেভ করুন' : 'হাই-কোয়ালিটি (৩০০ dpi)');
       var ac = document.getElementById('mm-ac'); ac.style.display = 'grid';
       function btn(label, bg, fn, span) { var b = document.createElement('button'); b.innerHTML = label; b.style.cssText = 'padding:12px 6px;border:none;border-radius:10px;color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;background:' + bg + (span ? ';grid-column:1/3' : ''); b.onclick = function () { fn(b); }; ac.appendChild(b); return b; }
       var pdfBlob = null;
-      function getPdf() {
-        if (pdfBlob) return Promise.resolve(pdfBlob);
-        return needPDF().then(function () {
-          var pdf = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
-          r.imgs.forEach(function (u, i) { if (i) pdf.addPage(); pdf.addImage(u, 'JPEG', 0, 0, 210, 297, undefined, 'FAST'); });
-          pdfBlob = pdf.output('blob'); return pdfBlob;
-        });
-      }
+      function getPdf() { if (!pdfBlob) pdfBlob = makePdf(r.imgs); return Promise.resolve(pdfBlob); }
       function b64(blob) { return new Promise(function (res) { var f = new FileReader(); f.onload = function () { res(String(f.result).split(',')[1]); }; f.readAsDataURL(blob); }); }
       function busy(b, on) { b.disabled = on; b.style.opacity = on ? .6 : 1; }
-      btn('📄 PDF ডাউনলোড', '#065f46', function (b) { busy(b, true); getPdf().then(function (bl) { var u = URL.createObjectURL(bl); if (window.AndroidBridge && window.AndroidBridge.saveJpg && false) { } dl(u, file + '.pdf'); setTimeout(function () { URL.revokeObjectURL(u); }, 4000); }).catch(function () { toastMsg('PDF তৈরি ব্যর্থ — ইন্টারনেট চেক করুন'); }).then(function () { busy(b, false); }); });
+      btn('📄 PDF ডাউনলোড', '#065f46', function (b) {
+        busy(b, true);
+        getPdf().then(function (bl) {
+          if (window.AndroidBridge && window.AndroidBridge.savePdf) return b64(bl).then(function (s64) { window.AndroidBridge.savePdf(s64, file + '.pdf'); });
+          saveBlob(bl, file + '.pdf');
+        }).catch(function () { toastMsg('PDF তৈরি ব্যর্থ — "প্রিন্ট" বাটন থেকে PDF সেভ করুন'); }).then(function () { busy(b, false); });
+      });
       btn('🖼️ JPG ডাউনলোড', '#0891b2', function () {
         r.imgs.forEach(function (u, i) {
-          if (window.AndroidBridge && window.AndroidBridge.saveJpg) window.AndroidBridge.saveJpg(u.split(',')[1], file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg');
-          else setTimeout(function () { dl(u, file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg'); }, i * 350);
+          var nm = file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg';
+          if (window.AndroidBridge && window.AndroidBridge.saveJpg) window.AndroidBridge.saveJpg(u.split(',')[1], nm);
+          else setTimeout(function () { saveBlob(dataToBlob(u), nm); }, i * 700);
         });
+        if (r.n > 1) toastMsg(dg(r.n) + 'টি পৃষ্ঠা ডাউনলোড হচ্ছে — ব্রাউজার অনুমতি চাইলে "Allow" দিন');
       });
       btn('🖨️ প্রিন্ট (A4)', '#334155', function () {
         var f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
@@ -10417,7 +10450,6 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
       btn('📲 WhatsApp এ পাঠান', '#25D366', shareWA('com.whatsapp'));
       btn('💼 WA Business এ পাঠান', '#075E54', shareWA('com.whatsapp.w4b'));
       btn('✕ বন্ধ করুন', '#94a3b8', function () { ov.remove(); }, true);
-      setTimeout(needPDF, 50);                        // warm-up so PDF is instant on tap
     }).catch(function (er) {
       var pv = document.getElementById('mm-pv'); if (pv) pv.innerHTML = '<div style="padding:40px 14px;color:#b91c1c;font-size:13px">মেমো তৈরি ব্যর্থ: ' + e(er && er.message || er) + '<br><small>ইন্টারনেট সংযোগ চেক করে আবার চেষ্টা করুন</small></div>';
     });
