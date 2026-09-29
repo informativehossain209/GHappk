@@ -3988,16 +3988,31 @@ function _soTodaySale() {
   var list = ((S.soDashData||{}).todayProductSales)||[];
   var h='<div class="ct">📦 আজকের মোট বিক্রয়</div>';
   h+='<div class="card" style="padding:10px;margin-bottom:10px"><div class="ib" style="background:var(--bll);border-color:var(--bl)">'
-    +'আজ আপনার নামে যত পণ্য বিক্রি/সরবরাহ হয়েছে (DSR + পয়েন্ট সেল), বোনাস পিস বাদ দিয়ে প্রকৃত বিক্রয় সংখ্যা।</div></div>';
-  if (!list.length) { h+='<div class="card" style="padding:20px;color:var(--mt2);text-align:center">আজ এখনো কোনো বিক্রয় হয়নি</div>'; return h; }
-  h+='<div class="card" style="padding:0;overflow:hidden">';
+    +'আজ আপনার নামে যত পণ্য বিক্রি/সরবরাহ হয়েছে (DSR + পয়েন্ট সেল), বোনাস বাদে। ড্যামেজ বদলে দেওয়া পণ্যও এখানে বিক্রি হিসেবে দেখানো হয় (কোম্পানির হিসাবের সাথে মেলাতে) — <b>বদল</b> কলামে আলাদা করে দেওয়া আছে, আসল স্টক/বাকির হিসাবে এটি বিক্রি ধরা হয় না।</div></div>';
+  if (!list.length) { h+='<div class="card" style="padding:20px;color:var(--mt2);text-align:center">কোনো পণ্য পাওয়া যায়নি</div>'; return h; }
+  var tS=0,tE=0,tP=0;
+  h+='<div class="card" style="padding:0;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:340px">';
+  h+='<thead><tr style="background:var(--bll);text-align:right">'
+    +'<th style="text-align:left;padding:8px 10px">পণ্য</th>'
+    +'<th style="padding:8px 6px">গতকালের স্টক</th>'
+    +'<th style="padding:8px 6px">আজকের বিক্রয়</th>'
+    +'<th style="padding:8px 10px 8px 6px">বর্তমান স্টক</th></tr></thead><tbody>';
   list.forEach(function(p){
-    var ti=thumbImg(p,'8px');
-    h+='<div class="sku-row"><div class="sku-i">'+(ti||'📦')+'</div>';
-    h+='<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">'+esc(p.productName)+'</div></div>';
-    h+='<div style="text-align:right;font-size:15px;font-weight:800;color:var(--gr)">'+fn(p.sold)+' পিস</div></div>';
+    var sold=num(p.sold), ex=num(p.exchangeUnits);
+    tS+=sold; tE+=ex; tP+=num(p.prevStock);
+    var ti=thumbImg(p,'6px');
+    h+='<tr style="border-top:1px solid #E6ECE8'+(sold>0?'':';opacity:.65')+'">';
+    h+='<td style="padding:7px 10px"><div style="display:flex;align-items:center;gap:8px"><div class="sku-i" style="width:30px;height:30px;flex:none">'+(ti||'📦')+'</div>'
+      +'<div style="font-weight:700;min-width:0">'+esc(p.productName)+'</div></div></td>';
+    h+='<td style="padding:7px 6px;text-align:right;font-weight:700">'+fn(p.prevStock)+'</td>';
+    h+='<td style="padding:7px 6px;text-align:right;font-weight:800;color:'+(sold>0?'var(--gr)':'var(--mt2)')+'">'+fn(sold)
+      +(ex>0?'<div style="font-size:10px;font-weight:600;color:var(--or,#c27c00)">বদল '+fn(ex)+'</div>':'')+'</td>';
+    h+='<td style="padding:7px 10px 7px 6px;text-align:right;font-weight:800">'+fn(p.currentStock)+'</td></tr>';
   });
-  h+='</div>';
+  h+='</tbody><tfoot><tr style="border-top:2px solid var(--bl);font-weight:800;background:var(--bll)">'
+    +'<td style="padding:8px 10px">মোট</td><td style="padding:8px 6px;text-align:right">'+fn(tP)+'</td>'
+    +'<td style="padding:8px 6px;text-align:right">'+fn(tS)+(tE>0?'<div style="font-size:10px;font-weight:600">আসল '+fn(tS-tE)+'</div>':'')+'</td>'
+    +'<td style="padding:8px 10px 8px 6px;text-align:right">'+fn(list.reduce(function(a,p){return a+num(p.currentStock);},0))+'</td></tr></tfoot></table></div>';
   return h;
 }
 

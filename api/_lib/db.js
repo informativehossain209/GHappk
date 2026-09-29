@@ -471,10 +471,16 @@ function calcStock(allTx) {
   return m;
 }
 
+// Sign of a transaction for BONUS purposes (net pieces sold).
+function _bonusSign(type) {
+  return (type === 'give' || type === 'point_sale') ? 1
+       : (type === 'return' || type === 'point_damage_return') ? -1 : 0;
+}
+
 async function computeBonusSummary() {
   const [prodsRaw, txRaw, bonusRaw] = await Promise.all([
     fetchAll(() => supabase.from('products').select('*').order('created_at')),
-    fetchAll(() => supabase.from('transactions').select('tx_id,type,product_id,total_units,date').order('created_at')),
+    fetchAll(() => supabase.from('transactions').select('tx_id,type,product_id,total_units,date').in('type', ['give','return','point_sale','point_damage_return']).order('created_at')),
     fetchAll(() => supabase.from('bonus').select('*').order('created_at'))
   ]);
   const prods     = (prodsRaw || []).map(mapProduct);
@@ -486,8 +492,11 @@ async function computeBonusSummary() {
       .sort((a, b) => String(b.clearedDate).localeCompare(String(a.clearedDate)));
     const lastCleared = cleared.length > 0 ? String(cleared[0].clearedDate) : '';
     const fromDate    = lastCleared || '2000-01-01';
-    const txSince     = allTx.filter(r => String(r.productId) === String(p.id) && r.type === 'give' && ds(r.date) > fromDate);
-    const totalGiven  = txSince.reduce((s, r) => s + num(r.totalUnits), 0);
+    // Bonus is earned on NET pieces sold: give + point_sale − return −
+    // point_damage_return. (Gross 'give' alone over-paid bonus once the
+    // end-of-day settlement started returning unsold van stock.)
+    const txSince     = allTx.filter(r => String(r.productId) === String(p.id) && ds(r.date) > fromDate);
+    const totalGiven  = Math.max(0, txSince.reduce((s, r) => s + _bonusSign(r.type) * num(r.totalUnits), 0));
     const cs  = num(p.caseSize) || 1;
     const bcr = num(p.bonusCasesReq) || 1;
     const totalCases = Math.floor(totalGiven / cs);
@@ -520,16 +529,16 @@ async function computeBonusRangeSummary(from, to) {
   const [prodsRaw, txRaw] = await Promise.all([
     fetchAll(() => supabase.from('products').select('*').order('created_at')),
     fetchAll(() => supabase.from('transactions')
-      .select('product_id,total_units').eq('type', 'give').gte('date', from).lte('date', to))
+      .select('product_id,type,total_units').in('type', ['give','return','point_sale','point_damage_return']).gte('date', from).lte('date', to))
   ]);
   const prods = (prodsRaw || []).map(mapProduct);
   const givenMap = {};
   (txRaw || []).forEach(r => {
     const pid = String(r.product_id || ''); if (!pid) return;
-    givenMap[pid] = (givenMap[pid] || 0) + num(r.total_units);
+    givenMap[pid] = (givenMap[pid] || 0) + _bonusSign(r.type) * num(r.total_units);
   });
   return prods.filter(p => num(p.bonusFreeUnits) > 0 || num(p.bonusFreeMoney) > 0).map(p => {
-    const totalGiven = givenMap[p.id] || 0;
+    const totalGiven = Math.max(0, givenMap[p.id] || 0);
     const cs  = num(p.caseSize) || 1;
     const bcr = num(p.bonusCasesReq) || 1;
     const totalCases  = Math.floor(totalGiven / cs);
@@ -680,5 +689,5 @@ module.exports = {
   calcStock, computeBonusSummary, computeBonusRangeSummary,
   bdtDateStr, bdtToday, addDaysStr, bdtYesterday, weekdayOf,
   cyclePeriodBounds, cyclePeriodForDate, cyclePeriodToday, cyclePeriodDates,
-  computeVanStock, applyDuePayment
+  computeVanStock, applyDuePayment, _bonusSign
 };

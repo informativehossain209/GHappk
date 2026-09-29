@@ -344,12 +344,15 @@ module.exports = async (req, res) => {
 
     // Paginated: a wide owner-picked range (e.g. a full month/year report)
     // can pass 1000 transaction rows well within the business's first year.
-    const [txRows, payRows, srRes, prodRes, dueTotals] = await Promise.all([
+    const [txRows, payRows, srRes, prodRes, dueTotals, claimRows] = await Promise.all([
       fetchAll(() => supabase.from('transactions').select('*').gte('date', from).lte('date', to).order('date')),
       fetchAll(() => supabase.from('sr_payments').select('*').gte('date', from).lte('date', to).order('date')),
       supabase.from('srs').select('*').order('created_at'),
       supabase.from('products').select('*').order('sort_order').order('created_at'),
-      computePeriodDueTotals(from, to)
+      computePeriodDueTotals(from, to),
+      // Every damage claim in the window — van damage AND damage-collection
+      // (tx_id 'dc:…') — the complete company loss, purchase-price based.
+      fetchAll(() => supabase.from('dmg_claims').select('total_units,total_cost').gte('date', from).lte('date', to))
     ]);
 
     const txs   = (txRows  || []).map(mapTx);
@@ -371,13 +374,17 @@ module.exports = async (req, res) => {
     const gU  = sU(txs,'give')+sU(txs,'point_sale'), rtU = sU(txs,'return')+sU(txs,'point_damage_return'), dmgU = sU(txs,'damage'), byU = sU(txs,'buy');
     const gR  = sR(txs,'give')+sR(txs,'point_sale'), rtR = sR(txs,'return')+sR(txs,'point_damage_return');
     const gC  = sC(txs,'give')+sC(txs,'point_sale'), rtC = sC(txs,'return')+sC(txs,'point_damage_return'), dmgC = sC(txs,'damage');
+    // Complete damage loss = all claims (van damage + shop damage collection).
+    const claimUnits = (claimRows || []).reduce((a, r) => a + num(r.total_units), 0);
+    const claimCost  = (claimRows || []).reduce((a, r) => a + num(r.total_cost), 0);
     const netRev  = gR - rtR, netCost = gC - rtC;
     const totalPay = pays.reduce((s, r) => s + num(r.amount), 0);
 
     const totals = {
       givenUnits: gU, returnUnits: rtU, dmgUnits: dmgU, buyUnits: byU,
-      soldUnits: gU - rtU, netRevenue: netRev, netCost,
-      grossProfit: netRev - netCost, dmgLoss: dmgC, payments: totalPay,
+      // sold = given − returned − damaged (same rule as the SR / product rows)
+      soldUnits: gU - rtU - dmgU, netRevenue: netRev, netCost,
+      grossProfit: netRev - netCost, dmgLoss: claimCost, dmgClaimUnits: claimUnits, payments: totalPay,
       // Update #43 — two due figures: this period's own due, and the
       // running cumulative due outstanding as of the period's end date.
       periodDue: dueTotals.periodDue, cumulativeDue: dueTotals.cumulativeDue

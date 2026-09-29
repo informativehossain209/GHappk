@@ -2,7 +2,7 @@ const {
   supabase, cors, num, ds,
   mapProduct, mapSR, mapTx, mapPayment, mapDmg, mapBonus,
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf,
-  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals
+  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals, _bonusSign
 } = require('./_lib/db');
 
 // V41 update 7 — every "this month" figure on the dashboard is scoped to
@@ -339,16 +339,57 @@ module.exports = async (req, res) => {
       // Reduce each product's raw today-total by that day's earned bonus
       // pieces (same floor-division formula used everywhere else bonus is
       // calculated); only the net number goes to the client as `sold`.
-      const todayProductSales = Object.values(todayProdMap)
-        .map(p => {
-          const raw = p.sold;
-          const bp = productBonusMap[p.productId] || { caseSize: 1, bonusCasesReq: 1, bonusFreeUnits: 0 };
-          const cases = Math.floor(raw / bp.caseSize);
-          const bonusPieces = Math.floor(cases / bp.bonusCasesReq) * bp.bonusFreeUnits;
-          return { productId: p.productId, productName: p.productName, thumb: p.thumb, sold: raw - bonusPieces };
-        })
-        .filter(p => p.sold > 0)
-        .sort((a, b) => b.sold - a.sold);
+      const soldNetMap = {};
+      Object.values(todayProdMap).forEach(p => {
+        const raw = p.sold;
+        const bp = productBonusMap[p.productId] || { caseSize: 1, bonusCasesReq: 1, bonusFreeUnits: 0 };
+        const cases = Math.floor(raw / bp.caseSize);
+        const bonusPieces = Math.floor(cases / bp.bonusCasesReq) * bp.bonusFreeUnits;
+        soldNetMap[p.productId] = Math.max(0, raw - bonusPieces);
+      });
+
+      // ── Damage swapped for PRODUCT today (display-only, company match) ──
+      // A replacement pack handed to a shop leaves the van and is never
+      // returned, so it is already inside give − return above: the SO
+      // panel therefore shows it as a sale, exactly like the company
+      // profile. It is NOT real revenue, so we also report it separately
+      // (`exchangeUnits`) and the "pure" sale = shown sale − exchange.
+      // Stock and DSR due are untouched by this figure.
+      const exchMap = {};
+      if (dsrIds.length) {
+        const exchRows = await fetchAll(() => supabase.from('damage_collections')
+          .select('exch_product_id,exch_units').in('dsr_id', dsrIds.map(String)).eq('date', today).eq('resolution', 'exchange'));
+        (exchRows || []).forEach(r => {
+          const k = String(r.exch_product_id || ''); if (!k) return;
+          exchMap[k] = (exchMap[k] || 0) + num(r.exch_units);
+        });
+      }
+
+      // ── Stock columns for the SO "আজকের মোট বিক্রয়" table ──
+      // Warehouse stock is global, so "yesterday's closing stock" is the
+      // live stock with today's warehouse movement (all users) reversed.
+      // Movement signs mirror the apply_stock_delta trigger in schema.sql.
+      const STOCK_SIGN = { buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1, return_company: -1 };
+      const dayMoveRows = await fetchAll(() => supabase.from('transactions')
+        .select('product_id,type,total_units').eq('date', today).in('type', Object.keys(STOCK_SIGN)));
+      const dayMove = {};
+      (dayMoveRows || []).forEach(r => {
+        const k = String(r.product_id || ''); if (!k) return;
+        dayMove[k] = (dayMove[k] || 0) + STOCK_SIGN[r.type] * num(r.total_units);
+      });
+
+      // ALL SKUs, zero when nothing sold today (sold desc, then catalogue order).
+      const todayProductSales = products.map((p, idx) => {
+        const pid = String(p.id);
+        const shown = soldNetMap[pid] || 0;
+        const exch = Math.min(exchMap[pid] || 0, shown);
+        const cur = num(p.currentStock);
+        return {
+          productId: p.id, productName: p.name || '', thumb: p.thumb || '', sold: shown,
+          exchangeUnits: exch, pureSold: shown - exch,
+          prevStock: +(cur - (dayMove[pid] || 0)).toFixed(4), currentStock: cur, _i: idx
+        };
+      }).sort((a, b) => (b.sold - a.sold) || (a._i - b._i)).map(x => { delete x._i; return x; });
 
       return res.json({
         ok: true,
@@ -423,12 +464,15 @@ module.exports = async (req, res) => {
       const givenTodayRev   = txMonth.filter(r => r.type === 'give'     && r.date === today).reduce((s, r) => s + num(r.totalRevenue), 0);
       const returnTodayRev  = txMonth.filter(r => r.type === 'return'   && r.date === today).reduce((s, r) => s + num(r.totalRevenue), 0);
       const damageTodayCost = txMonth.filter(r => r.type === 'damage'   && r.date === today).reduce((s, r) => s + num(r.totalCost), 0);
+      // Same price basis as given/return/sold (SELLING price). The old
+      // formula subtracted the purchase-price cost here — mixed bases.
+      const damageTodayRev  = txMonth.filter(r => r.type === 'damage'   && r.date === today).reduce((s, r) => s + num(r.totalRevenue), 0);
       const { data: shopDueTodayData } = await supabase.from('due_calendar')
         .select('amount,paid_amount').eq('dsr_id', userId).eq('client_type', 'shop').eq('due_date', today);
       const shopDueToday        = shopDueTodayData || [];
       const cashCollectedToday  = shopDueToday.reduce((s, r) => s + num(r.paid_amount), 0);
       const shopDueCreatedToday = shopDueToday.reduce((s, r) => s + (num(r.amount) - num(r.paid_amount)), 0);
-      const stillWithDsrToday   = givenTodayRev - returnTodayRev - damageTodayCost - dsrSaleToday;
+      const stillWithDsrToday   = givenTodayRev - returnTodayRev - damageTodayRev - dsrSaleToday;
 
       // V56 §4 — "you're due at [road] today" (day 2: paired DSR
       // delivers, always the day AFTER the SO's visit — unchanged rule).
@@ -513,7 +557,7 @@ module.exports = async (req, res) => {
     });
     const txAll = _bonusProds.length
       ? await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units,date')
-          .eq('type', 'give').gt('date', _bonusFrom).in('product_id', _bonusProds.map(p => String(p.id))).order('date'))
+          .in('type', ['give','return','point_sale','point_damage_return']).gt('date', _bonusFrom).in('product_id', _bonusProds.map(p => String(p.id))).order('date'))
       : [];
 
     // ── Stock map — straight from products.current_stock, no full
@@ -599,8 +643,8 @@ module.exports = async (req, res) => {
         .sort((a,b)=>String(b.clearedDate).localeCompare(String(a.clearedDate)));
       const lastCleared = cleared.length>0?String(cleared[0].clearedDate):'';
       const fromDate = lastCleared||'2000-01-01';
-      const txSince = txAll.filter(r=>String(r.product_id)===String(p.id)&&r.type==='give'&&ds(r.date)>fromDate);
-      const totalGiven = txSince.reduce((s,r)=>s+num(r.total_units),0);
+      const txSince = txAll.filter(r=>String(r.product_id)===String(p.id)&&ds(r.date)>fromDate);
+      const totalGiven = Math.max(0, txSince.reduce((s,r)=>s+_bonusSign(r.type)*num(r.total_units),0));
       const cs = num(p.caseSize)||1, bcr = num(p.bonusCasesReq)||1;
       const totalCases = Math.floor(totalGiven/cs);
       const accUnits = Math.floor(totalCases/bcr)*num(p.bonusFreeUnits);
