@@ -12,7 +12,7 @@
 // no manual action required, per update #14.
 const {
   supabase, cors, num, now_, mapDmg, safeErr,
-  cyclePeriodBounds, cyclePeriodToday, computeBonusRangeSummary
+  cyclePeriodBounds, cyclePeriodToday, computeBonusRangeSummary, fetchAll
 } = require('./_lib/db');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -78,7 +78,7 @@ async function handleDamage(req, res) {
   if (req.method === 'GET') {
     const { from, to } = _resolveRange(req);
     const [dmgRes, prodRes] = await Promise.all([
-      supabase.from('dmg_claims').select('*').gte('date', from).lte('date', to).order('date'),
+      fetchAll(() => supabase.from('dmg_claims').select('*').gte('date', from).lte('date', to).order('date')).then(d => ({ data: d, error: null })),
       // Update #46 — case_size pulled alongside thumb so the Monthly
       // Damage Report can print "X কেস Y পিস" per SKU, not just a raw
       // piece total, matching the case+piece rule used everywhere else.

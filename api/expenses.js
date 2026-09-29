@@ -1,6 +1,6 @@
 const {
   supabase, cors, num, ds, now_, today, mapExpCat, mapExpRecord, mapDue, mapChatMsg, safeErr,
-  cyclePeriodForDate, cyclePeriodBounds, bdtToday
+  cyclePeriodForDate, cyclePeriodBounds, bdtToday, fetchAll
 } = require('./_lib/db');
 
 module.exports = async (req, res) => {
@@ -75,10 +75,17 @@ module.exports = async (req, res) => {
     // ── Due Calendar ───────────────────────────────
     if (req.method === 'GET' && action === 'dues') {
       const { month } = req.query;
-      let q = supabase.from('due_calendar').select('*').order('due_date');
-      if (month) q = q.gte('due_date', month+'-01').lte('due_date', month+'-31');
-      const { data, error } = await q;
-      if (error) throw error;
+      // fetchAll (1000-row cap) + a real last-day-of-month (the old
+      // month+'-31' is an invalid date for Feb/Apr/Jun/Sep/Nov).
+      const data = await fetchAll(() => {
+        let q = supabase.from('due_calendar').select('*').order('due_date');
+        if (month) {
+          const [cy, cm] = month.split('-').map(Number);
+          const last = new Date(Date.UTC(cy, cm, 0)).getUTCDate();
+          q = q.gte('due_date', month+'-01').lte('due_date', month+'-'+String(last).padStart(2,'0'));
+        }
+        return q;
+      });
       return res.json({ ok: true, dues: (data||[]).map(mapDue) });
     }
     if (req.method === 'POST' && action === 'due') {
@@ -102,12 +109,12 @@ module.exports = async (req, res) => {
     // ── Payment Breakdown Report (with damage_amt) ──
     if (req.method === 'GET' && action === 'pay-report') {
       const { from, to } = req.query;
-      let q = supabase.from('sr_payments').select('*').order('date');
-      if (from) q = q.gte('date', from);
-      if (to)   q = q.lte('date', to);
-      const { data, error } = await q;
-      if (error) throw error;
-      const rows = data || [];
+      const rows = await fetchAll(() => {
+        let q = supabase.from('sr_payments').select('*').order('date');
+        if (from) q = q.gte('date', from);
+        if (to)   q = q.lte('date', to);
+        return q;
+      });
       const totalCash = rows.reduce((s,r)=>s+num(r.cash_amount),0);
       const totalComm = rows.reduce((s,r)=>s+num(r.commission_amt),0);
       const totalDisc = rows.reduce((s,r)=>s+num(r.discount_amt),0);

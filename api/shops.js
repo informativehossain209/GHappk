@@ -30,7 +30,12 @@ async function _verifyOwnerPin(pin) {
 async function _isDuplicateShopName(name, excludeId) {
   const needle = String(name || '').trim().toLowerCase();
   if (!needle) return false;
-  const { data, error } = await supabase.from('shops').select('id,name');
+  // Was a bare `select('id,name')` of the WHOLE shops table — silently capped
+  // at 1000 rows, so with 1000+ shops a duplicate name past row 1000 slipped
+  // through. Now asks the database only for names containing this text
+  // (a tiny result set), then does the exact trimmed/case-insensitive match.
+  const esc = needle.replace(/[\\%_,()]/g, ' ').replace(/\s+/g, ' ').trim();
+  const { data, error } = await supabase.from('shops').select('id,name').ilike('name', '%' + esc + '%').limit(500);
   if (error) throw error;
   return (data || []).some(s => String(s.id) !== String(excludeId || '') && String(s.name || '').trim().toLowerCase() === needle);
 }
@@ -173,20 +178,30 @@ module.exports = async (req, res) => {
     // ══════════════════════════════════════════════════
     if (req.method === 'GET' && (action === 'list' || action === 'search')) {
       const { q, dsrId, roadId, lat, lng, limit } = req.query;
-      let query = supabase.from('shops').select('*').order('created_at', { ascending: false });
-      if (dsrId) query = query.eq('assigned_dsr_id', dsrId);
-      if (roadId) query = query.eq('road_id', roadId);
-      const { data, error } = await query;
-      if (error) throw error;
+      // fetchAll — PostgREST silently returns only the first 1000 rows of a
+      // bare query, which is why the owner (who sees ALL shops) stopped
+      // seeing shops after 1000, while DSR/SO views (filtered to a subset
+      // under 1000) looked fine.
+      const data = await fetchAll(() => {
+        let query = supabase.from('shops').select('*').order('created_at', { ascending: false });
+        if (dsrId) query = query.eq('assigned_dsr_id', dsrId);
+        if (roadId) query = query.eq('road_id', roadId);
+        return query;
+      });
       let shops = (data || []).map(mapShop);
 
-      // Attach each shop's outstanding due total (§11/§20 — "see due status")
+      // Attach each shop's outstanding due total (§11/§20 — "see due status").
+      // The old code sent every shop id in one `.in('shop_id', [...1000s of
+      // ids])` request (a URL far too long for PostgREST) and again got cut
+      // at 1000 rows. Now: read the open shop-dues once (paginated, unfiltered
+      // by id list) and total them per shop in memory.
       if (shops.length) {
-        const ids = shops.map(s => s.id);
-        const { data: dueRows, error: dueErr } = await supabase
-          .from('due_calendar').select('shop_id,amount,paid_amount,status')
-          .in('shop_id', ids).neq('status', 'cleared');
-        if (dueErr) throw dueErr;
+        const dueRows = await fetchAll(() => {
+          let dq = supabase.from('due_calendar').select('shop_id,amount,paid_amount,status')
+            .eq('client_type', 'shop').neq('status', 'cleared');
+          if (dsrId) dq = dq.eq('dsr_id', dsrId);
+          return dq;
+        });
         const dueMap = {};
         (dueRows || []).forEach(r => {
           const sid = String(r.shop_id || '');
@@ -399,18 +414,16 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'visit-log-list') {
       const { date, roadId } = req.query;
       const d = date || bdtToday();
-      let shopIds = null;
+      // Today's visits are few; filter by road in memory instead of putting
+      // every shop id of the road into one giant `.in()` URL.
+      const data = await fetchAll(() => supabase.from('shop_visits').select('*').eq('visit_date', d));
+      let visitRows = data || [];
       if (roadId) {
-        const { data: roadShops, error: rsErr } = await supabase.from('shops').select('id').eq('road_id', roadId);
-        if (rsErr) throw rsErr;
-        shopIds = (roadShops || []).map(s => s.id);
-        if (!shopIds.length) return res.json({ ok: true, visits: [] });
+        const roadShops = await fetchAll(() => supabase.from('shops').select('id').eq('road_id', roadId));
+        const set = new Set((roadShops || []).map(s => String(s.id)));
+        visitRows = visitRows.filter(v => set.has(String(v.shop_id)));
       }
-      let q = supabase.from('shop_visits').select('*').eq('visit_date', d);
-      if (shopIds) q = q.in('shop_id', shopIds);
-      const { data, error } = await q;
-      if (error) throw error;
-      return res.json({ ok: true, visits: (data || []).map(mapShopVisit) });
+      return res.json({ ok: true, visits: visitRows.map(mapShopVisit) });
     }
 
     // ══════════════════════════════════════════════════

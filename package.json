@@ -1,6 +1,6 @@
 {
   "name": "axiion-stock-management",
-  "version": "4.8.1",
+  "version": "4.9.0",
   "description": "AXIION স্টক ও সেলস ম্যানেজমেন্ট সিস্টেম — Developed by AXIION TECHNOLOGY",
   "private": true,
   "dependencies": {

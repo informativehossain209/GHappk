@@ -832,14 +832,30 @@ body.dark .smi.active{background:rgba(255,255,255,.2)!important}
 // ════════════════════════════════════════════════════
 //  API HELPER — replaces google.script.run
 // ════════════════════════════════════════════════════
+// Identical GET requests fired at the same moment (several widgets asking
+// for the same dashboard/shops data while one screen is opening) share ONE
+// network call instead of each hitting the server + database separately.
+// Only concurrent duplicates are merged — every later call is a fresh fetch,
+// so figures (DU, stock, payments) are never served stale.
+var _inflightGets = {};
 async function apiFetch(url, opts) {
-  try {
-    var options = Object.assign({ headers: {'Content-Type':'application/json'} }, opts || {});
-    var res = await fetch(url, options);
-    return await res.json();
-  } catch(e) {
-    return { ok: false, error: e.message };
+  var isGet = !opts || !opts.method || String(opts.method).toUpperCase() === 'GET';
+  if (isGet && _inflightGets[url]) return _inflightGets[url];
+  var p = (async function() {
+    try {
+      var options = Object.assign({ headers: {'Content-Type':'application/json'} }, opts || {});
+      var res = await fetch(url, options);
+      return await res.json();
+    } catch(e) {
+      return { ok: false, error: e.message };
+    }
+  })();
+  if (isGet) {
+    _inflightGets[url] = p;
+    var done = function() { delete _inflightGets[url]; };
+    p.then(done, done);
   }
+  return p;
 }
 function apiGet(url) { return apiFetch(url); }
 function apiPost(url, data) { return apiFetch(url, { method:'POST', body: JSON.stringify(data) }); }
@@ -4432,6 +4448,7 @@ async function _shopsMapSearch() {
     shops = shops.filter(function(s){ return idSet[s.assignedDsrId]; });
   }
   S.shopsList = shops;
+  S.shopsLimit = 200;
   var countEl = document.getElementById('shmap-count'); if (countEl) countEl.textContent = '('+shops.length+'টি)';
   _paintShopsList(shops);
 }
@@ -4440,7 +4457,9 @@ function _paintShopsList(shops) {
   var el = document.getElementById('shmap-list'); if (!el) return;
   if (!shops.length) { el.innerHTML = '<div class="card" style="text-align:center;padding:24px;color:var(--mt2)">কোনো শপ পাওয়া যায়নি</div>'; return; }
   var h = '';
-  shops.forEach(function(s) {
+  // Painting 1000+ rows at once freezes phones — show 200 at a time.
+  var _lim = S.shopsLimit || 200;
+  shops.slice(0, _lim).forEach(function(s) {
     h += '<div class="sku-row" style="cursor:pointer" onclick="_openShopDetail(\''+s.id+'\')">';
     h += '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">'+esc(s.name)+' <span style="font-size:10px;color:var(--mt2)">('+esc(s.shopNo)+')</span></div>';
     h += '<div style="font-size:11px;color:var(--mt2)">🚚 '+esc(s.assignedDsrName||'—')+(s.address?' · '+esc(s.address):'')+'</div></div>';
@@ -4448,6 +4467,7 @@ function _paintShopsList(shops) {
     else h += '<div style="font-size:11px;color:var(--gr)">✓ বাকি নেই</div>';
     h += '</div>';
   });
+  if (shops.length > _lim) h += '<button class="btn btn-bl btn-w btn-sm" style="margin-top:8px" onclick="S.shopsLimit=(S.shopsLimit||200)+300;_paintShopsList(S.shopsList||[])">আরও দেখান ('+(shops.length-_lim)+'টি বাকি)</button>';
   el.innerHTML = h;
 }
 
@@ -4736,7 +4756,8 @@ function _paintDsrShopList() {
       h += '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">কোনো দোকান পাওয়া যায়নি</div>';
     } else {
       h += '<div class="card" style="padding:0;overflow:hidden">';
-      list.forEach(function(s) { h += _dsrShopRowHtml(s); });
+      list.slice(0, 150).forEach(function(s) { h += _dsrShopRowHtml(s); });
+      if (list.length > 150) h += '<div style="text-align:center;font-size:11px;color:var(--mt2);padding:8px">আরও '+(list.length-150)+'টি আছে — নাম/ফোন লিখে খুঁজুন</div>';
       h += '</div>';
     }
   }

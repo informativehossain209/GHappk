@@ -21,16 +21,40 @@ function cors(res) {
 // each call (so `.range()` can be re-applied per page) — not an
 // already-built/awaited query object.
 const FETCH_ALL_PAGE_SIZE = 1000;
-async function fetchAll(queryFactory) {
-  let from = 0;
-  let all = [];
-  while (true) {
-    const { data, error } = await queryFactory().range(from, from + FETCH_ALL_PAGE_SIZE - 1);
+const FETCH_ALL_PARALLEL  = 4;   // pages fetched concurrently (speed)
+// IMPORTANT (DU-mismatch fix): range() pagination is only correct when the
+// ORDER BY is a total order. Callers order by created_at / date, which are
+// NOT unique (a whole batch of rows shares one timestamp; hundreds of
+// payments share one date) — Postgres then returns tied rows in arbitrary
+// order per request, so a row can be skipped or repeated at a page
+// boundary and lifetime sums (DSR due, stock, bonus) come out slightly
+// wrong — and differently on every refresh. Appending the primary key as a
+// final tiebreaker makes every page deterministic. Pass opts.tiebreak =
+// false / another column for a table that has no `id` column.
+async function fetchAll(queryFactory, opts) {
+  const tie = (opts && opts.tiebreak !== undefined) ? opts.tiebreak : 'id';
+  const page = async (i) => {
+    let q = queryFactory();
+    if (tie) q = q.order(tie, { ascending: true });
+    const from = i * FETCH_ALL_PAGE_SIZE;
+    const { data, error } = await q.range(from, from + FETCH_ALL_PAGE_SIZE - 1);
     if (error) throw error;
-    const rows = data || [];
-    all = all.concat(rows);
-    if (rows.length < FETCH_ALL_PAGE_SIZE) break;
-    from += FETCH_ALL_PAGE_SIZE;
+    return data || [];
+  };
+  let all = [];
+  let i = 0;
+  while (true) {
+    // Fire a batch of pages in parallel instead of one-after-another —
+    // a 5,000-row table now costs ~2 round trips instead of 5.
+    const idx = Array.from({ length: FETCH_ALL_PARALLEL }, (_, k) => i + k);
+    const pages = await Promise.all(idx.map(page));
+    let done = false;
+    for (const rows of pages) {
+      all = all.concat(rows);
+      if (rows.length < FETCH_ALL_PAGE_SIZE) { done = true; break; }
+    }
+    if (done) break;
+    i += FETCH_ALL_PARALLEL;
   }
   return all;
 }
@@ -593,8 +617,63 @@ async function applyDuePayment(dueId, pay, meta) {
   return { applied, paidAmount: newPaid, remaining: Math.max(0, remaining), status };
 }
 
+
+// ══════════════════════════════════════════════════════════════════════
+//  LIFETIME DUE TOTALS — ONE source of truth for every panel
+// ══════════════════════════════════════════════════════════════════════
+// due = (Σ give revenue − Σ return revenue) − Σ payments, per DSR/SO.
+// Previously each dashboard (Owner / Manager / SO / DSR) pulled the WHOLE
+// transactions + sr_payments history into Node and summed it there, and
+// some of those payment reads were not paginated — so the same DSR showed
+// a different DU depending on which panel asked. Now every panel calls
+// this. When the `dsr_due_totals` SQL function exists the
+// sums are done inside Postgres in one tiny query (fast, exact, no 1000-row
+// cap possible); if it isn't installed yet it falls back to the paginated
+// JS path, which gives the identical numbers, just slower.
+// Returns { [srId]: { givenRev, returnRev, givenUnits, returnUnits, payments } }
+async function getDueTotals(srIds) {
+  const ids = Array.isArray(srIds) ? srIds.map(String).filter(Boolean) : null;
+  if (ids && !ids.length) return {};
+  const out = {};
+  const slot = (sid) => (out[sid] = out[sid] || { givenRev: 0, returnRev: 0, givenUnits: 0, returnUnits: 0, payments: 0 });
+  try {
+    const { data, error } = await supabase.rpc('dsr_due_totals', { p_sr_ids: ids });
+    if (error) throw error;
+    (data || []).forEach(r => {
+      const sid = String(r.sr_id || ''); if (!sid) return;
+      const o = slot(sid);
+      o.givenRev = num(r.given_rev); o.returnRev = num(r.return_rev);
+      o.givenUnits = num(r.given_units); o.returnUnits = num(r.return_units);
+      o.payments = num(r.paid);
+    });
+    return out;
+  } catch (e) {
+    // fall through to the slower, still-correct paginated path
+  }
+  const [tx, pay] = await Promise.all([
+    fetchAll(() => {
+      let q = supabase.from('transactions').select('type,sr_id,total_units,total_revenue').in('type', ['give', 'return']);
+      if (ids) q = q.in('sr_id', ids);
+      return q;
+    }),
+    fetchAll(() => {
+      let q = supabase.from('sr_payments').select('sr_id,amount');
+      if (ids) q = q.in('sr_id', ids);
+      return q;
+    })
+  ]);
+  tx.forEach(r => {
+    const sid = String(r.sr_id || ''); if (!sid) return;
+    const o = slot(sid);
+    if (r.type === 'give')   { o.givenRev += num(r.total_revenue);  o.givenUnits += num(r.total_units); }
+    if (r.type === 'return') { o.returnRev += num(r.total_revenue); o.returnUnits += num(r.total_units); }
+  });
+  pay.forEach(r => { const sid = String(r.sr_id || ''); if (sid) slot(sid).payments += num(r.amount); });
+  return out;
+}
+
 module.exports = {
-  supabase, cors, num, ds, today, now_, str, safeErr, fetchAll,
+  supabase, getDueTotals, cors, num, ds, today, now_, str, safeErr, fetchAll,
   mapProduct, mapSR, mapTx, mapDmg, mapBonus, mapPayment,
   mapExpCat, mapExpRecord, mapDue, mapChatMsg, mapShop, mapOrder,
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, mapShopVisit, mapPosCustomer,

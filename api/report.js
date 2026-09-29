@@ -24,11 +24,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // V47 update #40: productMetaMap now carries caseSize alongside unitType
 // so the frontend can render "X কেস Y পিস" instead of a raw piece count.
 async function buildRouteChallan(routeId, routeName, routePhone, routeArea, reportDate, productMetaMap, routeRoadName) {
-  const { data, error } = await supabase.from('transactions').select('*')
+  const data = await fetchAll(() => supabase.from('transactions').select('*')
     .eq('sr_id', routeId).eq('date', reportDate)
     .in('type', ['give', 'return', 'damage'])
-    .order('created_at', { ascending: true });
-  if (error) throw error;
+    .order('created_at', { ascending: true }));
   const rows = (data || []).map(mapTx);
 
   // Group 'give' rows into load batches by tx_id — every van-load-finish
@@ -98,9 +97,8 @@ async function buildRouteChallan(routeId, routeName, routePhone, routeArea, repo
 // Companion Due Report — today's due, previous carried-over due, and a
 // shop-wise breakdown, scoped to an SO + every DSR assigned to it.
 async function buildDueReportData(soId, reportDate, allIds) {
-  const { data, error } = await supabase.from('due_calendar').select('*')
-    .in('dsr_id', allIds).eq('client_type', 'shop');
-  if (error) throw error;
+  const data = await fetchAll(() => supabase.from('due_calendar').select('*')
+    .in('dsr_id', allIds).eq('client_type', 'shop'));
   const rows = (data || []).map(mapDue);
 
   let todayTotal = 0, prevTotal = 0;

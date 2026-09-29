@@ -671,12 +671,13 @@ module.exports = async (req, res) => {
 
     if (req.method === 'GET') {
       const { srId, from, to } = req.query;
-      let q = supabase.from('sr_payments').select('*').order('created_at');
-      if (srId) q = q.eq('sr_id', srId);
-      if (from) q = q.gte('date', from);
-      if (to)   q = q.lte('date', to);
-      const { data, error } = await q;
-      if (error) throw error;
+      const data = await fetchAll(() => {
+        let q = supabase.from('sr_payments').select('*').order('created_at');
+        if (srId) q = q.eq('sr_id', srId);
+        if (from) q = q.gte('date', from);
+        if (to)   q = q.lte('date', to);
+        return q;
+      });
       return res.json((data || []).map(mapPayment));
     }
 

@@ -1,4 +1,4 @@
-const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment } = require('./_lib/db');
+const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment, fetchAll } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 
 // Merged with the former api/settings.js (app-wide shop-name setting) to
@@ -50,19 +50,22 @@ module.exports = async (req, res) => {
     // GET — fetch dues filtered by month and/or dsrId
     if (req.method === 'GET') {
       const { month, dsrId, shopId } = req.query;
-      let q = supabase.from('due_calendar').select('*').order('due_date');
-      if (month) {
-        const [calY, calM] = month.split('-').map(Number);
-        const lastDay  = new Date(calY, calM, 0).getDate();
-        const lastDate = month + '-' + String(lastDay).padStart(2, '0');
-        q = q.gte('due_date', month + '-01').lte('due_date', lastDate);
-      }
-      // dsrId filter: DSR or SO can only see their own calendar dues
-      if (dsrId) q = q.eq('dsr_id', dsrId);
-      // shopId filter: pull a single shop's due history (used by shops.js detail view)
-      if (shopId) q = q.eq('shop_id', shopId);
-      const { data, error } = await q;
-      if (error) throw error;
+      // fetchAll: a busy month (or an all-time per-DSR/shop history) can
+      // pass PostgREST's silent 1000-row cap.
+      const data = await fetchAll(() => {
+        let q = supabase.from('due_calendar').select('*').order('due_date');
+        if (month) {
+          const [calY, calM] = month.split('-').map(Number);
+          const lastDay  = new Date(calY, calM, 0).getDate();
+          const lastDate = month + '-' + String(lastDay).padStart(2, '0');
+          q = q.gte('due_date', month + '-01').lte('due_date', lastDate);
+        }
+        // dsrId filter: DSR or SO can only see their own calendar dues
+        if (dsrId) q = q.eq('dsr_id', dsrId);
+        // shopId filter: pull a single shop's due history (used by shops.js detail view)
+        if (shopId) q = q.eq('shop_id', shopId);
+        return q;
+      });
       return res.json({ ok: true, dues: (data || []).map(mapDue) });
     }
 

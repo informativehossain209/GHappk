@@ -2,7 +2,7 @@ const {
   supabase, cors, num, ds,
   mapProduct, mapSR, mapTx, mapPayment, mapDmg, mapBonus,
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf,
-  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds
+  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals
 } = require('./_lib/db');
 
 // V41 update 7 — every "this month" figure on the dashboard is scoped to
@@ -173,7 +173,7 @@ module.exports = async (req, res) => {
     //  SO DASHBOARD — isolated to SO's own data + assigned DSRs
     // ══════════════════════════════════════════════════════
     if (role === 'so' && userId) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bdtToday();
       const monthStart = _cycleMonthStart(today);
       // Optional custom date-range for full sales visibility (AXIION §17)
       const rangeFrom = req.query.from || '';
@@ -218,17 +218,15 @@ module.exports = async (req, res) => {
       const txRangeFactory = () => supabase.from('transactions').select('*')
         .gte('date', rangeFrom).lte('date', rangeTo).in('sr_id', allIds).order('created_at');
 
-      // All-time for due calculation (give/return/damage for DSRs only) —
-      // this is a lifetime aggregate, so it MUST be paginated (fetchAll),
-      // never a bare query, or dues silently go wrong past 1000 rows.
-      const [txToday, txMonth, txAllDue, txRange] = await Promise.all([
+      // Lifetime due is now computed by the shared getDueTotals() helper
+      // (Postgres SUM — same numbers every panel shows). Only today /
+      // month / range rows are still downloaded.
+      const [txToday, txMonth, txRange, dueTotals] = await Promise.all([
         allIds.length ? fetchAll(txTodayFactory) : [],
         allIds.length ? fetchAll(txMonthFactory) : [],
-        dsrIds.length
-          ? fetchAll(() => supabase.from('transactions').select('type,sr_id,total_units,total_revenue').in('type', ['give', 'return', 'damage']).in('sr_id', dsrIds).order('created_at'))
-          : [],
-        hasRange ? fetchAll(txRangeFactory) : []
-      ]).then(([a, b, c, d]) => [a.map(mapTx), b.map(mapTx), c, d.map(mapTx)]);
+        hasRange ? fetchAll(txRangeFactory) : [],
+        getDueTotals(allIds)
+      ]).then(([a, b, c, d]) => [a.map(mapTx), b.map(mapTx), c.map(mapTx), d]);
 
       // ── Full sales visibility, split regular (DSR-given) vs SO's own
       //    point-sale, for any date range (AXIION §17) ──────────────
@@ -249,47 +247,30 @@ module.exports = async (req, res) => {
       const monthSplit = buildSalesSplit(txMonth);
       const rangeSplit = (rangeFrom && rangeTo) ? { from: rangeFrom, to: rangeTo, ...buildSalesSplit(txRange) } : null;
 
-      // SO's own payments
-      const { data: soPayData } = await supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false });
+      // SO's own payments — fetchAll: a bare query is capped at 1000 rows.
+      const soPayData = await fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false }));
       const soPayments = (soPayData || []).map(mapPayment);
       const soTotalPaid = soPayments.reduce((s, r) => s + num(r.amount), 0);
-
-      // DSR payments (all time, for due calc)
-      let dsrPayData = { data: [] };
-      if (dsrIds.length) {
-        dsrPayData = await supabase.from('sr_payments').select('sr_id,amount').in('sr_id', dsrIds);
-      }
-      const dsrPayments = dsrPayData.data || [];
 
       // DSR month payments
       let dsrPayMonthData = { data: [] };
       if (dsrIds.length) {
-        dsrPayMonthData = await supabase.from('sr_payments').select('*')
-          .in('sr_id', dsrIds).gte('date', monthStart).lte('date', today).order('date');
+        dsrPayMonthData = { data: await fetchAll(() => supabase.from('sr_payments').select('*')
+          .in('sr_id', dsrIds).gte('date', monthStart).lte('date', today).order('date')) };
       }
       const dsrPayMonth = (dsrPayMonthData.data || []).map(mapPayment);
 
       // SO own stats (point_sale only — direct sales by SO)
       const soTxToday = txToday.filter(r => r.srId === userId);
       const soTxMonth = txMonth.filter(r => r.srId === userId);
-      const soOwnGivenRev  = txAllDue.filter(r => r.sr_id === userId && r.type === 'give').reduce((s, r) => s + num(r.total_revenue), 0);
-      const soOwnReturnRev = txAllDue.filter(r => r.sr_id === userId && r.type === 'return').reduce((s, r) => s + num(r.total_revenue), 0);
-      const soOwnDue = (soOwnGivenRev - soOwnReturnRev) - soTotalPaid;
+      const _own = dueTotals[String(userId)] || { givenRev: 0, returnRev: 0 };
+      const soOwnDue = (_own.givenRev - _own.returnRev) - soTotalPaid;
 
       // DSR due map
       const dueMap = {};
       assignedDsrs.forEach(dsr => {
-        dueMap[dsr.id] = { srId: dsr.id, name: dsr.name, area: dsr.area || '', phone: dsr.phone || '', thumb: dsr.thumb || '', givenRev: 0, returnRev: 0, payments: 0 };
-      });
-      txAllDue.forEach(r => {
-        const sid = String(r.sr_id || ''); if (!sid || !dueMap[sid]) return;
-        const rev = num(r.total_revenue);
-        if (r.type === 'give')   dueMap[sid].givenRev  += rev;
-        if (r.type === 'return') dueMap[sid].returnRev += rev;
-      });
-      dsrPayments.forEach(r => {
-        const sid = String(r.sr_id || ''); if (!sid || !dueMap[sid]) return;
-        dueMap[sid].payments += num(r.amount);
+        const t = dueTotals[String(dsr.id)] || { givenRev: 0, returnRev: 0, payments: 0 };
+        dueMap[dsr.id] = { srId: dsr.id, name: dsr.name, area: dsr.area || '', phone: dsr.phone || '', thumb: dsr.thumb || '', givenRev: t.givenRev, returnRev: t.returnRev, payments: t.payments };
       });
       const dsrDueList = Object.values(dueMap).map(d => ({ ...d, due: (d.givenRev - d.returnRev) - d.payments }));
       const totalDsrDue = dsrDueList.reduce((s, d) => s + (d.due > 0 ? d.due : 0), 0);
@@ -392,7 +373,7 @@ module.exports = async (req, res) => {
     //  DSR DASHBOARD — strictly isolated to own data
     // ══════════════════════════════════════════════════════
     if (role === 'dsr' && userId) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = bdtToday();
       const monthStart = _cycleMonthStart(today);
 
       // V40: stock read straight from products.current_stock — see
@@ -401,27 +382,30 @@ module.exports = async (req, res) => {
       // txAll fetch below is still needed (and still paginated) — it's
       // scoped to just this one DSR's own history for their own due
       // calculation, which is much smaller than the whole table.
-      const [prodRes, txAll, paymentsRes, txMonthRes, payMonthRes] = await Promise.all([
+      const [prodRes, dueTotals, paymentsList, txMonthList, payMonthList] = await Promise.all([
         supabase.from('products').select('*').order('sort_order').order('created_at'),
-        // Lifetime due for one DSR — still needs pagination for long-running,
-        // high-volume DSRs (a few years of daily deliveries can pass 1000 rows).
-        fetchAll(() => supabase.from('transactions').select('type,total_units,total_revenue').eq('sr_id', userId).in('type', ['give', 'return', 'damage']).order('created_at')),
-        supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false }),
-        supabase.from('transactions').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('created_at'),
-        supabase.from('sr_payments').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('date')
+        // Lifetime due — same shared helper as the Owner/Manager/SO panels,
+        // so a DSR's own "মোট বাকি" can never differ from what the owner sees.
+        getDueTotals([String(userId)]),
+        // fetchAll (was a bare query, silently capped at 1000 rows → the
+        // DSR's total-paid was understated and his due showed too high).
+        fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false })),
+        fetchAll(() => supabase.from('transactions').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('created_at')),
+        fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('date'))
       ]);
 
       const products = (prodRes.data || []).map(mapProduct);
       const stockMap = {};
       products.forEach(p => { stockMap[p.id] = p.currentStock; });
-      const payments = (paymentsRes.data || []).map(mapPayment);
-      const txMonth  = (txMonthRes.data || []).map(mapTx);
-      const payMonth = (payMonthRes.data || []).map(mapPayment);
+      const payments = (paymentsList || []).map(mapPayment);
+      const txMonth  = (txMonthList || []).map(mapTx);
+      const payMonth = (payMonthList || []).map(mapPayment);
 
-      // Own due calculation
-      const givenRev  = txAll.filter(r => r.type === 'give').reduce((s, r)  => s + num(r.total_revenue), 0);
-      const returnRev = txAll.filter(r => r.type === 'return').reduce((s, r) => s + num(r.total_revenue), 0);
-      const totalPaid = payments.reduce((s, r) => s + num(r.amount), 0);
+      // Own due calculation (Σgive − Σreturn − Σpayments, from the shared helper)
+      const _t = dueTotals[String(userId)] || { givenRev: 0, returnRev: 0, payments: 0 };
+      const givenRev  = _t.givenRev;
+      const returnRev = _t.returnRev;
+      const totalPaid = _t.payments;
       const ownDue    = (givenRev - returnRev) - totalPaid;
 
       // Month summary
@@ -477,7 +461,7 @@ module.exports = async (req, res) => {
     // ══════════════════════════════════════════════════════
     //  OWNER / MANAGER DASHBOARD — full data
     // ══════════════════════════════════════════════════════
-    const today = new Date().toISOString().slice(0, 10);
+    const today = bdtToday();
     const monthStart = _cycleMonthStart(today);
 
     // V40: the old 'txAll' full-lifetime-transactions fetch below used
@@ -498,25 +482,39 @@ module.exports = async (req, res) => {
     // made last month's revenue/profit figures go quietly wrong. Both now
     // go through fetchAll, same as the lifetime bonus/dues queries already
     // did.
-    const [pRes, sRes, txTodayRaw, txMonthRaw, txAllForBonus, payMonthRes, dmgRes, bonRes] = await Promise.all([
+    const [pRes, sRes, txTodayRaw, txMonthRaw, payMonthRaw, dmgRes, bonRes] = await Promise.all([
       supabase.from('products').select('*').order('sort_order').order('created_at'),
       supabase.from('srs').select('*').order('created_at'),
       fetchAll(() => supabase.from('transactions').select('*').eq('date', today).order('created_at')),
       fetchAll(() => supabase.from('transactions').select('*').gte('date', monthStart).lte('date', today).order('created_at')),
-      fetchAll(() => supabase.from('transactions').select('tx_id,type,product_id,total_units,date').eq('type', 'give').order('created_at')),
-      supabase.from('sr_payments').select('*').gte('date', monthStart).lte('date', today).order('date'),
-      supabase.from('dmg_claims').select('*').eq('status', 'pending').order('created_at'),
-      supabase.from('bonus').select('*').order('created_at')
+      fetchAll(() => supabase.from('sr_payments').select('*').gte('date', monthStart).lte('date', today).order('date')),
+      fetchAll(() => supabase.from('dmg_claims').select('*').eq('status', 'pending').order('created_at')).then(d => ({ data: d })),
+      fetchAll(() => supabase.from('bonus').select('*').order('created_at')).then(d => ({ data: d }))
     ]);
 
     const products    = (pRes.data  || []).map(mapProduct);
     const srs         = (sRes.data  || []).map(mapSR);
     const txToday     = txTodayRaw.map(mapTx);
     const txMonth     = txMonthRaw.map(mapTx);
-    const txAll       = txAllForBonus; // kept name for the bonus calc below, unchanged from here on
-    const payMonth    = (payMonthRes.data || []).map(mapPayment);
+    const payMonth    = (payMonthRaw || []).map(mapPayment);
     const dmgPending  = (dmgRes.data      || []).map(mapDmg);
     const bonusRecs   = (bonRes.data      || []).map(mapBonus);
+
+    // Bonus needs 'give' history only for products that HAVE a bonus rule,
+    // and only since the oldest "last cleared" date among them — not the
+    // entire lifetime of every product like before (this was the single
+    // biggest download on every Owner dashboard refresh).
+    const _bonusProds = products.filter(p => num(p.bonusFreeUnits) > 0 || num(p.bonusFreeMoney) > 0);
+    let _bonusFrom = null;
+    _bonusProds.forEach(p => {
+      const cl = bonusRecs.filter(b => String(b.productId) === String(p.id) && b.status === 'cleared' && b.clearedDate)
+        .map(b => String(b.clearedDate)).sort().pop() || '2000-01-01';
+      if (_bonusFrom === null || cl < _bonusFrom) _bonusFrom = cl;
+    });
+    const txAll = _bonusProds.length
+      ? await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units,date')
+          .eq('type', 'give').gt('date', _bonusFrom).in('product_id', _bonusProds.map(p => String(p.id))).order('date'))
+      : [];
 
     // ── Stock map — straight from products.current_stock, no full
     //    transaction history refetch needed any more ────────────────
@@ -568,21 +566,15 @@ module.exports = async (req, res) => {
       };
     });
 
-    const [txAllForDues, payAll] = await Promise.all([
-      fetchAll(() => supabase.from('transactions').select('type,sr_id,total_units,total_revenue').in('type',['give','return','damage']).order('created_at')),
-      fetchAll(() => supabase.from('sr_payments').select('sr_id,amount').order('date'))
-    ]);
-
-    (txAllForDues || []).forEach(r => {
-      const sid = String(r.sr_id || ''); if (!sid) return;
-      if (!srDueMap[sid]) srDueMap[sid] = { srId:sid, name:r.sr_name||'', area:'', phone:'', thumb:'', givenUnits:0, returnUnits:0, givenRev:0, returnRev:0, payments:0 };
-      const u = num(r.total_units), rev = num(r.total_revenue);
-      if (r.type==='give')   { srDueMap[sid].givenUnits += u; srDueMap[sid].givenRev += rev; }
-      if (r.type==='return') { srDueMap[sid].returnUnits+= u; srDueMap[sid].returnRev+= rev; }
-    });
-    (payAll || []).forEach(r => {
-      const sid = String(r.sr_id || ''); if (!sid) return;
-      if (srDueMap[sid]) srDueMap[sid].payments += num(r.amount);
+    // One shared, exact lifetime-due source (Postgres SUM) — identical to
+    // what each DSR sees on his own panel.
+    const _dueTotals = await getDueTotals(null);
+    Object.keys(_dueTotals).forEach(sid => {
+      if (!srDueMap[sid]) srDueMap[sid] = { srId:sid, name:'', area:'', phone:'', thumb:'', givenUnits:0, returnUnits:0, givenRev:0, returnRev:0, payments:0 };
+      const t = _dueTotals[sid];
+      srDueMap[sid].givenUnits = t.givenUnits; srDueMap[sid].returnUnits = t.returnUnits;
+      srDueMap[sid].givenRev = t.givenRev;     srDueMap[sid].returnRev = t.returnRev;
+      srDueMap[sid].payments = t.payments;
     });
 
     const duesList = Object.values(srDueMap).map(sr => ({

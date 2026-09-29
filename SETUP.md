@@ -84,3 +84,13 @@ Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-ca
 - New main-menu item **🧮 দিনশেষ হিসাব** (Owner + Manager, right under the Home tab). It holds
   **হিসাব/পেমেন্ট** (end-of-day settlement) and **বাকি পেমেন্ট** (due & damage collected by DSRs) as icon tiles.
 - The **DSR/SO** page now has only icon tiles: 👥 তালিকা, ➕ যোগ করুন, 🛣️ রোড (add/delete/assign road stay here).
+
+## 8. What's new in 4.9.0 — DU fix, 1000-row fix, speed
+**Run the full `schema.sql` in the Supabase SQL editor.** The new v4.9 function and indexes are at the very bottom of it (they use `CREATE OR REPLACE` / `IF NOT EXISTS`). The app still works without them, just slower.
+
+- One shared due calculation (`getDueTotals`) for Owner / Manager / SO / DSR — same DU everywhere. Uses a Postgres SUM (`dsr_due_totals`) instead of downloading all history.
+- `fetchAll` now orders by `id` as a tiebreaker and loads pages in parallel (fixes rows skipped/repeated at page boundaries → the "sometimes wrong" DU).
+- Shop list, duplicate-name check, due calendar, payment lists, reports: no more silent 1000-row cut-off.
+- "Today" on SO/DSR dashboards now follows Asia/Dhaka time (was UTC).
+- Owner bonus card loads only the give-history it needs; shop list paints 200 rows at a time; identical simultaneous GETs are merged; app shell revalidates instead of full re-download.
+- Still 12 API files.

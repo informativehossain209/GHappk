@@ -915,3 +915,54 @@ INSERT INTO products (id,name,sku,case_size,unit_type,case_price,case_purchase_p
   ('b20eb0f7-ebec-4fd5-9f60-115cbd37927e','গ্রীন অ্যাপেল ২৫০ মিলি','1190',24,'কেস',1190.0000,1130.7690,47.1154,49.5833,2.0000,1.00,0.0000,120.00,'','',34,0),
   ('898f20a4-20f0-4ae1-9690-b32d7dfce32b','জিন্জার ২৫০ মিলি','1190',24,'কেস',1190.0000,1130.7690,47.1154,49.5833,2.0000,1.00,0.0000,120.00,'','',35,0)
 ON CONFLICT (id) DO NOTHING;
+
+-- ═══ v4.9 — speed + DU consistency ═══
+-- 1) One exact, fast lifetime-due query used by EVERY panel
+--    (Owner / Manager / SO / DSR) — replaces downloading the whole
+--    transactions + payments tables into the server on each page load.
+CREATE OR REPLACE FUNCTION dsr_due_totals(p_sr_ids TEXT[] DEFAULT NULL)
+RETURNS TABLE (
+  sr_id        TEXT,
+  given_rev    NUMERIC,
+  return_rev   NUMERIC,
+  given_units  NUMERIC,
+  return_units NUMERIC,
+  paid         NUMERIC
+)
+LANGUAGE sql STABLE AS $$
+  WITH t AS (
+    SELECT tx.sr_id,
+           COALESCE(SUM(CASE WHEN tx.type = 'give'   THEN tx.total_revenue END), 0) AS given_rev,
+           COALESCE(SUM(CASE WHEN tx.type = 'return' THEN tx.total_revenue END), 0) AS return_rev,
+           COALESCE(SUM(CASE WHEN tx.type = 'give'   THEN tx.total_units   END), 0) AS given_units,
+           COALESCE(SUM(CASE WHEN tx.type = 'return' THEN tx.total_units   END), 0) AS return_units
+      FROM transactions tx
+     WHERE tx.type IN ('give', 'return')
+       AND tx.sr_id <> ''
+       AND (p_sr_ids IS NULL OR tx.sr_id = ANY (p_sr_ids))
+     GROUP BY tx.sr_id
+  ), p AS (
+    SELECT sp.sr_id, COALESCE(SUM(sp.amount), 0) AS paid
+      FROM sr_payments sp
+     WHERE sp.sr_id <> ''
+       AND (p_sr_ids IS NULL OR sp.sr_id = ANY (p_sr_ids))
+     GROUP BY sp.sr_id
+  )
+  SELECT COALESCE(t.sr_id, p.sr_id),
+         COALESCE(t.given_rev, 0),  COALESCE(t.return_rev, 0),
+         COALESCE(t.given_units, 0), COALESCE(t.return_units, 0),
+         COALESCE(p.paid, 0)
+    FROM t FULL OUTER JOIN p ON p.sr_id = t.sr_id;
+$$;
+GRANT EXECUTE ON FUNCTION dsr_due_totals(TEXT[]) TO service_role;
+
+-- 2) Composite indexes for the queries that run on every screen load.
+CREATE INDEX IF NOT EXISTS idx_tx_sr_type_date   ON transactions(sr_id, type, date);
+CREATE INDEX IF NOT EXISTS idx_tx_date_type      ON transactions(date, type);
+CREATE INDEX IF NOT EXISTS idx_pay_sr_date       ON sr_payments(sr_id, date);
+CREATE INDEX IF NOT EXISTS idx_due_dsr_client    ON due_calendar(dsr_id, client_type, status);
+CREATE INDEX IF NOT EXISTS idx_due_shop_status   ON due_calendar(shop_id, status);
+CREATE INDEX IF NOT EXISTS idx_due_created       ON due_calendar(created_at);
+CREATE INDEX IF NOT EXISTS idx_shops_created     ON shops(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shops_name_lower  ON shops(lower(name));
+CREATE INDEX IF NOT EXISTS idx_tx_created        ON transactions(created_at);
