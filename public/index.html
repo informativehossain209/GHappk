@@ -3359,6 +3359,7 @@ function toggleAcc(key) {
   var el = document.getElementById('acc-' + key);
   if (el) el.classList.toggle('open', S.accOpen[key]);
   if (S.accOpen[key]) setTimeout(function () { _animateBarsIn(el); }, 60);
+  if (key === 'topshops' && S.accOpen[key]) _loadTopShops();
 }
 function _acc(key, icon, title, summaryHtml, bodyHtml, defaultOpen) {
   if (!S.accOpen) S.accOpen = {};
@@ -3473,6 +3474,58 @@ function svgGauge(pct, color, size) {
 //  Two tabs. Tap a person → pie charts: (1) how much of his target he
 //  completed, (2) his share compared with the others in the same role.
 // ══════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════
+//  🏅 সেরা ৫০ দোকান (Owner/Manager dashboard) — api/shops.js action=top-shops
+//  Lazy: nothing is fetched until the card is opened, so the dashboard
+//  itself does not get slower.
+// ════════════════════════════════════════════════════
+var _topShopsData = null, _topShopsBusy = false;
+function _topShopsShell() {
+  var rg = S.tsRange || 'cycle', so = S.tsSort || 'best';
+  if (!_topShopsData && S.accOpen && S.accOpen.topshops) setTimeout(function(){ _loadTopShops(); }, 0);
+  return '<div class="g2" style="margin:8px 0">'
+    + '<div class="fg"><label class="fl">সময়</label><select onchange="S.tsRange=this.value;_loadTopShops(true)">'
+    + [['cycle','এই মাস (২৬–২৫)'],['30','গত ৩০ দিন'],['90','গত ৯০ দিন'],['all','সব সময়']].map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===rg?' selected':'')+'>'+o[1]+'</option>'; }).join('')
+    + '</select></div>'
+    + '<div class="fg"><label class="fl">সাজান</label><select onchange="S.tsSort=this.value;_loadTopShops(true)">'
+    + [['best','⭐ সেরা (বেশি কেনা + কম বাকি)'],['buy','🛒 সবচেয়ে বেশি কেনা'],['lowdue','✅ সবচেয়ে কম বাকি']].map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===so?' selected':'')+'>'+o[1]+'</option>'; }).join('')
+    + '</select></div></div>'
+    + '<div id="topshops-box">' + _topShopsListHtml() + '</div>';
+}
+function _topShopsListHtml() {
+  var d = _topShopsData;
+  if (!d) return '<div style="text-align:center;padding:18px;color:var(--mt2)">' + (_topShopsBusy ? 'লোড হচ্ছে...' : 'খুলে দেখুন') + '</div>';
+  if (!d.ok) return '<div class="card" style="text-align:center;color:var(--re);padding:16px">লোড ব্যর্থ — আবার চেষ্টা করুন</div>';
+  if (!d.shops.length) return '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">এই সময়ে কোনো দোকানের কেনাকাটা নেই</div>';
+  var medals = ['🥇','🥈','🥉'];
+  var h = '<div style="font-size:10px;color:var(--mt2);margin:0 2px 6px">এই সময়ে ' + fn(d.totalShopsBuying) + 'টি দোকান কিনেছে · সেরা ' + d.shops.length + 'টি দেখানো হচ্ছে · বাকি = দোকানের বর্তমান মোট বাকি</div>';
+  h += '<div class="card" style="padding:0;overflow:hidden">';
+  d.shops.forEach(function(x) {
+    var tag = x.rank <= 3 ? medals[x.rank - 1] : '#' + x.rank;
+    h += '<div style="padding:9px 11px;border-bottom:1px solid #E6ECE8;display:flex;gap:8px;align-items:center">'
+      + '<div style="flex-shrink:0;width:34px;text-align:center;font-size:' + (x.rank <= 3 ? '20' : '12') + 'px;font-weight:700;color:var(--mt)">' + tag + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis">' + esc(x.name) + ' <span style="font-size:10px;font-weight:400;color:var(--mt2)">' + esc(x.shopNo) + '</span></div>'
+      + '<div style="font-size:11px;color:var(--mt)">🛒 <b style="color:var(--bl)">৳' + fm(x.buy) + '</b> · ' + (x.due > 0 ? 'বাকি <b style="color:var(--re)">৳' + fm(x.due) + '</b>' : '<b style="color:var(--gr)">✓ বাকি নেই</b>') + '</div>'
+      + '<div style="font-size:10px;color:var(--mt2)">' + fn(x.orders) + ' বার' + (x.lastBuy ? ' · শেষ ' + fmtBn(x.lastBuy) : '') + (x.keeperName ? ' · 👤 ' + esc(x.keeperName) : '') + (x.roadName ? ' · 🛣️ ' + esc(x.roadName) : '') + '</div>'
+      + '</div>'
+      + (x.phone ? '<a href="tel:' + esc(x.phone) + '" class="btn btn-gr btn-sm" style="flex-shrink:0;text-decoration:none;padding:7px 10px">📞 কল</a>' : '<span style="font-size:10px;color:var(--mt2);flex-shrink:0">নম্বর নেই</span>')
+      + '</div>';
+  });
+  return h + '</div>';
+}
+async function _loadTopShops(force) {
+  if (_topShopsBusy) return;
+  if (_topShopsData && !force) return;
+  _topShopsBusy = true;
+  var box = document.getElementById('topshops-box');
+  if (box) box.innerHTML = '<div style="text-align:center;padding:18px;color:var(--mt2)">লোড হচ্ছে...</div>';
+  var r = await apiGet('/api/shops?action=top-shops&range=' + encodeURIComponent(S.tsRange || 'cycle') + '&sort=' + encodeURIComponent(S.tsSort || 'best') + '&limit=50');
+  _topShopsBusy = false;
+  _topShopsData = r && r.ok ? r : { ok: false };
+  box = document.getElementById('topshops-box'); if (box) box.innerHTML = _topShopsListHtml();
+}
 var _srPerfData = null;
 function _srPerfShell() {
   var tab = S.srPerfTab || 'dsr';
@@ -3655,6 +3708,9 @@ function renderDash(d) {
   // ── DSR/SO পারফরম্যান্স — v60: two tabs (DSR | SO); tap a person for the pie charts
   var srp=d.srPerformance||[];
   h+=_acc('srperf','🏆','DSR/SO পারফরম্যান্স (এই মাস)',srp.length?'#1 '+esc(srp[0].name):'',_srPerfShell(),false);
+
+  // ── 🏅 সেরা ৫০ দোকান — কল করে বিশেষ অফার দেওয়ার জন্য (খুললে তবেই লোড হয়)
+  h+=_acc('topshops','🏅','সেরা ৫০ দোকান','',_topShopsShell(),false);
 
   // ── সম্পূর্ণ SKU র‍্যাংকিং — Today & This Month, ranked in cases (§47).
   // Both lists live inside one accordion now instead of two always-open
@@ -5709,6 +5765,13 @@ async function saveQuickCash() {
   else toast((r && r.error) || 'ব্যর্থ');
 }
 
+
+// "3:15 PM" in Bangladesh time from an ISO timestamp (independent of the phone's timezone).
+function _timeBdt(iso) {
+  if (!iso) return '—';
+  try { return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(iso)); }
+  catch (e) { return String(iso).slice(11, 16); }
+}
 // ── Owner / Manager • আদায় (DSR-রা যা বাকি ও ড্যামেজ কালেকশন করেছে) ──
 async function _loadCollectionsTab() {
   var el = document.getElementById('pg-settle'); if (!el) return;
@@ -5725,12 +5788,31 @@ async function _loadCollectionsTab() {
     + '<div class="met" style="border-top:3px solid var(--am)"><div class="ml">⚠️ ড্যামেজ মূল্য</div><div class="mv">৳' + fm(tt.damageValue) + '</div><div style="font-size:10px;color:var(--mt2)">টাকা ৳' + fm(tt.refundPaid) + ' · বদল ৳' + fm(tt.exchangeValue) + '</div></div></div>';
   if (r.byDsr.length) {
     h += '<div class="ct">DSR অনুযায়ী</div><div class="card" style="padding:0;overflow:hidden">';
-    r.byDsr.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="font-weight:700">🚚 ' + esc(x.dsrName) + '</div>' + _row('বাকি আদায়', '৳' + fm(x.dueCollected)) + _row('ড্যামেজ (টাকা ফেরত / বদল)', '৳' + fm(x.refundPaid) + ' / ৳' + fm(x.exchangeValue)) + '</div>'; });
+    r.byDsr.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="font-weight:700">🚚 ' + esc(x.dsrName) + '</div>' + _row('বাকি আদায়', '৳' + fm(x.dueCollected) + ' (' + fn(x.shopCount || 0) + 'টি দোকান)') + _row('ড্যামেজ (টাকা ফেরত / বদল)', '৳' + fm(x.refundPaid) + ' / ৳' + fm(x.exchangeValue)) + '</div>'; });
     h += '</div>';
   }
-  h += '<div class="ct" style="margin-top:12px">📥 বাকি আদায়ের তালিকা</div>';
+  h += '<div class="ct" style="margin-top:12px">📥 বাকি আদায়ের তালিকা — কোন দোকান, কখন, কত</div>';
   if (!r.dues.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px">এই সময়ে কোনো বাকি আদায় নেই</div>';
-  else { h += '<div class="card" style="padding:0;overflow:hidden">'; r.dues.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="display:flex;justify-content:space-between"><b>🏪 ' + esc(x.shopName) + (x.shopNo ? ' <span style="font-weight:400;color:var(--mt2)">' + esc(x.shopNo) + '</span>' : '') + '</b><b style="color:var(--gr)">৳' + fm(x.amount) + '</b></div><div style="color:var(--mt);font-size:11px">🚚 ' + esc(x.dsrName) + ' · ' + fmtBn(x.date) + (x.keeperName ? ' · 👤 ' + esc(x.keeperName) : '') + (x.phone ? ' · 📞 ' + esc(x.phone) : '') + (x.roadName ? ' · 🛣️ ' + esc(x.roadName) : '') + '</div></div>'; }); h += '</div>'; }
+  else {
+    h += '<div class="card" style="background:#ECFDF5;border:1.5px solid var(--gr);font-size:12px;font-weight:700;color:#059669">🏪 ' + fn(tt.dueShopCount || 0) + 'টি দোকান থেকে ' + fn(tt.dueCount || r.dues.length) + ' বার আদায় · মোট ৳' + fm(tt.dueCollected) + '</div>';
+    var grp = {}, order = [];
+    r.dues.forEach(function(x) { var k = x.dsrId || x.dsrName || '—'; if (!grp[k]) { grp[k] = { name: x.dsrName, rows: [], total: 0, shops: {} }; order.push(k); } grp[k].rows.push(x); grp[k].total += num(x.amount); grp[k].shops[x.shopId || x.shopName] = 1; });
+    order.forEach(function(k) {
+      var g = grp[k];
+      g.rows.sort(function(p, q) { return String(p.createdAt || '').localeCompare(String(q.createdAt || '')); });
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 2px 4px;font-size:12px"><b>🚚 ' + esc(g.name || 'DSR') + ' <span style="font-weight:400;color:var(--mt2)">· ' + Object.keys(g.shops).length + 'টি দোকান</span></b><b style="color:var(--gr)">৳' + fm(g.total) + '</b></div>';
+      h += '<div class="card" style="padding:0;overflow:hidden">';
+      g.rows.forEach(function(x) {
+        h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px;display:flex;gap:8px;align-items:center">'
+          + '<div style="flex-shrink:0;min-width:58px;text-align:center;background:#EFF6FF;border-radius:8px;padding:4px 2px;font-size:11px;font-weight:700;color:var(--bl)">🕐 ' + esc(_timeBdt(x.createdAt)) + '</div>'
+          + '<div style="flex:1;min-width:0"><div style="display:flex;justify-content:space-between;gap:6px"><b style="overflow:hidden;text-overflow:ellipsis">🏪 ' + esc(x.shopName) + (x.shopNo ? ' <span style="font-weight:400;color:var(--mt2)">' + esc(x.shopNo) + '</span>' : '') + '</b><b style="color:var(--gr);flex-shrink:0">৳' + fm(x.amount) + '</b></div>'
+          + '<div style="color:var(--mt);font-size:11px">' + fmtBn(x.date) + (x.keeperName ? ' · 👤 ' + esc(x.keeperName) : '') + (x.phone ? ' · ' + esc(x.phone) : '') + (x.roadName ? ' · 🛣️ ' + esc(x.roadName) : '') + '</div></div>'
+          + (x.phone ? '<a href="tel:' + esc(x.phone) + '" class="btn btn-gr btn-sm" style="flex-shrink:0;text-decoration:none;padding:6px 9px">📞 কল</a>' : '<span style="font-size:10px;color:var(--mt2);flex-shrink:0">নম্বর নেই</span>')
+          + '</div>';
+      });
+      h += '</div>';
+    });
+  }
   h += '<div class="ct" style="margin-top:12px">⚠️ ড্যামেজ কালেকশনের তালিকা</div>';
   if (!r.damages.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:14px">এই সময়ে কোনো ড্যামেজ কালেকশন নেই</div>';
   else { h += '<div class="card" style="padding:0;overflow:hidden">'; r.damages.forEach(function(x) { h += '<div style="padding:8px 11px;border-bottom:1px solid #E6ECE8;font-size:12px"><div style="display:flex;justify-content:space-between"><b>🏪 ' + esc(x.shopName) + ' — ' + esc(x.productName) + ' × ' + fn(x.units) + '</b><b>৳' + fm(x.damagedValue) + '</b></div><div style="color:var(--mt);font-size:11px">🚚 ' + esc(x.dsrName) + ' · ' + fmtBn(x.date) + ' · ' + (x.resolution === 'money' ? '💵 টাকা ফেরত ৳' + fm(x.refundAmt) : '🔁 বদল: ' + esc(x.exchProductName) + ' × ' + fn(x.exchUnits)) + '</div></div>'; }); h += '</div>'; }

@@ -621,8 +621,10 @@ module.exports = async (req, res) => {
       ]);
       const shopIds = [...new Set([...(dc || []), ...(gc || [])].map(r => String(r.shop_id || '')).filter(Boolean))];
       const shopMap = {};
-      if (shopIds.length) {
-        const { data: sh } = await supabase.from('shops').select('id,shop_no,keeper_name,phone,address,road_name').in('id', shopIds);
+      // chunked: a long date range can touch hundreds of shops, and one
+      // giant .in() list overflows the request URL.
+      for (let i = 0; i < shopIds.length; i += 80) {
+        const { data: sh } = await supabase.from('shops').select('id,shop_no,keeper_name,phone,address,road_name').in('id', shopIds.slice(i, i + 80));
         (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
       }
       const shopInfo = id => { const x = shopMap[String(id || '')] || {}; return { shopNo: x.shop_no || '', keeperName: x.keeper_name || '', phone: x.phone || '', address: x.address || '', roadName: x.road_name || '' }; };
@@ -636,12 +638,13 @@ module.exports = async (req, res) => {
       }));
       const byDsr = {};
       const slot = (id, name) => (byDsr[id] = byDsr[id] || { dsrId: id, dsrName: name || '', dueCollected: 0, damageValue: 0, refundPaid: 0, exchangeValue: 0 });
-      dues.forEach(r => { slot(r.dsrId, r.dsrName).dueCollected += r.amount; });
+      dues.forEach(r => { const x = slot(r.dsrId, r.dsrName); x.dueCollected += r.amount; (x._shops = x._shops || new Set()).add(r.shopId || r.shopName); });
+      Object.values(byDsr).forEach(x => { x.shopCount = x._shops ? x._shops.size : 0; delete x._shops; });
       damages.forEach(r => { const x = slot(r.dsrId, r.dsrName); x.damageValue += r.damagedValue; x.refundPaid += r.refundAmt; x.exchangeValue += r.exchValue; });
       return res.json({
         ok: true, from: f, to: t, dues, damages, byDsr: Object.values(byDsr),
         totals: {
-          dueCollected: dues.reduce((a, r) => a + r.amount, 0), damageValue: damages.reduce((a, r) => a + r.damagedValue, 0),
+          dueCollected: dues.reduce((a, r) => a + r.amount, 0), dueShopCount: new Set(dues.map(r => r.shopId || r.shopName)).size, dueCount: dues.length, damageValue: damages.reduce((a, r) => a + r.damagedValue, 0),
           refundPaid: damages.reduce((a, r) => a + r.refundAmt, 0), exchangeValue: damages.reduce((a, r) => a + r.exchValue, 0)
         }
       });

@@ -8,7 +8,8 @@
 const { randomUUID } = require('crypto');
 const {
   supabase, cors, num, now_, str, safeErr,
-  mapShop, mapDue, mapTx, fetchAll, mapShopVisit, mapPosCustomer, bdtToday, computeVanStock
+  mapShop, mapDue, mapTx, fetchAll, mapShopVisit, mapPosCustomer, bdtToday, computeVanStock,
+  addDaysStr, cyclePeriodBounds, cyclePeriodToday
 } = require('./_lib/db');
 
 // V48 update #37/#38 — re-verifies an Owner PIN server-side (never trust
@@ -240,6 +241,84 @@ module.exports = async (req, res) => {
 
       if (limit) shops = shops.slice(0, num(limit));
       return res.json({ ok: true, shops });
+    }
+
+
+    // ══════════════════════════════════════════════════
+    //  TOP-SHOPS — Owner dashboard "সেরা ৫০ দোকান"
+    //  GET /api/shops?action=top-shops&range=cycle|30|90|all&sort=best|buy|lowdue&limit=50
+    //  Ranks the shops the dealer actually does business with:
+    //    buy   = Σ dsr_sale + point_sale − point_damage_return revenue in the window
+    //    due   = the shop's CURRENT unpaid due (all open due_calendar rows)
+    //    score = buy × (1 − min(1, due ÷ buy))  → big buyers who also PAY rank
+    //            first; a shop that buys a lot but owes nearly all of it drops.
+    //  sort=buy → highest buying only; sort=lowdue → lowest due first among
+    //  shops with real buying. Every row carries the phone for one-tap call.
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'top-shops') {
+      const range = String(req.query.range || 'cycle');
+      const sort  = String(req.query.sort  || 'best');
+      const limit = Math.max(1, Math.min(100, num(req.query.limit) || 50));
+      const today = bdtToday();
+      let from = null, to = today;
+      if (range === '30')      from = addDaysStr(today, -29);
+      else if (range === '90') from = addDaysStr(today, -89);
+      else if (range === 'all') from = null;
+      else { const b = cyclePeriodBounds(cyclePeriodToday()); from = b.start; to = b.end < today ? b.end : today; }
+
+      const [txRows, dueRows] = await Promise.all([
+        fetchAll(() => {
+          let q = supabase.from('transactions').select('shop_id,type,tx_id,date,total_revenue')
+            .in('type', ['dsr_sale', 'point_sale', 'point_damage_return']).neq('shop_id', '');
+          if (from) q = q.gte('date', from);
+          return q.lte('date', to);
+        }),
+        fetchAll(() => supabase.from('due_calendar').select('shop_id,amount,paid_amount')
+          .eq('client_type', 'shop').neq('status', 'cleared'))
+      ]);
+
+      const agg = {};
+      (txRows || []).forEach(r => {
+        const sid = String(r.shop_id || ''); if (!sid) return;
+        const a = agg[sid] || (agg[sid] = { shopId: sid, buy: 0, orders: new Set(), lastBuy: '' });
+        const rev = num(r.total_revenue);
+        if (r.type === 'point_damage_return') { a.buy -= rev; return; }
+        a.buy += rev; a.orders.add(String(r.tx_id || ''));
+        const d = String(r.date || '').slice(0, 10); if (d > a.lastBuy) a.lastBuy = d;
+      });
+      const dueMap = {};
+      (dueRows || []).forEach(r => {
+        const sid = String(r.shop_id || ''); if (!sid) return;
+        dueMap[sid] = (dueMap[sid] || 0) + Math.max(0, num(r.amount) - num(r.paid_amount));
+      });
+
+      let list = Object.values(agg).filter(a => a.buy > 0).map(a => {
+        const due = +(dueMap[a.shopId] || 0).toFixed(2);
+        const buy = +a.buy.toFixed(2);
+        const dueRatio = buy > 0 ? Math.min(1, due / buy) : 1;
+        return { shopId: a.shopId, buy, due, orders: a.orders.size, lastBuy: a.lastBuy,
+                 dueRatio: +dueRatio.toFixed(4), score: +(buy * (1 - dueRatio)).toFixed(2) };
+      });
+      if (sort === 'buy')         list.sort((x, y) => y.buy - x.buy);
+      else if (sort === 'lowdue') list.sort((x, y) => (x.due - y.due) || (y.buy - x.buy));
+      else                        list.sort((x, y) => (y.score - x.score) || (y.buy - x.buy));
+
+      // Shop details (name/phone/…) for just the winners — a few .in() chunks.
+      const top = list.slice(0, limit + 20);            // small spare in case a shop was deleted
+      const info = {};
+      for (let i = 0; i < top.length; i += 50) {
+        const ids = top.slice(i, i + 50).map(x => x.shopId);
+        const { data: sh, error: shErr } = await supabase.from('shops')
+          .select('id,shop_no,name,keeper_name,phone,address,road_name,assigned_dsr_name').in('id', ids);
+        if (shErr) throw shErr;
+        (sh || []).forEach(x => { info[String(x.id)] = x; });
+      }
+      const shops = top.filter(x => info[x.shopId]).slice(0, limit).map((x, i) => {
+        const sh = info[x.shopId];
+        return { rank: i + 1, ...x, shopNo: sh.shop_no || '', name: sh.name || '', keeperName: sh.keeper_name || '',
+                 phone: sh.phone || '', address: sh.address || '', roadName: sh.road_name || '', dsrName: sh.assigned_dsr_name || '' };
+      });
+      return res.json({ ok: true, range, sort, from: from || '', to, totalShopsBuying: list.length, shops });
     }
 
     // ══════════════════════════════════════════════════

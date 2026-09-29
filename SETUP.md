@@ -94,3 +94,8 @@ Still 12 API files (new logic lives inside `sr-payments.js`, `shops.js`, `due-ca
 - "Today" on SO/DSR dashboards now follows Asia/Dhaka time (was UTC).
 - Owner bonus card loads only the give-history it needs; shop list paints 200 rows at a time; identical simultaneous GETs are merged; app shell revalidates instead of full re-download.
 - Still 12 API files.
+
+## 9. What's new in 4.9.1 — no database change needed
+- **Owner/Manager → দিনশেষ হিসাব → 📥 বাকি পেমেন্ট:** every due collection now shows the **time** (Bangladesh time), shop, amount and a **📞 কল** button, grouped by DSR with a shop count and total ("N টি দোকান থেকে M বার আদায়").
+- **Owner/Manager dashboard → 🏅 সেরা ৫০ দোকান:** top 50 shops by buying and payment behaviour (period + sort selectable), each with a one-tap call button. Loads only when the card is opened. Backed by `api/shops.js?action=top-shops`.
+- Still 12 API files; `schema.sql` unchanged from 4.9.0.
