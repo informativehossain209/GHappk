@@ -1,12 +1,45 @@
-const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll, bdtToday, computeVanStock, applyDuePayment } = require('./_lib/db');
+const { supabase, cors, num, now_, mapPayment, mapOrder, safeErr, fetchAll, bdtToday, computeVanStock, computeVanDetail, applyDuePayment, getDueTotals, idemRun, pageParams, blockNegativeStock } = require('./_lib/db');
+const { priceItems, txRow, stockShortage, weightedGivePrices, loadProducts, lineMoney, bonusSnapshot, r2: _m2 } = require('./_lib/money');
 const { randomUUID } = require('crypto');
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const PAY_COLS = 'id,sr_id,sr_name,date,amount,cash_amount,commission_amt,discount_amt,damage_amt,note,created_at';
+
+// CALC-5 — an order/loading list must carry the REAL prices. The browser's
+// numbers are replaced with the products table's values (units re-derived
+// from cases/pcs). Other fields on each item (id, thumb, …) are kept.
+async function _repriceItems(items) {
+  // lines with nothing in them (a removed row on the loading screen) stay as they are
+  const idx = [];
+  items.forEach((it, i) => { if (num(it.totalUnits) > 0 || num(it.cases) > 0 || num(it.pcs) > 0) idx.push(i); });
+  const priced = idx.length ? await priceItems(idx.map(i => items[i]), { type: 'give' }) : { ok: true, lines: [] };
+  if (!priced.ok) return priced;
+  const out = items.map(it => Object.assign({}, it));
+  idx.forEach((i, k) => {
+    const l = priced.lines[k];
+    Object.assign(out[i], {
+      productName: l.productName, sku: l.sku, cases: l.cases, pcs: l.pcs, totalUnits: l.units,
+      sellingPrice: l.sellingPrice, purchasePrice: l.purchasePrice
+    });
+  });
+  return { ok: true, items: out, amount: _m2(priced.lines.reduce((s, l) => s + l.revenue, 0)) };
+}
+
+// POST actions that move money / stock — protected against double taps (CALC-8).
+const IDEM_ACTIONS = new Set(['approval_submit', 'order_submit', 'give_direct', 'due-collect', 'damage-collect']);
 
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   const action = (req.query && req.query.action) || (req.body && req.body.action) || '';
+  // a plain POST with no action is the manual payment entry
+  if (req.method === 'POST' && (IDEM_ACTIONS.has(action) || action === '')) {
+    try { return await idemRun(req, res, 'srpay-' + (action || 'payment'), () => _handle(req, res, action)); }
+    catch (e) { return res.json({ ok: false, error: safeErr(e) }); }
+  }
+  return _handle(req, res, action);
+};
 
+async function _handle(req, res, action) {
   try {
     // ══════════════════════════════════════════════════
     //  MANAGER APPROVAL FLOW
@@ -128,7 +161,10 @@ module.exports = async (req, res) => {
       const d = req.body || {};
       const items = Array.isArray(d.items) ? d.items : [];
       if (!d.soId || !items.length) return res.json({ ok: false, error: 'soId ও items প্রয়োজন' });
-      const requestedAmount = items.reduce((s, it) => s + num(it.totalUnits) * num(it.sellingPrice), 0);
+      const rp = await _repriceItems(items);
+      if (!rp.ok) return res.json({ ok: false, error: rp.error });
+      items.splice(0, items.length, ...rp.items);
+      const requestedAmount = rp.amount;
 
       // AXIION §17-follow-up / Update #20: auto-carry the SO's
       // same-numbered auto-paired DSR (so_id, set automatically by
@@ -176,7 +212,10 @@ module.exports = async (req, res) => {
       if (!cur) return res.json({ ok: false, error: 'অর্ডার পাওয়া যায়নি' });
       if (cur.load_status === 'loaded' || cur.status === 'rejected')
         return res.json({ ok: false, error: 'এই অর্ডার আর পরিবর্তন করা যাবে না' });
-      const modifiedAmount = d.items.reduce((s, it) => s + num(it.totalUnits) * num(it.sellingPrice), 0);
+      const rpM = await _repriceItems(d.items);
+      if (!rpM.ok) return res.json({ ok: false, error: rpM.error });
+      d.items = rpM.items;
+      const modifiedAmount = rpM.amount;
       const who = ['manager', 'owner', 'dsr'].includes(d.requestedBy) ? d.requestedBy : 'manager';
       const { error } = await supabase.from('orders').update({
         items: d.items, modified_by: who, modified_amount: modifiedAmount, proposed_items: null,
@@ -241,7 +280,10 @@ module.exports = async (req, res) => {
       const d = req.body || {};
       const items = Array.isArray(d.items) ? d.items : [];
       if (!d.dsrId || !items.length) return res.json({ ok: false, error: 'dsrId ও items প্রয়োজন' });
-      const requestedAmount = items.reduce((s, it) => s + num(it.totalUnits) * num(it.sellingPrice), 0);
+      const rpG = await _repriceItems(items);
+      if (!rpG.ok) return res.json({ ok: false, error: rpG.error });
+      items.splice(0, items.length, ...rpG.items);
+      const requestedAmount = rpG.amount;
       const who = d.requestedBy === 'manager' ? 'ম্যানেজার' : 'মালিক';
       const label = 'দেওয়া (' + who + (d.requestedByName ? ' — ' + d.requestedByName : '') + ')';
       const { data, error } = await supabase.from('orders').insert({
@@ -359,18 +401,12 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'dsr-reconcile') {
       const { dsrId, date } = req.query;
       if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
-      const d = (date && DATE_RE.test(date)) ? date : new Date().toISOString().slice(0, 10);
+      const d = (date && DATE_RE.test(date)) ? date : bdtToday();   // CALC-4: Dhaka day
 
-      // Lifetime due — identical formula to the DSR's own dashboard due.
-      // Paginated: a long-running DSR's lifetime give/return history can
-      // pass the 1000-row PostgREST cap after a couple of years.
-      const allDueTx = await fetchAll(() => supabase.from('transactions')
-        .select('type,total_revenue').eq('sr_id', dsrId).in('type', ['give', 'return']));
-      const givenRevAll  = (allDueTx || []).filter(r => r.type === 'give').reduce((s, r) => s + num(r.total_revenue), 0);
-      const returnRevAll = (allDueTx || []).filter(r => r.type === 'return').reduce((s, r) => s + num(r.total_revenue), 0);
-      const allPay = await fetchAll(() => supabase.from('sr_payments').select('amount').eq('sr_id', dsrId));
-      const paidAll = (allPay || []).reduce((s, r) => s + num(r.amount), 0);
-      const lifetimeDue = (givenRevAll - returnRevAll) - paidAll;
+      // Lifetime due — the ONE shared calculation (Postgres SUM) every panel
+      // uses, instead of downloading this DSR's whole history again (PERF-3).
+      const _dt = (await getDueTotals([String(dsrId)]))[String(dsrId)] || { givenRev: 0, returnRev: 0, payments: 0 };
+      const lifetimeDue = (_dt.givenRev - _dt.returnRev) - _dt.payments;
 
       // Today's movement — given / returned / damage / sold-to-shops.
       // V35 — damage here uses total_revenue (SELLING price), not
@@ -410,6 +446,125 @@ module.exports = async (req, res) => {
           givenToday, returnedToday, damageToday, soldToShopsToday,
           commissionToday, discountToday,
           cashCollectedToday, shopDueCreatedToday, stillWithDsrToday
+        }
+      });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  v5.2 — DSR "আমার লেনদেন" (My Transactions) day summary
+    //  GET dsr-my-day  dsrId, from, to   (from/to default = today, Dhaka)
+    //  Five money boxes + the cash the DSR must hand over, each with the
+    //  line-by-line history behind it (what product / which shop).
+    //
+    //    given      Σ 'give' revenue                       (stock loaded)
+    //    return     Σ 'return' revenue                     (stock handed back)
+    //    damage     van damage + damage taken back from shops (money/exchange)
+    //    commission Σ commission_amt on 'dsr_sale' rows    (per shop / product)
+    //    discount   Σ discount_amt   on 'dsr_sale' rows    (per shop / product)
+    //    cashInHand = cash shops paid at the sale
+    //               + old dues collected
+    //               − cash paid to shops for damaged goods
+    //    (the very same cash formula the end-of-day settlement uses, so the
+    //     number the DSR sees here is the number the manager expects)
+    //  Read-only: nothing is written, no new table, no new function file.
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'dsr-my-day') {
+      const { dsrId } = req.query;
+      if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
+      const today = bdtToday();
+      let from = DATE_RE.test(req.query.from || '') ? req.query.from : today;
+      let to   = DATE_RE.test(req.query.to   || '') ? req.query.to   : from;
+      if (to < from) { const t = from; from = to; to = t; }
+      if ((Date.parse(to) - Date.parse(from)) / 86400000 > 92) return res.json({ ok: false, error: 'সর্বোচ্চ ৯৩ দিনের হিসাব দেখা যায়' });
+      const sid = String(dsrId);
+
+      const [txs, dueRows, dueCols, dmgCols, settled] = await Promise.all([
+        fetchAll(() => supabase.from('transactions')
+          .select('tx_id,type,date,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
+          .eq('sr_id', sid).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
+        fetchAll(() => supabase.from('due_calendar').select('id,shop_id,shop_name,due_date,amount,paid_amount')
+          .eq('client_type', 'shop').eq('dsr_id', sid).gte('due_date', from).lte('due_date', to)),
+        fetchAll(() => supabase.from('due_collections').select('shop_name,date,amount,created_at')
+          .eq('dsr_id', sid).gte('date', from).lte('date', to).order('created_at')),
+        fetchAll(() => supabase.from('damage_collections').select('*')
+          .eq('dsr_id', sid).gte('date', from).lte('date', to).order('created_at')),
+        fetchAll(() => supabase.from('dsr_settlements').select('cash_received')
+          .eq('dsr_id', sid).gte('date', from).lte('date', to))
+      ]);
+
+      // shop names for the commission / discount history
+      const shopIds = [...new Set((txs || []).filter(r => r.type === 'dsr_sale' && r.shop_id).map(r => String(r.shop_id)))];
+      const shopName = {};
+      if (shopIds.length) {
+        const { data: shRows } = await supabase.from('shops').select('id,name').in('id', shopIds);
+        (shRows || []).forEach(r => { shopName[String(r.id)] = r.name || ''; });
+      }
+
+      // cash shops handed over AT the sale (same rule as _computeSettlement:
+      // paid_amount also grows on later collections, so subtract every logged one)
+      let cashAtSale = 0;
+      const cashSales = [];
+      if ((dueRows || []).length) {
+        const ids = dueRows.map(r => String(r.id));
+        const logged = await fetchAll(() => supabase.from('due_collections').select('due_id,amount').in('due_id', ids));
+        const lm = {}; (logged || []).forEach(r => { lm[String(r.due_id)] = (lm[String(r.due_id)] || 0) + num(r.amount); });
+        dueRows.forEach(r => {
+          const initial = Math.max(0, num(r.paid_amount) - (lm[String(r.id)] || 0));
+          if (initial > 0.004) { cashAtSale += initial; cashSales.push({ date: r.due_date, shopName: r.shop_name || '', amount: _m2(initial) }); }
+        });
+      }
+      const dueCollected = (dueCols || []).reduce((a, r) => a + num(r.amount), 0);
+      const damageMoney = (dmgCols || []).filter(r => r.resolution === 'money').reduce((a, r) => a + num(r.refund_amt), 0);
+      const damageExchange = (dmgCols || []).filter(r => r.resolution === 'exchange').reduce((a, r) => a + Math.min(num(r.exch_value), num(r.damaged_value)), 0);
+
+      // group stock movements (give / return / van damage) by their slip
+      const groupTx = (type) => {
+        const g = {};
+        (txs || []).filter(r => r.type === type).forEach(r => {
+          const k = String(r.tx_id || r.created_at);
+          const o = g[k] = g[k] || { date: r.date, total: 0, items: [] };
+          o.total += num(r.total_revenue);
+          o.items.push({ productName: r.product_name || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units), value: _m2(r.total_revenue) });
+        });
+        return Object.values(g).map(o => ({ date: o.date, total: _m2(o.total), items: o.items }));
+      };
+      const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage');
+      const sumV = (arr) => _m2(arr.reduce((a, g) => a + g.total, 0));
+
+      const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
+        date: r.date, shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
+        units: num(r.total_units), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
+      }));
+      const commLines = perSale('commission_amt'), discLines = perSale('discount_amt');
+
+      const damageTotal = _m2(sumV(vanDamage) + damageMoney + damageExchange);
+      const cashInHand = _m2(cashAtSale + dueCollected - damageMoney);
+      const handedOver = _m2((settled || []).reduce((a, r) => a + num(r.cash_received), 0));
+
+      return res.json({
+        ok: true, dsrId: sid, from, to,
+        given:  { total: sumV(given),    slips: given },
+        ret:    { total: sumV(returned), slips: returned },
+        damage: {
+          total: damageTotal,
+          vanDamage: { total: sumV(vanDamage), slips: vanDamage },
+          shopDamage: (dmgCols || []).map(r => ({
+            date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units),
+            damagedValue: _m2(r.damaged_value), resolution: r.resolution,
+            refundAmt: _m2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units),
+            exchValue: _m2(Math.min(num(r.exch_value), num(r.damaged_value)))
+          })),
+          moneyRefunded: _m2(damageMoney), exchanged: _m2(damageExchange)
+        },
+        commission: { total: _m2(commLines.reduce((a, r) => a + r.amount, 0)), lines: commLines },
+        discount:   { total: _m2(discLines.reduce((a, r) => a + r.amount, 0)), lines: discLines },
+        cash: {
+          cashAtSale: _m2(cashAtSale), dueCollected: _m2(dueCollected), damageMoneyPaid: _m2(damageMoney),
+          inHand: cashInHand, handedOver, stillToHandOver: _m2(cashInHand - handedOver),
+          saleLines: cashSales,
+          dueLines: (dueCols || []).map(r => ({ date: r.date, shopName: r.shop_name || '', amount: _m2(r.amount) })),
+          damageLines: (dmgCols || []).filter(r => r.resolution === 'money' && num(r.refund_amt) > 0)
+            .map(r => ({ date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', amount: _m2(r.refund_amt) }))
         }
       });
     }
@@ -463,9 +618,9 @@ module.exports = async (req, res) => {
       if (mErr) throw mErr;
       const myShopIds = (mine || []).map(x => String(x.id));
       const [a, b] = await Promise.all([
-        supabase.from('due_calendar').select('*').eq('client_type', 'shop').eq('dsr_id', String(dsrId)).in('status', ['pending', 'partial']),
+        supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id').eq('client_type', 'shop').eq('dsr_id', String(dsrId)).in('status', ['pending', 'partial']),
         myShopIds.length
-          ? supabase.from('due_calendar').select('*').eq('client_type', 'shop').in('shop_id', myShopIds).in('status', ['pending', 'partial'])
+          ? supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id').eq('client_type', 'shop').in('shop_id', myShopIds).in('status', ['pending', 'partial'])
           : Promise.resolve({ data: [] })
       ]);
       if (a.error) throw a.error; if (b.error) throw b.error;
@@ -504,7 +659,7 @@ module.exports = async (req, res) => {
       const amount = num(d.amount);
       if (!d.dsrId || !d.shopId) return res.json({ ok: false, error: 'dsrId ও shopId প্রয়োজন' });
       if (amount <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
-      const { data: dues, error: dErr } = await supabase.from('due_calendar').select('*')
+      const { data: dues, error: dErr } = await supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id')
         .eq('client_type', 'shop').eq('shop_id', String(d.shopId)).in('status', ['pending', 'partial'])
         .order('due_date').order('created_at');
       if (dErr) throw dErr;
@@ -616,7 +771,7 @@ module.exports = async (req, res) => {
       const f = DATE_RE.test(from || '') ? from : bdtToday();
       const t = DATE_RE.test(to || '') ? to : f;
       const [dc, gc] = await Promise.all([
-        fetchAll(() => { let q = supabase.from('due_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; }),
+        fetchAll(() => { let q = supabase.from('due_collections').select('id,due_id,shop_id,shop_name,dsr_id,dsr_name,date,amount,created_at').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; }),
         fetchAll(() => { let q = supabase.from('damage_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; })
       ]);
       const shopIds = [...new Set([...(dc || []), ...(gc || [])].map(r => String(r.shop_id || '')).filter(Boolean))];
@@ -674,8 +829,18 @@ module.exports = async (req, res) => {
 
     if (req.method === 'GET') {
       const { srId, from, to } = req.query;
+      const pg = pageParams(req.query, 50);
+      if (pg) {
+        let q = supabase.from('sr_payments').select(PAY_COLS, { count: 'exact' }).order('created_at', { ascending: false }).order('id');
+        if (srId) q = q.eq('sr_id', srId);
+        if (from) q = q.gte('date', from);
+        if (to)   q = q.lte('date', to);
+        const { data, error, count } = await q.range(pg.from, pg.to);
+        if (error) throw error;
+        return res.json({ ok: true, rows: (data || []).map(mapPayment), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
+      }
       const data = await fetchAll(() => {
-        let q = supabase.from('sr_payments').select('*').order('created_at');
+        let q = supabase.from('sr_payments').select(PAY_COLS).order('created_at');
         if (srId) q = q.eq('sr_id', srId);
         if (from) q = q.gte('date', from);
         if (to)   q = q.lte('date', to);
@@ -685,16 +850,19 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'POST') {
-      const d = req.body;
-      const cashAmt   = num(d.cashAmount)    || 0;
-      const commAmt   = num(d.commissionAmt) || 0;
-      const discAmt   = num(d.discountAmt)   || 0;
-      const dmgAmt    = num(d.damageAmt)     || 0;
-      const total = cashAmt + commAmt + discAmt + dmgAmt || num(d.amount);
+      const d = req.body || {};
+      const cashAmt   = _m2(d.cashAmount);
+      const commAmt   = _m2(d.commissionAmt);
+      const discAmt   = _m2(d.discountAmt);
+      const dmgAmt    = _m2(d.damageAmt);
+      if (cashAmt < 0 || commAmt < 0 || discAmt < 0 || dmgAmt < 0) return res.json({ ok: false, error: 'পরিমাণ ঋণাত্মক হতে পারবে না' });
+      const total = _m2(cashAmt + commAmt + discAmt + dmgAmt || num(d.amount));
+      if (total <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
+      if (!d.srId) return res.json({ ok: false, error: 'srId প্রয়োজন' });
       const { error } = await supabase.from('sr_payments').insert({
         sr_id:          d.srId    || '',
         sr_name:        d.srName  || '',
-        date:           d.date,
+        date:           (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday(),
         amount:         total,
         cash_amount:    cashAmt,
         commission_amt: commAmt,
@@ -711,7 +879,7 @@ module.exports = async (req, res) => {
   } catch (e) {
     res.json({ ok: false, error: safeErr(e) });
   }
-};
+}
 
 // ── Map approval row to frontend shape ──────────────────────────────
 function mapApproval(r) {
@@ -731,7 +899,7 @@ function mapApproval(r) {
 // ── Move one approved row into its real table(s) ───────────────────
 async function _doApprove(row) {
   const d  = row.input_data || {};
-  const ts = new Date().toISOString();
+  const ts = now_();
 
   if (row.input_type === 'transaction') {
     // "give" now flows through the van-load safety net (same as SO
@@ -741,11 +909,12 @@ async function _doApprove(row) {
     // the stock deduction) actually get written.
     if (d.type === 'give') {
       const items = d.items || [];
-      const requestedAmount = items.reduce((s, item) => s + num(item.totalUnits) * num(item.sellingPrice), 0);
+      const rpA = await _repriceItems(items);
+      if (!rpA.ok) return { ok: false, error: rpA.error };
       const label = 'দেওয়া (ম্যানেজার' + (d.srName ? ' → ' + d.srName : '') + ')';
       const { error: ordErr } = await supabase.from('orders').insert({
         id: randomUUID(), so_id: '', so_name: label,
-        items, requested_amount: requestedAmount,
+        items: rpA.items, requested_amount: rpA.amount,
         status: 'approved', assigned_dsr_id: String(d.srId || ''), load_status: 'not_started', load_ticks: {},
         approved_by: 'owner', approved_at: ts, created_at: ts
       });
@@ -753,70 +922,45 @@ async function _doApprove(row) {
       return;
     }
 
+    // Everything else is priced on the server (CALC-5 / CALC-6) and guarded
+    // against negative stock (CALC-9) exactly like a direct entry.
+    const dDate = (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday();
+    const pricedA = await priceItems(d.items || [], { type: d.type, srId: d.srId, date: dDate });
+    if (!pricedA.ok) return { ok: false, error: pricedA.error };
+    if (['point_sale', 'return_company'].includes(d.type) && await blockNegativeStock()) {
+      const msgA = stockShortage(pricedA.lines);
+      if (msgA) return { ok: false, error: msgA };
+    }
     const txId = randomUUID();
-    const rows = (d.items || []).map(item => {
-      const u  = num(item.totalUnits);
-      const pp = num(item.purchasePrice);
-      const sp = num(item.sellingPrice);
-      return {
-        tx_id:          txId,
-        type:           d.type,
-        sr_id:          d.srId   || '',
-        sr_name:        d.srName || '',
-        date:           d.date,
-        slip_no:        d.slipNo || '',
-        product_id:     String(item.productId   || ''),
-        product_name:   String(item.productName || ''),
-        sku:            String(item.sku         || ''),
-        cases:          num(item.cases),
-        pcs:            num(item.pcs),
-        total_units:    u,
-        purchase_price: pp,
-        selling_price:  sp,
-        total_cost:     u * pp,
-        total_revenue:  u * sp,
-        note:           d.note || '',
-        created_at:     ts
-      };
-    });
+    const rows = pricedA.lines.map(l => txRow(l, {
+      tx_id: txId, type: d.type, sr_id: d.srId || '', sr_name: d.srName || '',
+      date: dDate, slip_no: d.slipNo || '', note: d.note || '', created_at: ts
+    }));
     const { error: txErr } = await supabase.from('transactions').insert(rows);
     if (txErr) throw txErr;
 
     if (d.type === 'damage') {
-      const dmgRows = (d.items || []).map(item => {
-        const u  = num(item.totalUnits);
-        const pp = num(item.purchasePrice);
-        return {
-          tx_id:          txId,
-          product_id:     String(item.productId   || ''),
-          product_name:   String(item.productName || ''),
-          sku:            String(item.sku         || ''),
-          total_units:    u,
-          purchase_price: pp,
-          total_cost:     u * pp,
-          date:           d.date,
-          sr_id:          d.srId   || '',
-          sr_name:        d.srName || '',
-          status:         'pending',
-          cleared_date:   null,
-          created_at:     ts
-        };
-      });
+      const dmgRows = pricedA.lines.map(l => ({
+        tx_id: txId, product_id: l.productId, product_name: l.productName, sku: l.sku,
+        total_units: l.units, purchase_price: l.purchasePrice, total_cost: l.cost,
+        date: dDate, sr_id: d.srId || '', sr_name: d.srName || '',
+        status: 'pending', cleared_date: null, created_at: ts
+      }));
       const { error: dmgErr } = await supabase.from('dmg_claims').insert(dmgRows);
-      if (dmgErr) throw dmgErr;
+      if (dmgErr) { await supabase.from('transactions').delete().eq('tx_id', txId); throw dmgErr; }
     }
   }
 
   if (row.input_type === 'payment') {
-    const cashAmt = num(d.cashAmount)    || 0;
-    const commAmt = num(d.commissionAmt) || 0;
-    const discAmt = num(d.discountAmt)   || 0;
-    const dmgAmt  = num(d.damageAmt)     || 0;
-    const total   = cashAmt + commAmt + discAmt + dmgAmt || num(d.amount);
+    const cashAmt = _m2(d.cashAmount);
+    const commAmt = _m2(d.commissionAmt);
+    const discAmt = _m2(d.discountAmt);
+    const dmgAmt  = _m2(d.damageAmt);
+    const total   = _m2(cashAmt + commAmt + discAmt + dmgAmt || num(d.amount));
     const { error } = await supabase.from('sr_payments').insert({
       sr_id:          d.srId   || '',
       sr_name:        d.srName || '',
-      date:           d.date,
+      date:           (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday(),
       amount:         total,
       cash_amount:    cashAmt,
       commission_amt: commAmt,
@@ -840,8 +984,8 @@ async function _doApprove(row) {
       const expRows = entries.map(e => ({
         category_id:   String(e.categoryId   || ''),
         category_name: String(e.categoryName || ''),
-        date:          d.date,
-        amount:        num(e.amount),
+        date:          (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday(),
+        amount:        _m2(e.amount),
         note:          d.note || '',
         created_at:    ts
       }));
@@ -860,8 +1004,19 @@ async function _loadAndDeduct(id, allowedLoadStatuses) {
   if (!row || row.status !== 'approved') return { ok: false, error: 'অর্ডার পাওয়া যায়নি' };
   if (row.load_status === 'loaded') return { ok: false, error: 'এই লোড ইতিমধ্যে সম্পন্ন হয়ে গেছে' };
   if (!allowedLoadStatuses.includes(row.load_status)) return { ok: false, error: 'এই লোড এখন সম্পন্ন করা যাবে না' };
-  const items = (row.items || []).filter(it => num(it.totalUnits) > 0);
-  if (!items.length) return { ok: false, error: 'অর্ডারে কোনো পণ্য নেই' };
+  const rawItems = (row.items || []).filter(it => num(it.totalUnits) > 0 || num(it.cases) > 0 || num(it.pcs) > 0);
+  if (!rawItems.length) return { ok: false, error: 'অর্ডারে কোনো পণ্য নেই' };
+
+  // CALC-5 — the DSR is charged the products table's price at the moment the
+  // stock leaves the warehouse (numbers stored in the order are not trusted).
+  const loadDate = bdtToday();                       // CALC-4: Asia/Dhaka calendar day
+  const priced = await priceItems(rawItems, { type: 'give', srId: row.assigned_dsr_id, date: loadDate });
+  if (!priced.ok) return { ok: false, error: priced.error };
+  // CALC-9 — refuse BEFORE claiming the order, with a readable message.
+  if (await blockNegativeStock()) {
+    const short = stockShortage(priced.lines);
+    if (short) return { ok: false, error: short };
+  }
 
   const prevStatus = row.load_status;
   const loadedAt = now_();
@@ -878,18 +1033,12 @@ async function _loadAndDeduct(id, allowedLoadStatuses) {
   } catch (_) {}
 
   const txId = randomUUID();
-  const date = bdtToday(); // Asia/Dhaka calendar day
-  const rows = items.map(item => {
-    const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
-    return {
-      tx_id: txId, type: 'give', sr_id: row.assigned_dsr_id, sr_name: dsrName,
-      date, slip_no: '', product_id: String(item.productId || ''), product_name: String(item.productName || ''),
-      sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
-      total_units: u, purchase_price: pp, selling_price: sp,
-      total_cost: u * pp, total_revenue: u * sp,
-      note: 'ভ্যান-লোড অর্ডার #' + String(row.id).slice(0, 8), created_at: loadedAt
-    };
-  });
+  const date = loadDate;
+  const rows = priced.lines.map(l => txRow(l, {
+    tx_id: txId, type: 'give', sr_id: row.assigned_dsr_id, sr_name: dsrName,
+    date, slip_no: '',
+    note: 'ভ্যান-লোড অর্ডার #' + String(row.id).slice(0, 8), created_at: loadedAt
+  }));
   const { error: txErr } = await supabase.from('transactions').insert(rows);
   if (txErr) {
     await supabase.from('orders').update({ load_status: prevStatus, loaded_at: null }).eq('id', id);
@@ -920,18 +1069,20 @@ async function _loadAndDeduct(id, allowedLoadStatuses) {
 const _r2 = n => Math.round((num(n) + Number.EPSILON) * 100) / 100;
 
 async function _computeSettlement(dsrId, date) {
-  const [dayTx, dueRows, dueColsToday, dmgCols, settled, van, dsrRow, allTxForDue, allPay] = await Promise.all([
+  const [dayTx, dueRows, dueColsToday, dmgCols, settled, vanDetail, dsrRow, dueTotals] = await Promise.all([
     fetchAll(() => supabase.from('transactions').select('type,product_id,total_units,total_revenue,commission_amt,discount_amt')
       .eq('sr_id', dsrId).eq('date', date).in('type', ['give', 'return', 'damage', 'dsr_sale'])),
     fetchAll(() => supabase.from('due_calendar').select('id,amount,paid_amount').eq('client_type', 'shop').eq('dsr_id', dsrId).eq('due_date', date)),
     fetchAll(() => supabase.from('due_collections').select('shop_name,amount').eq('dsr_id', dsrId).eq('date', date)),
     fetchAll(() => supabase.from('damage_collections').select('*').eq('dsr_id', dsrId).eq('date', date).order('created_at')),
     fetchAll(() => supabase.from('dsr_settlements').select('*').eq('dsr_id', dsrId).eq('date', date).order('created_at')),
-    computeVanStock(dsrId, date, { damage: 'all' }),
+    // CALC-2 — the van carries stock over from earlier days, so the
+    // settlement hands back EVERYTHING still on the van, not just today's.
+    computeVanDetail(dsrId, date, { damage: 'all' }),
     supabase.from('srs').select('name').eq('id', dsrId).maybeSingle(),
-    fetchAll(() => supabase.from('transactions').select('type,total_revenue').eq('sr_id', dsrId).in('type', ['give', 'return'])),
-    fetchAll(() => supabase.from('sr_payments').select('amount').eq('sr_id', dsrId))
+    getDueTotals([String(dsrId)])
   ]);
+  const van = vanDetail.stock;
 
   const sum = (t, f) => (dayTx || []).filter(r => r.type === t).reduce((a, r) => a + num(r[f]), 0);
   const givenToday = sum('give', 'total_revenue'), returnedToday = sum('return', 'total_revenue');
@@ -972,30 +1123,28 @@ async function _computeSettlement(dsrId, date) {
   const pids = Object.keys(van).filter(k => num(van[k]) > 0);
   const returnItems = [];
   if (pids.length) {
-    const { data: prods, error: pErr } = await supabase.from('products').select('id,name,sku,case_size,selling_price,purchase_price').in('id', pids);
-    if (pErr) throw pErr;
-    const gives = {}; // price the DSR was actually charged today
-    (await fetchAll(() => supabase.from('transactions').select('product_id,total_units,total_revenue,selling_price').eq('sr_id', dsrId).eq('date', date).eq('type', 'give')))
-      .forEach(r => { const k = String(r.product_id); gives[k] = gives[k] || { u: 0, v: 0 }; gives[k].u += num(r.total_units); gives[k].v += num(r.total_revenue); });
-    (prods || []).forEach(p => {
-      const units = num(van[String(p.id)]);
-      const g = gives[String(p.id)];
-      const sp = g && g.u > 0 ? g.v / g.u : num(p.selling_price);
+    const prodMap = await loadProducts(pids);
+    // price the DSR was actually charged (his latest loading of that product)
+    const givePrice = await weightedGivePrices(dsrId, pids, date);
+    pids.forEach(pid => {
+      const p = prodMap[pid]; if (!p) return;
+      const units = num(van[pid]);
+      const sp = givePrice[pid] !== undefined ? givePrice[pid] : num(p.selling_price);
       const cs = num(p.case_size) || 1;
+      const whole = Math.floor(units / cs + 1e-9);
       returnItems.push({
         productId: String(p.id), productName: p.name || '', sku: p.sku || '', totalUnits: units,
-        cases: Math.floor(units / cs), pcs: +(units - Math.floor(units / cs) * cs).toFixed(4),
-        sellingPrice: sp, purchasePrice: num(p.purchase_price), value: _r2(units * sp)
+        cases: whole, pcs: +(units - whole * cs).toFixed(4),
+        sellingPrice: sp, purchasePrice: num(p.purchase_price),
+        value: lineMoney(p, units, 'sell', sp), cost: lineMoney(p, units, 'buy'),
+        _rule: bonusSnapshot(p)
       });
     });
   }
   const returnValue = _r2(returnItems.reduce((a, i) => a + i.value, 0));
 
-  const lifetimeDue = _r2(
-    (allTxForDue || []).filter(r => r.type === 'give').reduce((a, r) => a + num(r.total_revenue), 0)
-    - (allTxForDue || []).filter(r => r.type === 'return').reduce((a, r) => a + num(r.total_revenue), 0)
-    - (allPay || []).reduce((a, r) => a + num(r.amount), 0)
-  );
+  const _dt = dueTotals[String(dsrId)] || { givenRev: 0, returnRev: 0, payments: 0 };
+  const lifetimeDue = _r2((_dt.givenRev - _dt.returnRev) - _dt.payments);
 
   const pendingCash = Math.max(0, cashExpectedRaw);
   const hasPending = returnItems.length > 0 || pend.commission > 0 || pend.discount > 0 || pend.damage > 0 || Math.abs(cashExpectedRaw) > 0.005;
@@ -1077,14 +1226,14 @@ async function _performSettlement(d, byName) {
     //    trigger puts the stock back in the warehouse, due drops by value).
     if (doReturn) {
       const txId = randomUUID();
-      const rows = c.returnItems.map(i => ({
+      const rows = c.returnItems.map(i => Object.assign({
         tx_id: txId, type: 'return', sr_id: dsrId, sr_name: c.dsrName || '', date, slip_no: '',
         product_id: i.productId, product_name: i.productName, sku: i.sku,
         cases: i.cases, pcs: i.pcs, total_units: i.totalUnits,
         purchase_price: i.purchasePrice, selling_price: i.sellingPrice,
-        total_cost: i.totalUnits * i.purchasePrice, total_revenue: i.totalUnits * i.sellingPrice,
+        total_cost: i.cost, total_revenue: i.value,
         note: 'দিনশেষ হিসাব — অবিক্রিত মাল ফেরত', created_at: ts
-      }));
+      }, i._rule || {}));
       const { error: retErr } = await supabase.from('transactions').insert(rows);
       if (retErr) throw retErr;
     }

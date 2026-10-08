@@ -9,8 +9,37 @@ const { randomUUID } = require('crypto');
 const {
   supabase, cors, num, now_, str, safeErr,
   mapShop, mapDue, mapTx, fetchAll, mapShopVisit, mapPosCustomer, bdtToday, computeVanStock,
-  addDaysStr, cyclePeriodBounds, cyclePeriodToday
+  addDaysStr, cyclePeriodBounds, cyclePeriodToday, pageParams, idemRun, blockNegativeStock
 } = require('./_lib/db');
+const { priceItems, txRow, stockShortage, r2: _money2 } = require('./_lib/money');
+
+const DATE_RE_ = /^\d{4}-\d{2}-\d{2}$/;
+// PERF-5 — explicit column lists (no select('*'))
+const SHOP_COLS = 'id,shop_no,name,keeper_name,phone,address,lat,lng,assigned_dsr_id,assigned_dsr_name,road_id,road_name,created_at';
+const DUE_COLS_ = 'id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id';
+const TX_COLS_ = 'tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at,id';
+
+// Open shop due per shop, summed INSIDE Postgres (PERF-3). Falls back to the
+// old in-memory sum if the SQL function is not installed yet.
+async function _shopDueMap(shopIds, dsrId) {
+  const map = {};
+  try {
+    const { data, error } = await supabase.rpc('shop_due_totals', { p_shop_ids: shopIds && shopIds.length ? shopIds.map(String) : null, p_dsr_id: dsrId || null });
+    if (error) throw error;
+    (data || []).forEach(r => { map[String(r.shop_id || '')] = num(r.due); });
+    return map;
+  } catch (e) {
+    const rows = await fetchAll(() => {
+      let dq = supabase.from('due_calendar').select('shop_id,amount,paid_amount')
+        .eq('client_type', 'shop').neq('status', 'cleared');
+      if (dsrId) dq = dq.eq('dsr_id', dsrId);
+      return dq;
+    });
+    rows.forEach(r => { const sid = String(r.shop_id || ''); map[sid] = (map[sid] || 0) + Math.max(0, num(r.amount) - num(r.paid_amount)); });
+    return map;
+  }
+}
+
 
 // V48 update #37/#38 — re-verifies an Owner PIN server-side (never trust
 // a client-side role flag alone). Same table/pattern already used by
@@ -69,8 +98,8 @@ async function _buildShopLedger(shopId) {
     fetchAll(() => supabase.from('transactions')
       .select('id,tx_id,type,date,created_at,sr_name,slip_no,total_units,total_revenue,commission_amt,discount_amt,note')
       .eq('shop_id', sid).in('type', ['dsr_sale', 'point_sale', 'point_damage_return'])),
-    fetchAll(() => supabase.from('due_calendar').select('*').eq('shop_id', sid).eq('client_type', 'shop')),
-    fetchAll(() => supabase.from('due_collections').select('*').eq('shop_id', sid)),
+    fetchAll(() => supabase.from('due_calendar').select(DUE_COLS_).eq('shop_id', sid).eq('client_type', 'shop')),
+    fetchAll(() => supabase.from('due_collections').select('id,due_id,shop_id,dsr_name,date,amount,created_at').eq('shop_id', sid)),
     fetchAll(() => supabase.from('damage_collections').select('*').eq('shop_id', sid))
   ]);
 
@@ -346,49 +375,43 @@ module.exports = async (req, res) => {
     //  LIST / SEARCH — by number, name, DSR, or GPS proximity
     // ══════════════════════════════════════════════════
     if (req.method === 'GET' && (action === 'list' || action === 'search')) {
-      const { q, dsrId, roadId, lat, lng, limit } = req.query;
-      // fetchAll — PostgREST silently returns only the first 1000 rows of a
-      // bare query, which is why the owner (who sees ALL shops) stopped
-      // seeing shops after 1000, while DSR/SO views (filtered to a subset
-      // under 1000) looked fine.
-      const data = await fetchAll(() => {
-        let query = supabase.from('shops').select('*').order('created_at', { ascending: false });
-        if (dsrId) query = query.eq('assigned_dsr_id', dsrId);
-        if (roadId) query = query.eq('road_id', roadId);
-        return query;
-      });
-      let shops = (data || []).map(mapShop);
+      const { q, dsrId, dsrIds, roadId, lat, lng, limit } = req.query;
+      const dsrList = String(dsrIds || '').split(',').map(x => x.trim()).filter(Boolean);
 
-      // Attach each shop's outstanding due total (§11/§20 — "see due status").
-      // The old code sent every shop id in one `.in('shop_id', [...1000s of
-      // ids])` request (a URL far too long for PostgREST) and again got cut
-      // at 1000 rows. Now: read the open shop-dues once (paginated, unfiltered
-      // by id list) and total them per shop in memory.
-      if (shops.length) {
-        const dueRows = await fetchAll(() => {
-          let dq = supabase.from('due_calendar').select('shop_id,amount,paid_amount,status')
-            .eq('client_type', 'shop').neq('status', 'cleared');
-          if (dsrId) dq = dq.eq('dsr_id', dsrId);
-          return dq;
-        });
-        const dueMap = {};
-        (dueRows || []).forEach(r => {
-          const sid = String(r.shop_id || '');
-          dueMap[sid] = (dueMap[sid] || 0) + (num(r.amount) - num(r.paid_amount));
-        });
-        shops = shops.map(s => ({ ...s, totalDue: dueMap[s.id] || 0 }));
+      // PERF-1 — the search text is matched INSIDE the database (trigram
+      // index on name/phone/keeper), and the list is cut into pages there too.
+      const needle = String(q || '').trim().replace(/[\\%_,()*]/g, ' ').replace(/\s+/g, ' ').trim();
+      const applyFilters = (qb) => {
+        if (dsrId) qb = qb.eq('assigned_dsr_id', dsrId);
+        if (dsrList.length) qb = qb.in('assigned_dsr_id', dsrList);
+        if (roadId) qb = qb.eq('road_id', roadId);
+        if (needle) {
+          const like = '%' + needle + '%';
+          qb = qb.or(['shop_no', 'name', 'keeper_name', 'phone', 'assigned_dsr_name', 'address'].map(c => c + '.ilike.' + like).join(','));
+        }
+        return qb;
+      };
+
+      // Paged mode (?page=1&pageSize=100): one small page + its due totals.
+      const pg = pageParams(req.query, 100);
+      if (pg && !(lat && lng)) {
+        const { data, error, count } = await applyFilters(supabase.from('shops').select(SHOP_COLS, { count: 'exact' })
+          .order('created_at', { ascending: false }).order('id')).range(pg.from, pg.to);
+        if (error) throw error;
+        const pageShops = (data || []).map(mapShop);
+        const dueMap = pageShops.length ? await _shopDueMap(pageShops.map(x => x.id), dsrId || '') : {};
+        const shops = pageShops.map(x => ({ ...x, totalDue: dueMap[x.id] || 0 }));
+        return res.json({ ok: true, shops, page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
       }
 
-      if (q) {
-        const needle = String(q).trim().toLowerCase();
-        shops = shops.filter(s =>
-          s.shopNo.toLowerCase().includes(needle) ||
-          s.name.toLowerCase().includes(needle) ||
-          s.keeperName.toLowerCase().includes(needle) ||
-          s.phone.includes(needle) ||
-          s.assignedDsrName.toLowerCase().includes(needle) ||
-          s.address.toLowerCase().includes(needle)
-        );
+      // Full-list mode (kept for the nearest-shop picker, which needs every
+      // shop of one DSR to sort by distance). Still much lighter than before:
+      // explicit columns, search done by the database, dues summed by Postgres.
+      const data = await fetchAll(() => applyFilters(supabase.from('shops').select(SHOP_COLS).order('created_at', { ascending: false })));
+      let shops = (data || []).map(mapShop);
+      if (shops.length) {
+        const dueMap = await _shopDueMap(shops.length <= 150 ? shops.map(x => x.id) : null, dsrId || '');
+        shops = shops.map(x => ({ ...x, totalDue: dueMap[x.id] || 0 }));
       }
 
       // Free GPS-proximity sort — simple haversine, no paid "nearby search" API
@@ -434,31 +457,37 @@ module.exports = async (req, res) => {
       else if (range === 'all') from = null;
       else { const b = cyclePeriodBounds(cyclePeriodToday()); from = b.start; to = b.end < today ? b.end : today; }
 
-      const [txRows, dueRows] = await Promise.all([
-        fetchAll(() => {
+      // PERF-3 — buying totals and open dues are summed inside Postgres.
+      // (The old code downloaded every sale row of the window — for
+      // "all time" that is the whole sales history.)
+      const agg = {};
+      const dueMap = await _shopDueMap(null, '');
+      let aggOk = false;
+      try {
+        const { data, error } = await supabase.rpc('shop_buying_totals', { p_from: from || '1900-01-01', p_to: to });
+        if (error) throw error;
+        (data || []).forEach(r => {
+          const sid = String(r.shop_id || ''); if (!sid) return;
+          agg[sid] = { shopId: sid, buy: num(r.buy), orders: { size: num(r.orders) }, lastBuy: String(r.last_buy || '').slice(0, 10) };
+        });
+        aggOk = true;
+      } catch (e) { aggOk = false; }
+      if (!aggOk) {
+        const txRows = await fetchAll(() => {
           let q = supabase.from('transactions').select('shop_id,type,tx_id,date,total_revenue')
             .in('type', ['dsr_sale', 'point_sale', 'point_damage_return']).neq('shop_id', '');
           if (from) q = q.gte('date', from);
           return q.lte('date', to);
-        }),
-        fetchAll(() => supabase.from('due_calendar').select('shop_id,amount,paid_amount')
-          .eq('client_type', 'shop').neq('status', 'cleared'))
-      ]);
-
-      const agg = {};
-      (txRows || []).forEach(r => {
-        const sid = String(r.shop_id || ''); if (!sid) return;
-        const a = agg[sid] || (agg[sid] = { shopId: sid, buy: 0, orders: new Set(), lastBuy: '' });
-        const rev = num(r.total_revenue);
-        if (r.type === 'point_damage_return') { a.buy -= rev; return; }
-        a.buy += rev; a.orders.add(String(r.tx_id || ''));
-        const d = String(r.date || '').slice(0, 10); if (d > a.lastBuy) a.lastBuy = d;
-      });
-      const dueMap = {};
-      (dueRows || []).forEach(r => {
-        const sid = String(r.shop_id || ''); if (!sid) return;
-        dueMap[sid] = (dueMap[sid] || 0) + Math.max(0, num(r.amount) - num(r.paid_amount));
-      });
+        });
+        (txRows || []).forEach(r => {
+          const sid = String(r.shop_id || ''); if (!sid) return;
+          const a = agg[sid] || (agg[sid] = { shopId: sid, buy: 0, orders: new Set(), lastBuy: '' });
+          const rev = num(r.total_revenue);
+          if (r.type === 'point_damage_return') { a.buy -= rev; return; }
+          a.buy += rev; a.orders.add(String(r.tx_id || ''));
+          const d = String(r.date || '').slice(0, 10); if (d > a.lastBuy) a.lastBuy = d;
+        });
+      }
 
       let list = Object.values(agg).filter(a => a.buy > 0).map(a => {
         const due = +(dueMap[a.shopId] || 0).toFixed(2);
@@ -498,7 +527,7 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'ledger') {
       const { shopId } = req.query;
       if (!shopId) return res.json({ ok: false, error: 'shopId প্রয়োজন' });
-      const { data: shopRow, error: shopErr } = await supabase.from('shops').select('*').eq('id', shopId).maybeSingle();
+      const { data: shopRow, error: shopErr } = await supabase.from('shops').select(SHOP_COLS).eq('id', shopId).maybeSingle();
       if (shopErr) throw shopErr;
       if (!shopRow) return res.json({ ok: false, error: 'দোকান পাওয়া যায়নি' });
       const L = await _buildShopLedger(shopId);
@@ -528,13 +557,13 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'detail') {
       const { shopId } = req.query;
       if (!shopId) return res.json({ ok: false, error: 'shopId প্রয়োজন' });
-      const { data: shopRow, error: shopErr } = await supabase.from('shops').select('*').eq('id', shopId).single();
+      const { data: shopRow, error: shopErr } = await supabase.from('shops').select(SHOP_COLS).eq('id', shopId).single();
       if (shopErr) throw shopErr;
       if (!shopRow) return res.json({ ok: false, error: 'দোকান পাওয়া যায়নি' });
 
       const [dueRes, txRows] = await Promise.all([
-        supabase.from('due_calendar').select('*').eq('shop_id', shopId).order('due_date', { ascending: false }),
-        fetchAll(() => supabase.from('transactions').select('*').eq('shop_id', shopId).order('created_at', { ascending: false }))
+        supabase.from('due_calendar').select(DUE_COLS_).eq('shop_id', shopId).order('due_date', { ascending: false }),
+        fetchAll(() => supabase.from('transactions').select(TX_COLS_).eq('shop_id', shopId).order('created_at', { ascending: false }))
       ]);
       const dues  = (dueRes.data || []).map(mapDue);
       const sales = (txRows || []).map(mapTx);
@@ -562,28 +591,29 @@ module.exports = async (req, res) => {
     //  (client_type='shop') for visibility, while the amount stays under
     //  the DSR's name until collected/handed over.
     // ══════════════════════════════════════════════════
-    if (req.method === 'POST' && action === 'visit-sale') {
-      const d = req.body;
+    if (req.method === 'POST' && action === 'visit-sale') return idemRun(req, res, 'visit-sale', async () => {
+      const d = req.body || {};
       if (!d.shopId || !d.dsrId) return res.json({ ok: false, error: 'shopId ও dsrId প্রয়োজন' });
       const items = Array.isArray(d.items) ? d.items : [];
       if (!items.length) return res.json({ ok: false, error: 'অন্তত একটি পণ্য প্রয়োজন' });
 
       const txId = randomUUID();
-      const date = d.date || now_().slice(0, 10);
+      // CALC-4 — the sale date is the Asia/Dhaka calendar day (never the UTC date)
+      const date = (d.date && DATE_RE_.test(d.date)) ? d.date : bdtToday();
 
-      // v4.8.0 — a DSR can never sell more than is on his van. The screen
-      // also caps the inputs, but THIS is the real guard (a hand-edited
-      // request, a stale screen or a double-tap cannot get past it).
-      // Same numbers as the on-screen "গাড়িতে আছে" figure.
+      // CALC-5 / CALC-6 — prices come from the products table; every line is
+      // rounded to 2 decimals (whole cases at the case price).
+      const priced = await priceItems(items, { type: 'dsr_sale' });
+      if (!priced.ok) return res.json({ ok: false, error: priced.error });
+      const lines = priced.lines;
+
+      // v4.8.0 — a DSR can never sell more than is on his van. v5.1: the van
+      // stock now CARRIES OVER from earlier days (CALC-2), so stock left
+      // from yesterday can still be sold today.
       {
         const want = {}, names = {};
-        items.forEach(it => {
-          const pid = String(it.productId || ''); if (!pid) return;
-          const u = num(it.totalUnits);
-          if (u < 0) return;
-          want[pid] = (want[pid] || 0) + u; names[pid] = String(it.productName || 'পণ্য');
-        });
-        const van = await computeVanStock(String(d.dsrId), /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : bdtToday(), { damage: 'cleared' });
+        lines.forEach(l => { want[l.productId] = (want[l.productId] || 0) + l.units; names[l.productId] = l.productName || 'পণ্য'; });
+        const van = await computeVanStock(String(d.dsrId), date, { damage: 'cleared' });
         for (const pid of Object.keys(want)) {
           const have = num(van[pid]);
           if (want[pid] > have + 0.0001)
@@ -591,82 +621,77 @@ module.exports = async (req, res) => {
         }
       }
 
-      const rows = items.map(item => {
-        const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
-        return {
-          tx_id: txId, type: 'dsr_sale',
-          sr_id: String(d.dsrId), sr_name: d.dsrName || '',
-          date, slip_no: d.slipNo || '',
-          product_id: String(item.productId || ''), product_name: String(item.productName || ''),
-          sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
-          total_units: u, purchase_price: pp, selling_price: sp,
-          total_cost: u * pp, total_revenue: u * sp,
-          // V35 — persist this item's own commission/discount (per-case
-          // rate × cases sold, computed client-side) so the DSR Payment
-          // page can total "today's commission" / "today's discount"
-          // straight from the DB.
-          commission_amt: num(item.commission) || 0,
-          discount_amt: num(item.discount) || 0,
-          shop_id: String(d.shopId), note: d.note || '',
-          created_at: now_()
-        };
-      });
-      // The bill's grand totals (d.commissionAmt / d.discountAmt) also
-      // include any flat invoice-level discount that isn't tied to a
-      // single product line (see _dsrSaleComputeBill's invoiceDiscount).
-      // Reconcile any gap onto the first row so the sum of commission_amt
-      // / discount_amt across this sale's rows always matches the exact
-      // amounts shown on the DSR's bill/slip and used to compute payable.
+      const ts = now_();
+      const rows = lines.map(l => txRow(l, {
+        tx_id: txId, type: 'dsr_sale',
+        sr_id: String(d.dsrId), sr_name: d.dsrName || '',
+        date, slip_no: d.slipNo || '',
+        // V35 — persist this item's own commission/discount (per-case
+        // rate × cases sold) so the DSR Payment page can total them.
+        commission_amt: _money2(l.commission), discount_amt: _money2(l.discount),
+        shop_id: String(d.shopId), note: d.note || '', created_at: ts
+      }));
+      // The bill's grand totals also include any flat invoice-level discount
+      // that isn't tied to one product line. Reconcile the gap onto the first
+      // row so the sum across the sale's rows equals the bill's exact amounts.
       if (rows.length) {
         const itemCommSum = rows.reduce((s, r) => s + num(r.commission_amt), 0);
         const itemDiscSum = rows.reduce((s, r) => s + num(r.discount_amt), 0);
-        const extraComm = +(num(d.commissionAmt || 0) - itemCommSum).toFixed(4);
-        const extraDisc = +(num(d.discountAmt || 0) - itemDiscSum).toFixed(4);
-        rows[0].commission_amt = +(num(rows[0].commission_amt) + extraComm).toFixed(4);
-        rows[0].discount_amt   = +(num(rows[0].discount_amt) + extraDisc).toFixed(4);
+        const extraComm = _money2(num(d.commissionAmt || 0) - itemCommSum);
+        const extraDisc = _money2(num(d.discountAmt || 0) - itemDiscSum);
+        rows[0].commission_amt = _money2(num(rows[0].commission_amt) + extraComm);
+        rows[0].discount_amt   = _money2(num(rows[0].discount_amt) + extraDisc);
       }
-      const { error: txErr } = await supabase.from('transactions').insert(rows);
-      if (txErr) throw txErr;
 
-      const payable  = rows.reduce((s, r) => s + num(r.total_revenue), 0) - num(d.discountAmt || 0) - num(d.commissionAmt || 0);
-      const paidNow  = num(d.paidAmount);
-      const shortfall = +(payable - paidNow).toFixed(4);
+      const payable  = _money2(rows.reduce((s, r) => s + num(r.total_revenue), 0) - num(d.discountAmt || 0) - num(d.commissionAmt || 0));
+      const paidNow  = _money2(num(d.paidAmount));
+      const shortfall = _money2(payable - paidNow);
 
-      // §12 — every shop visit leaves a due_calendar trace: a shortfall
-      // opens a pending entry that feeds the DSR's Clear Plate; a fully
-      // paid visit still writes an already-cleared row so the shop's due
-      // history (§11 detail view) shows a complete, honest audit trail
-      // of every visit — not just the ones still owed.
-      let due = null;
+      // §12 — every shop visit leaves a due_calendar trace: a shortfall opens
+      // a pending entry; a fully paid visit writes an already-cleared row so
+      // the shop's history is complete.
+      let dueRowIn = null;
       if (payable > 0) {
         const { data: shopRow } = await supabase.from('shops').select('name').eq('id', d.shopId).single();
-        const isCleared = shortfall <= 0;
-        const { data: dueRow, error: dueErr } = await supabase.from('due_calendar').insert({
+        const isCleared = shortfall <= 0.009;
+        dueRowIn = {
           id: randomUUID(), tx_id: txId, dsr_id: String(d.dsrId), dsr_name: d.dsrName || '',
           client_type: 'shop', shop_id: String(d.shopId), shop_name: shopRow ? shopRow.name : '',
-          due_date: date, amount: payable, paid_amount: isCleared ? payable : Math.max(0, paidNow),
+          due_date: date, amount: payable, paid_amount: isCleared ? payable : Math.max(0, Math.min(payable, paidNow)),
           note: 'দোকান বিক্রয়' + (isCleared ? ' (সম্পূর্ণ পরিশোধিত)' : ' বাকি'),
-          status: isCleared ? 'cleared' : 'pending',
+          status: isCleared ? 'cleared' : (paidNow > 0 ? 'partial' : 'pending'),
           cleared_date: isCleared ? date : null,
-          created_at: now_()
-        }).select().single();
-        if (dueErr) throw dueErr;
-        due = mapDue(dueRow);
+          created_at: ts
+        };
+        // keep the old behaviour: a sale with some cash down starts as 'pending'
+        if (!isCleared) dueRowIn.status = 'pending';
+      }
+      const visitIn = { shop_id: String(d.shopId), visit_role: 'dsr', visitor_id: String(d.dsrId), visitor_name: d.dsrName || '', visit_date: date, created_at: ts };
+
+      // CALC-7 — sale rows + due row + visit are written in ONE database
+      // transaction (SQL function create_shop_sale): either all of it
+      // exists or none of it. Falls back to a compensating cleanup if the
+      // function is not installed yet.
+      let due = null;
+      let rpcDone = false;
+      {
+        const { data, error } = await supabase.rpc('create_shop_sale', { p_rows: rows, p_due: dueRowIn, p_visit: visitIn });
+        if (!error) { rpcDone = true; due = data ? mapDue(data) : null; }
+        else if (!/create_shop_sale|PGRST202|42883|schema cache/i.test(String(error.code || '') + ' ' + String(error.message || ''))) throw error;
+      }
+      if (!rpcDone) {
+        const { error: txErr } = await supabase.from('transactions').insert(rows);
+        if (txErr) throw txErr;
+        if (dueRowIn) {
+          const { data: dueRow, error: dueErr } = await supabase.from('due_calendar').insert(dueRowIn).select().single();
+          if (dueErr) { await supabase.from('transactions').delete().eq('tx_id', txId); throw dueErr; }
+          due = mapDue(dueRow);
+        }
+        try { await supabase.from('shop_visits').insert(visitIn); } catch (ve) { /* non-fatal */ }
       }
 
-      // Map — Daily Visit Tracking (Update #26): every real shop sale
-      // IS a DSR visit, so log it automatically — no separate tap needed
-      // on the DSR side. Best-effort: never fail the sale over this.
-      try {
-        await supabase.from('shop_visits').insert({
-          shop_id: String(d.shopId), visit_role: 'dsr',
-          visitor_id: String(d.dsrId), visitor_name: d.dsrName || '',
-          visit_date: date, created_at: now_()
-        });
-      } catch (ve) { /* non-fatal */ }
-
       return res.json({ ok: true, payable, paidNow, shortfall: Math.max(0, shortfall), due });
-    }
+    });
 
     // ══════════════════════════════════════════════════
     //  MAP — DAILY VISIT TRACKING (Update #26)
@@ -893,8 +918,8 @@ module.exports = async (req, res) => {
     // ══════════════════════════════════════════════════
     //  POINT-SALE — walk-in / phone-number counter sale
     // ══════════════════════════════════════════════════
-    if (req.method === 'POST' && action === 'point-sale') {
-      const d = req.body;
+    if (req.method === 'POST' && action === 'point-sale') return idemRun(req, res, 'point-sale', async () => {
+      const d = req.body || {};
       const items = Array.isArray(d.items) ? d.items : [];
       if (!items.length) return res.json({ ok: false, error: 'অন্তত একটি পণ্য প্রয়োজন' });
 
@@ -905,26 +930,28 @@ module.exports = async (req, res) => {
         if (match && match.length) { shopId = match[0].id; shopName = match[0].name; }
       }
 
+      const priced = await priceItems(items, { type: 'point_sale' });
+      if (!priced.ok) return res.json({ ok: false, error: priced.error });
+      // CALC-9 — a counter sale cannot sell stock the warehouse does not have
+      if (await blockNegativeStock()) {
+        const msg = stockShortage(priced.lines);
+        if (msg) return res.json({ ok: false, error: msg });
+      }
+
       const txId = randomUUID();
-      const date = d.date || now_().slice(0, 10);
-      const rows = items.map(item => {
-        const u = num(item.totalUnits), sp = num(item.sellingPrice), pp = num(item.purchasePrice);
-        return {
-          tx_id: txId, type: 'point_sale',
-          sr_id: String(d.handledBy || ''), sr_name: d.handledByName || '',
-          date, slip_no: d.slipNo || '',
-          product_id: String(item.productId || ''), product_name: String(item.productName || ''),
-          sku: String(item.sku || ''), cases: num(item.cases), pcs: num(item.pcs),
-          total_units: u, purchase_price: pp, selling_price: sp,
-          total_cost: u * pp, total_revenue: u * sp,
-          shop_id: shopId, note: shopName ? ('গ্রাহক: ' + shopName) : (d.note || ''),
-          created_at: now_()
-        };
-      });
+      const date = (d.date && DATE_RE_.test(d.date)) ? d.date : bdtToday();   // CALC-4
+      const ts = now_();
+      const rows = priced.lines.map(l => txRow(l, {
+        tx_id: txId, type: 'point_sale',
+        sr_id: String(d.handledBy || ''), sr_name: d.handledByName || '',
+        date, slip_no: d.slipNo || '',
+        shop_id: shopId, note: shopName ? ('গ্রাহক: ' + shopName) : (d.note || ''),
+        created_at: ts
+      }));
       const { error } = await supabase.from('transactions').insert(rows);
       if (error) throw error;
       return res.json({ ok: true, matchedShop: shopId ? { id: shopId, name: shopName } : null });
-    }
+    });
 
     res.status(405).json({ ok: false, error: 'Method not allowed অথবা ভুল action' });
   } catch (e) {

@@ -1,8 +1,14 @@
-const { supabase, cors, num, now_, mapTx, safeErr, fetchAll } = require('./_lib/db');
+const { supabase, cors, num, now_, mapTx, safeErr, fetchAll, pageParams, idemRun, blockNegativeStock, bdtToday } = require('./_lib/db');
+const { priceItems, txRow, stockShortage, r2, r4 } = require('./_lib/money');
 const { randomUUID } = require('crypto');
+
+// Movements that take stock OUT of the warehouse (CALC-9).
+const OUTGOING = new Set(['give', 'point_sale', 'return_company']);
 
 const VALID_TYPES = new Set(['buy','give','return','damage','point_sale','point_damage_return','dsr_sale','return_company']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// PERF-5 — only the columns the screens use (mapTx reads exactly these)
+const TX_COLS = 'tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at,id';
 
 // Update #49 — DSR/SO due-history modal: given a set of transaction
 // rows (already filtered to one sr_id) that have a shop_id set, resolve
@@ -16,6 +22,60 @@ async function _resolveShopNames(shopIds) {
   const map = {};
   (data || []).forEach(s => { map[String(s.id)] = s.name || ''; });
   return map;
+}
+
+
+// ── POST: one or many items sharing one txId ─────────────────────────────
+// CALC-5  prices/costs come from the products table, never from the browser.
+// CALC-6  each bill line is rounded to 2 decimals (whole cases at case price).
+// CALC-9  outgoing movements are refused when the warehouse does not have
+//         the stock (the database trigger enforces the same rule race-free).
+async function _addTransaction(req, res) {
+  const d = req.body || {};
+  if (!VALID_TYPES.has(d.type)) return res.json({ ok: false, error: 'অবৈধ লেনদেনের ধরন' });
+  if (!d.date || !DATE_RE.test(d.date)) return res.json({ ok: false, error: 'বৈধ তারিখ দিন (YYYY-MM-DD)' });
+  if (!Array.isArray(d.items) || !d.items.length) return res.json({ ok: false, error: 'কমপক্ষে একটি আইটেম দিন' });
+  if (d.items.length > 100) return res.json({ ok: false, error: 'একসাথে সর্বোচ্চ ১০০টি আইটেম' });
+
+  const priced = await priceItems(d.items, { type: d.type, srId: d.srId, date: d.date });
+  if (!priced.ok) return res.json({ ok: false, error: priced.error });
+  const lines = priced.lines;
+
+  if (OUTGOING.has(d.type) && await blockNegativeStock()) {
+    const msg = stockShortage(lines);
+    if (msg) return res.json({ ok: false, error: msg });
+  }
+
+  const txId = randomUUID();
+  const ts   = now_();
+  const rows = lines.map(l => txRow(l, {
+    tx_id: txId, type: d.type,
+    sr_id: d.srId || '', sr_name: d.srName || '',
+    date: d.date, slip_no: d.slipNo || '',
+    // Update #51 — point-sale rows carry a real shop_id / customer_id.
+    shop_id: d.shopId || '', customer_id: d.customerId || '',
+    note: d.note || '', created_at: ts
+  }));
+
+  const { error: txErr } = await supabase.from('transactions').insert(rows);
+  if (txErr) throw txErr;
+
+  // Auto-create damage claims for 'damage' type
+  if (d.type === 'damage') {
+    const dmgRows = lines.map(l => ({
+      tx_id: txId, product_id: l.productId, product_name: l.productName, sku: l.sku,
+      total_units: l.units, purchase_price: l.purchasePrice, total_cost: l.cost,
+      date: d.date, sr_id: d.srId || '', sr_name: d.srName || '',
+      status: 'pending', cleared_date: null, created_at: ts
+    }));
+    const { error: dmgErr } = await supabase.from('dmg_claims').insert(dmgRows);
+    if (dmgErr) {
+      // keep the two tables in step: no damage claim → no damage row either
+      await supabase.from('transactions').delete().eq('tx_id', txId);
+      throw dmgErr;
+    }
+  }
+  return res.json({ ok: true, txId });
 }
 
 module.exports = async (req, res) => {
@@ -43,8 +103,8 @@ module.exports = async (req, res) => {
       // everything the person took and did. Only give/return/payments
       // change the due figure (affectsDue flag) — the rest is context.
       const [txRows, payRows] = await Promise.all([
-        fetchAll(() => supabase.from('transactions').select('*').eq('sr_id', srId).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('date', { ascending: false }).order('created_at', { ascending: false })),
-        fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', srId).order('date', { ascending: false }))
+        fetchAll(() => supabase.from('transactions').select(TX_COLS).eq('sr_id', srId).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('date', { ascending: false }).order('created_at', { ascending: false })),
+        fetchAll(() => supabase.from('sr_payments').select('id,sr_id,date,amount,cash_amount,commission_amt,discount_amt,damage_amt,note,created_at').eq('sr_id', srId).order('date', { ascending: false }))
       ]);
       const txs  = (txRows  || []).map(mapTx);
       const pays = (payRows || []);
@@ -121,97 +181,10 @@ module.exports = async (req, res) => {
       return res.json({ ok: true, srId, rows, products, totals });
     }
 
-    // POST — add transaction (one or many items share same txId)
-    if (req.method === 'POST') {
-      const d = req.body;
-      if (!VALID_TYPES.has(d.type)) return res.json({ ok: false, error: 'অবৈধ লেনদেনের ধরন' });
-      if (!d.date || !DATE_RE.test(d.date)) return res.json({ ok: false, error: 'বৈধ তারিখ দিন (YYYY-MM-DD)' });
-      if (!Array.isArray(d.items) || !d.items.length) return res.json({ ok: false, error: 'কমপক্ষে একটি আইটেম দিন' });
-      if (d.items.length > 100) return res.json({ ok: false, error: 'একসাথে সর্বোচ্চ ১০০টি আইটেম' });
-      // v60 — return to company: you can only send back what is in stock.
-      // Stock then drops by exactly that amount (DB trigger), nothing else
-      // changes (no due, no revenue, no DSR involved).
-      if (d.type === 'return_company') {
-        const want = {};
-        (d.items || []).forEach(it => {
-          const pid = String(it.productId || ''); if (!pid) return;
-          want[pid] = (want[pid] || 0) + num(it.totalUnits);
-        });
-        const ids = Object.keys(want);
-        if (!ids.length) return res.json({ ok: false, error: 'পণ্য বাছাই করুন' });
-        const { data: stk, error: stkErr } = await supabase.from('products').select('id,name,current_stock').in('id', ids);
-        if (stkErr) throw stkErr;
-        for (const p of (stk || [])) {
-          if (want[String(p.id)] > num(p.current_stock))
-            return res.json({ ok: false, error: (p.name || 'পণ্য') + ' — স্টকে আছে ' + num(p.current_stock) + ' পিস, ফেরত দিতে চাইছেন ' + want[String(p.id)] + ' পিস' });
-        }
-      }
-
-      const txId = randomUUID();
-      const ts   = now_();
-
-      const rows = (d.items || []).map(item => {
-        const u  = num(item.totalUnits);
-        const pp = num(item.purchasePrice);
-        const sp = num(item.sellingPrice);
-        return {
-          tx_id:         txId,
-          type:          d.type,
-          sr_id:         d.srId   || '',
-          sr_name:       d.srName || '',
-          date:          d.date,
-          slip_no:       d.slipNo || '',
-          product_id:    String(item.productId  || ''),
-          product_name:  String(item.productName|| ''),
-          sku:           String(item.sku        || ''),
-          cases:         num(item.cases),
-          pcs:           num(item.pcs),
-          total_units:   u,
-          purchase_price: pp,
-          selling_price:  sp,
-          total_cost:    u * pp,
-          total_revenue: u * sp,
-          // Update #51 — point-sale rows now carry a real shop_id (when
-          // the phone number matched an existing registered shop) or a
-          // customer_id (pointing at a proper pos_customers record)
-          // instead of only ever landing in the free-text `note` field.
-          shop_id:       d.shopId     || '',
-          customer_id:   d.customerId || '',
-          note:          d.note || '',
-          created_at:    ts
-        };
-      });
-
-      const { error: txErr } = await supabase.from('transactions').insert(rows);
-      if (txErr) throw txErr;
-
-      // Auto-create damage claims for 'damage' type
-      if (d.type === 'damage') {
-        const dmgRows = (d.items || []).map(item => {
-          const u  = num(item.totalUnits);
-          const pp = num(item.purchasePrice);
-          return {
-            tx_id:         txId,
-            product_id:    String(item.productId   || ''),
-            product_name:  String(item.productName || ''),
-            sku:           String(item.sku         || ''),
-            total_units:   u,
-            purchase_price: pp,
-            total_cost:    u * pp,
-            date:          d.date,
-            sr_id:         d.srId   || '',
-            sr_name:       d.srName || '',
-            status:        'pending',
-            cleared_date:  null,
-            created_at:    ts
-          };
-        });
-        const { error: dmgErr } = await supabase.from('dmg_claims').insert(dmgRows);
-        if (dmgErr) throw dmgErr;
-      }
-
-      return res.json({ ok: true, txId });
-    }
+    // POST — add transaction (one or many items share same txId).
+    // v5.1: runs inside the idempotency guard (a double tap / retry carrying
+    // the same requestId returns the first answer instead of writing twice).
+    if (req.method === 'POST') return idemRun(req, res, 'tx', () => _addTransaction(req, res));
 
     // GET — list transactions with optional filters
     // ?srId=<id>   → filter by a single sr_id (DSR isolation)
@@ -228,8 +201,18 @@ module.exports = async (req, res) => {
         // Include the SO's own transactions as well
         const allIds = [soId, ...dsrIds];
 
+        const pg = pageParams(req.query, 50);
+        if (pg) {
+          let q = supabase.from('transactions').select(TX_COLS, { count: 'exact' }).order('created_at', { ascending: false }).order('id');
+          if (from) q = q.gte('date', from);
+          if (to)   q = q.lte('date', to);
+          q = q.in('sr_id', allIds.map(String));
+          const { data, error, count } = await q.range(pg.from, pg.to);
+          if (error) throw error;
+          return res.json({ ok: true, rows: (data || []).map(mapTx), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
+        }
         const rows = await fetchAll(() => {
-          let q = supabase.from('transactions').select('*').order('created_at', { ascending: false });
+          let q = supabase.from('transactions').select(TX_COLS).order('created_at', { ascending: false });
           if (from) q = q.gte('date', from);
           if (to)   q = q.lte('date', to);
           if (allIds.length) q = q.in('sr_id', allIds);
@@ -242,8 +225,19 @@ module.exports = async (req, res) => {
       // today's newest entry to appear at the very bottom of the list).
       // Paginated (fetchAll): without from/to this is a full-table list,
       // which would otherwise silently truncate at 1000 rows.
+      const pg = pageParams(req.query, 50);
+      if (pg) {
+        let q = supabase.from('transactions').select(TX_COLS, { count: 'exact' }).order('created_at', { ascending: false }).order('id');
+        if (from) q = q.gte('date', from);
+        if (to)   q = q.lte('date', to);
+        if (srId) q = q.eq('sr_id', srId);
+        if (req.query.type) q = q.eq('type', String(req.query.type));
+        const { data, error, count } = await q.range(pg.from, pg.to);
+        if (error) throw error;
+        return res.json({ ok: true, rows: (data || []).map(mapTx), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
+      }
       const rows = await fetchAll(() => {
-        let q = supabase.from('transactions').select('*').order('created_at', { ascending: false });
+        let q = supabase.from('transactions').select(TX_COLS).order('created_at', { ascending: false });
         if (from) q = q.gte('date', from);
         if (to)   q = q.lte('date', to);
         if (srId) q = q.eq('sr_id', srId);

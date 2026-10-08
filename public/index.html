@@ -838,9 +838,46 @@ body.dark .smi.active{background:rgba(255,255,255,.2)!important}
 // Only concurrent duplicates are merged — every later call is a fresh fetch,
 // so figures (DU, stock, payments) are never served stale.
 var _inflightGets = {};
+// v5.1 (CALC-8) — a double tap, a retry after a weak-network timeout or a
+// second tab can no longer record the same money twice. Every money-writing
+// POST/PUT carries a requestId; the SAME screen action (same url + same body)
+// re-uses the SAME id for 2 minutes, and the server answers a repeat with the
+// stored first result instead of writing again. An identical write that is
+// still in flight is simply shared.
+var _reqIds = {}, _inflightWrites = {};
+function _reqIdFor(url, body) {
+  var key = url + '|' + body, now = Date.now(), e = _reqIds[key];
+  if (e && now - e.t < 120000) return e.id;
+  var id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : 'r' + now.toString(36) + Math.random().toString(36).slice(2, 10);
+  _reqIds[key] = { id: id, t: now };
+  var ks = Object.keys(_reqIds);
+  if (ks.length > 60) ks.forEach(function(k) { if (now - _reqIds[k].t > 120000) delete _reqIds[k]; });
+  return id;
+}
+// Dhaka calendar date (YYYY-MM-DD) — the browser's UTC date is wrong between
+// 00:00 and 06:00 in Bangladesh.
+function bdtToday(offsetDays) {
+  var d = new Date(Date.now() + (offsetDays || 0) * 86400000);
+  try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
+  catch (e) { return new Date(d.getTime() + 6 * 3600000).toISOString().slice(0, 10); }
+}
 async function apiFetch(url, opts) {
-  var isGet = !opts || !opts.method || String(opts.method).toUpperCase() === 'GET';
+  var method = opts && opts.method ? String(opts.method).toUpperCase() : 'GET';
+  var isGet = method === 'GET';
   if (isGet && _inflightGets[url]) return _inflightGets[url];
+  var wkey = null;
+  if ((method === 'POST' || method === 'PUT') && opts && typeof opts.body === 'string' && opts.body.charAt(0) === '{') {
+    try {
+      var bodyObj = JSON.parse(opts.body);
+      if (!bodyObj.requestId) {
+        bodyObj.requestId = _reqIdFor(url, opts.body);
+        opts = Object.assign({}, opts, { body: JSON.stringify(bodyObj) });
+      }
+      wkey = url + '|' + opts.body;
+      if (_inflightWrites[wkey]) return _inflightWrites[wkey];
+    } catch (e) {}
+  }
   var p = (async function() {
     try {
       var options = Object.assign({ headers: {'Content-Type':'application/json'} }, opts || {});
@@ -854,6 +891,11 @@ async function apiFetch(url, opts) {
     _inflightGets[url] = p;
     var done = function() { delete _inflightGets[url]; };
     p.then(done, done);
+  }
+  if (wkey) {
+    _inflightWrites[wkey] = p;
+    var wdone = function() { delete _inflightWrites[wkey]; };
+    p.then(wdone, wdone);
   }
   return p;
 }
@@ -1190,6 +1232,21 @@ function closeMenu() {
 //  fall back to WebView history) when there's truly nothing left,
 //  exactly like a normal native app's back stack.
 // ════════════════════════════════════════════════════
+// One step "out" of an in-page sub-view. Returns true if it handled it.
+function _backInPageView() {
+  // উপস্থিতি ও লোকেশন (Owner) — একজন স্টাফের উপস্থিতি পেজ → স্টাফ তালিকা
+  if (S.tab === 'attendance' && S.role === 'owner' && _ownerAttPerson) { ownerClosePersonAttendance(); return true; }
+  // দোকান ও লোকেশন — রেজিস্টার/বিস্তারিত (এডিট) → বিস্তারিত → তালিকা
+  if (S.tab === 'shopsmap' && S.shopsMapMode && S.shopsMapMode !== 'list') {
+    if (S.shopsMapMode === 'detail' && S.shopEditMode) { S.shopEditMode = false; _renderShopsMapDetail(); return true; }
+    S.shopsMapMode = 'list'; S.shopEditMode = false; S.shopsDetailData = null;
+    _paintShopsMapTab();
+    return true;
+  }
+  // DSR হোম — "আমার লেনদেন"-এর খোলা বক্স বন্ধ করা
+  if (S.tab === 'dash' && S.role === 'dsr' && (S.dsrTab || 'tx') === 'tx' && S.dsrBox) { dsrToggleBox(S.dsrBox); return true; }
+  return false;
+}
 window.__onAndroidBack = function() {
   try {
     // 1) Slip / share preview panel
@@ -1216,6 +1273,15 @@ window.__onAndroidBack = function() {
     // 5) Side menu
     var sideMenu = document.getElementById('side-menu');
     if (sideMenu && sideMenu.classList.contains('show')) { closeMenu(); return true; }
+
+    // 5b) Shop ledger full-screen page (opened from the shop detail)
+    var ldgPg = document.getElementById('ldg-pg');
+    if (ldgPg && ldgPg.style.display !== 'none') { closeShopLedger(); return true; }
+
+    // 5c) In-page sub-views (these used to have only their own "◀ ফিরুন"
+    //     button, so the phone's back button skipped straight past them).
+    //     Back now steps out one level at a time, exactly like the button.
+    if (_backInPageView()) return true;
 
     // 6) Go back to whichever section/tab was open before this one
     if (_tabHistory.length > 1) {
@@ -3114,7 +3180,7 @@ async function ownerPaySalary(scopeId) {
 // actively re-checks freshness and forces a fresh fix if the watch has
 // gone stale, and the watch itself is periodically torn down/re-armed.
 var _locWatchId = null, _locTimer = null, _locRearmTimer = null;
-var _lastCoords = null, _lastCoordsAt = 0;
+var _lastCoords = null, _lastCoordsAt = 0, _lastPing = null;
 
 function startLocationTracking() {
   if (_locTimer !== null) return; // already running
@@ -3123,7 +3189,7 @@ function startLocationTracking() {
 
   _armWatch();
   _sendLocationPing(); // attempt immediately
-  _locTimer = setInterval(_sendLocationPing, 60000); // every ~60s
+  _locTimer = setInterval(_sendLocationPing, 180000); // PERF-5: every ~3 min (was 60s) — a heartbeat is still sent at least every 10 min even when standing still
   _locRearmTimer = setInterval(_armWatch, 300000); // re-arm watch every 5 min, just in case
 }
 
@@ -3148,6 +3214,13 @@ async function _sendLocationPing() {
     if (forced) { coords = forced; _lastCoords = forced; _lastCoordsAt = Date.now(); }
   }
   if (!coords) return; // couldn't get a fix this cycle — try again next tick
+  // PERF-5 — don't spend a serverless call + DB write when the phone has not
+  // moved (~50 m) since the last ping, except for a heartbeat every 10 min.
+  if (_lastPing && (Date.now() - _lastPing.at) < 600000) {
+    var dLat = (coords.lat - _lastPing.lat) * 111320, dLng = (coords.lng - _lastPing.lng) * 111320 * Math.cos(coords.lat * Math.PI / 180);
+    if (Math.sqrt(dLat * dLat + dLng * dLng) < 50) return;
+  }
+  _lastPing = { lat: coords.lat, lng: coords.lng, at: Date.now() };
   try {
     await apiPost('/api/attendance?action=location-ping', {
       userKey: S.userId, userName: S.userName, role: S.role,
@@ -3224,9 +3297,43 @@ async function ownerSaveShopInfo() {
 // পাসওয়ার্ড/নোটিশ/রিসেট under সিস্টেম so it's easy to find. ─────────
 function renderSettingsTab() {
   var el = document.getElementById('pg-settings'); if (!el) return;
-  var h = '<div id="settings-shopinfo-wrap"></div>';
+  var h = '<div id="settings-shopinfo-wrap"></div><div id="settings-rules-wrap"></div>';
   el.innerHTML = h;
   _renderShopInfoCard();
+  _renderRulesCard();
+}
+
+// v5.1 — Owner switches: stock guard (CALC-9) + what is subtracted for NET profit (CALC-1).
+async function _renderRulesCard() {
+  var el = document.getElementById('settings-rules-wrap'); if (!el || S.role !== 'owner') return;
+  var r = await apiGet('/api/due-calendar?action=settings-get');
+  if (!r || !r.ok) { el.innerHTML = ''; return; }
+  var pr = r.profitRules || {};
+  var cb = function(id, on, label) { return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:7px 0"><input type="checkbox" style="width:auto" id="'+id+'" '+(on?'checked':'')+'> '+label+'</label>'; };
+  var h = '<div class="card" style="margin-bottom:12px"><div class="ct" style="margin-bottom:6px">🧮 হিসাব ও স্টক নিয়ম</div>';
+  h += '<div style="font-size:11.5px;font-weight:700;margin-top:6px">নীট লাভ থেকে কী কী বাদ যাবে?</div>';
+  h += cb('pr-commission', pr.commission !== false, 'কমিশন') + cb('pr-discount', pr.discount !== false, 'ডিসকাউন্ট')
+     + cb('pr-damage', pr.damage !== false, 'ড্যামেজ লোকসান') + cb('pr-bonus', pr.bonus !== false, 'দোকানকে বোনাস')
+     + cb('pr-expenses', pr.expenses !== false, 'খরচ (Expenses)');
+  h += '<div style="font-size:11.5px;font-weight:700;margin-top:12px">স্টক</div>';
+  h += cb('pr-block', r.blockNegativeStock !== false, 'স্টকে যা নেই তা দেওয়া/বিক্রি বন্ধ রাখুন (স্টক ঋণাত্মক হতে দেবেন না)');
+  h += '<button class="btn btn-bl btn-w" style="margin-top:8px" ontouchstart="ownerSaveRules();event.preventDefault()" onclick="ownerSaveRules()">💾 সেভ করুন</button></div>';
+  el.innerHTML = h;
+}
+async function ownerSaveRules() {
+  var g = function(id) { var e = document.getElementById(id); return !!(e && e.checked); };
+  var pinOk = await confirmOwnerPin('নিয়ম পরিবর্তন করতে Owner PIN দিন');
+  if (!pinOk) return;
+  showOvl('সেভ হচ্ছে...');
+  var r = await apiPost('/api/due-calendar?action=settings-update', {
+    shopName: S.shopName || 'AXIION', shopAddress: S.shopAddress || '', shopPhone: S.shopPhone || '',
+    distributorName: S.distributorName || '', logoText: S.logoText || '', setBy: S.userName || 'owner',
+    blockNegativeStock: g('pr-block'),
+    profitRules: { commission: g('pr-commission'), discount: g('pr-discount'), damage: g('pr-damage'), bonus: g('pr-bonus'), expenses: g('pr-expenses') }
+  });
+  hideOvl();
+  if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
+  toast('✅ সেভ হয়েছে');
 }
 
 async function _renderOfficeCard() {
@@ -3715,7 +3822,7 @@ function renderDash(d) {
   // instead of a full page of static cards (V59 minimalist redesign).
   h+='<div class="hero-grid" style="grid-template-columns:1fr 1fr">';
   h+='<div class="hero-card"><div class="hero-l" id="hv-rev-lbl">আজ বিক্রি</div><div class="hero-v" id="hv-rev">৳0</div></div>';
-  if(isOwner) h+='<div class="hero-card" id="hv-prof-card"><div class="hero-l" id="hv-prof-lbl">আজ '+(t.profit>=0?'লাভ':'ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div></div>';
+  if(isOwner) h+='<div class="hero-card" id="hv-prof-card"><div class="hero-l" id="hv-prof-lbl">আজ '+(t.profit>=0?'নীট লাভ':'নীট ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div></div>';
   h+='<div class="hero-card"><div class="hero-l">পেমেন্ট আদায় (মাস)</div><div class="hero-v" style="color:var(--te)">৳'+fm(m.payments)+'</div></div>';
   h+='<div class="hero-card" style="border-top-color:var(--re)"><div class="hero-l">মোট বাকি</div><div class="hero-v" style="color:var(--re)">৳'+fm(dues.total)+'</div></div>';
   h+='</div>';
@@ -3735,7 +3842,8 @@ function renderDash(d) {
   // ── এই মাস — open by default (the core recurring number owners check)
   var monthBody='<div class="mets">';
   monthBody+='<div class="met met-b"><div class="ml">মোট বিক্রয়</div><div class="mv">৳'+fm(m.revenue)+'</div></div>';
-  if(isOwner) monthBody+='<div class="met" style="border-top:3px solid '+mpc+'"><div class="ml">'+(m.profit>=0?'মোট লাভ':'মোট ক্ষতি')+'</div><div class="mv" style="color:'+mpc+'">৳'+fm(Math.abs(m.profit))+'</div></div>';
+  if(isOwner) monthBody+='<div class="met" style="border-top:3px solid '+mpc+'"><div class="ml">'+(m.profit>=0?'নীট লাভ':'নীট ক্ষতি')+'</div><div class="mv" style="color:'+mpc+'">৳'+fm(Math.abs(m.profit))+'</div></div>';
+  if(isOwner && m.breakdown) monthBody+='<div class="met" style="grid-column:1/-1;border-top:3px solid var(--bl2);text-align:left"><div class="ml">নীট লাভের হিসাব (এই মাস)</div><div style="font-size:11.5px;line-height:1.7;color:var(--mt)">মোট লাভ ৳'+fm(m.breakdown.grossProfit)+' − কমিশন ৳'+fm(m.breakdown.commission)+' − ডিসকাউন্ট ৳'+fm(m.breakdown.discount)+' − ড্যামেজ ৳'+fm(m.breakdown.damageLoss)+' − বোনাস ৳'+fm(m.breakdown.bonus)+' − খরচ ৳'+fm(m.breakdown.expenses)+'</div></div>';
   monthBody+='<div class="met met-a"><div class="ml">পেমেন্ট আদায়</div><div class="mv">৳'+fm(m.payments)+'</div></div>';
   monthBody+='<div class="met met-r"><div class="ml">মোট বাকি</div><div class="mv">৳'+fm(dues.total)+'</div></div>';
   monthBody+='<div class="met" style="border-top:3px solid var(--am)"><div class="ml">আজকের নতুন বাকি</div><div class="mv" style="font-size:15px">৳'+fm(dues.todayNew||0)+'</div></div>';
@@ -3849,7 +3957,7 @@ function renderDash(d) {
   var revLbl = document.getElementById('hv-rev-lbl'); if (revLbl) revLbl.textContent = heroData.label + ' বিক্রি';
   _animateNum(document.getElementById('hv-rev'), heroData.revenue, true);
   if (isOwner) {
-    var profLbl = document.getElementById('hv-prof-lbl'); if (profLbl) profLbl.textContent = heroData.label + ' ' + (heroData.profit>=0?'লাভ':'ক্ষতি');
+    var profLbl = document.getElementById('hv-prof-lbl'); if (profLbl) profLbl.textContent = heroData.label + ' ' + (heroData.profit>=0?'নীট লাভ':'নীট ক্ষতি');
     var profCard = document.getElementById('hv-prof-card');
     if (profCard) { profCard.style.borderTopColor = heroData.profit>=0?'var(--bl2)':'var(--re)'; var pv=document.getElementById('hv-prof'); if(pv) pv.style.color = heroData.profit>=0?'var(--bl)':'var(--re)'; }
     _animateNum(document.getElementById('hv-prof'), Math.abs(heroData.profit), true);
@@ -4337,11 +4445,122 @@ async function _loadDsrTxView() {
   var qFrom = mode==='range' ? from2 : date;
   var qTo   = mode==='range' ? to2   : date;
   showOvl('লোড হচ্ছে...');
-  var r = await apiGet('/api/transactions?from='+qFrom+'&to='+qTo+'&srId='+encodeURIComponent(S.userId));
+  var both = await Promise.all([
+    apiGet('/api/transactions?from='+qFrom+'&to='+qTo+'&srId='+encodeURIComponent(S.userId)),
+    apiGet('/api/sr-payments?action=dsr-my-day&dsrId='+encodeURIComponent(S.userId)+'&from='+qFrom+'&to='+qTo)
+  ]);
   hideOvl();
+  var r = both[0];
   if (!Array.isArray(r)) return toast('লোড ব্যর্থ');
   S.dsrData = r;
+  S.dsrMyDay = (both[1] && both[1].ok) ? both[1] : null;
+  S.dsrBox = '';   // a fresh load always starts with every box closed
   renderDsrTxTab(r, qFrom, qTo);
+}
+
+// ── v5.2 — আমার লেনদেন: ৫টি বক্স (দেওয়া / ফেরত / ড্যামেজ / কমিশন / ছাড়) +
+//    হাতে থাকা নগদ। প্রতিটি বক্সে ট্যাপ করলে নিচে বিস্তারিত ইতিহাস খোলে;
+//    আবার ট্যাপ বা ব্যাক বাটনে বন্ধ হয়।
+function _dmdRow(l, r) {
+  return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--bdr);font-size:12px"><span style="color:var(--mt);min-width:0">'+l+'</span><span style="white-space:nowrap">'+r+'</span></div>';
+}
+function _dmdQty(it) {
+  var q = (it.cases ? fn(it.cases)+' কেস ' : '') + (it.pcs ? fn(it.pcs)+' পিস' : '');
+  return q || (fn(it.units)+' পিস');
+}
+function _dmdEmpty() { return '<div style="text-align:center;color:var(--mt2);padding:12px;font-size:12px">এই সময়ে কোনো রেকর্ড নেই</div>'; }
+function _dmdSlips(slips, color) {
+  if (!slips || !slips.length) return _dmdEmpty();
+  var h = '';
+  slips.forEach(function(g) {
+    h += '<div style="padding:7px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mt2);margin-bottom:3px"><span>'+esc(fmtBn(g.date))+'</span><b style="color:'+color+'">৳'+fm(g.total)+'</b></div>';
+    g.items.forEach(function(it) { h += '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:1px 0"><span>'+esc(it.productName)+' × '+_dmdQty(it)+'</span><span style="color:var(--mt);white-space:nowrap">৳'+fm(it.value)+'</span></div>'; });
+    h += '</div>';
+  });
+  return h;
+}
+function _dmdSaleLines(lines, color) {
+  if (!lines || !lines.length) return _dmdEmpty();
+  var h = '';
+  lines.forEach(function(l) {
+    h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><b>🏪 '+esc(l.shopName||'—')+'</b><b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
+      + '<div style="font-size:11px;color:var(--mt2)">'+esc(l.productName)+' × '+fn(l.units)+' পিস · বিক্রয় ৳'+fm(l.saleValue)+' · '+esc(fmtBn(l.date))+'</div></div>';
+  });
+  return h;
+}
+function _dmdList(arr, fmtLine, none) {
+  return arr.length ? arr.map(fmtLine).join('') : '<div style="font-size:11px;color:var(--mt2);padding:3px 0">'+(none||'নেই')+'</div>';
+}
+function _dmdDetail(key, d) {
+  if (key === 'given')      return _dmdSlips(d.given.slips, 'var(--bl)');
+  if (key === 'ret')        return _dmdSlips(d.ret.slips, 'var(--te)');
+  if (key === 'commission') return _dmdSaleLines(d.commission.lines, 'var(--pu)');
+  if (key === 'discount')   return _dmdSaleLines(d.discount.lines, 'var(--am)');
+  if (key === 'damage') {
+    var dm = d.damage, h = '';
+    if (!dm.vanDamage.slips.length && !dm.shopDamage.length) return _dmdEmpty();
+    if (dm.vanDamage.slips.length) h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:4px 0">🚚 গাড়ির ড্যামেজ — ৳'+fm(dm.vanDamage.total)+'</div>' + _dmdSlips(dm.vanDamage.slips, 'var(--re)');
+    if (dm.shopDamage.length) {
+      h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:8px 0 4px">🏪 দোকান থেকে নেওয়া ড্যামেজ</div>';
+      dm.shopDamage.forEach(function(x) {
+        h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><b>🏪 '+esc(x.shopName||'—')+' — '+esc(x.productName)+' × '+fn(x.units)+'</b><b style="color:var(--re)">৳'+fm(x.damagedValue)+'</b></div>'
+          + '<div style="font-size:11px;color:var(--mt2)">'+esc(fmtBn(x.date))+' · '+(x.resolution==='money' ? '💵 টাকা ফেরত ৳'+fm(x.refundAmt) : '🔁 বদল: '+esc(x.exchProductName)+' × '+fn(x.exchUnits)+' (৳'+fm(x.exchValue)+')')+'</div></div>';
+      });
+    }
+    return h;
+  }
+  if (key === 'cash') {
+    var c = d.cash, h2 = '';
+    h2 += '<div style="font-size:11px;font-weight:800;color:var(--gr);margin:2px 0 3px">➕ দোকান বিক্রয়ে পাওয়া নগদ — ৳'+fm(c.cashAtSale)+'</div>';
+    h2 += _dmdList(c.saleLines, function(l){ return _dmdRow('🏪 '+esc(l.shopName||'—')+' · '+esc(fmtBn(l.date)), '৳'+fm(l.amount)); });
+    h2 += '<div style="font-size:11px;font-weight:800;color:var(--gr);margin:8px 0 3px">➕ পুরনো বাকি আদায় — ৳'+fm(c.dueCollected)+'</div>';
+    h2 += _dmdList(c.dueLines, function(l){ return _dmdRow('🏪 '+esc(l.shopName||'—')+' · '+esc(fmtBn(l.date)), '৳'+fm(l.amount)); });
+    h2 += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:8px 0 3px">➖ ড্যামেজের জন্য দোকানকে দেওয়া টাকা — ৳'+fm(c.damageMoneyPaid)+'</div>';
+    h2 += _dmdList(c.damageLines, function(l){ return _dmdRow('🏪 '+esc(l.shopName||'—')+' — '+esc(l.productName)+' · '+esc(fmtBn(l.date)), '৳'+fm(l.amount)); });
+    return h2;
+  }
+  return '';
+}
+function dsrToggleBox(key) {
+  S.dsrBox = (S.dsrBox === key) ? '' : key;
+  var f = S.dsrMyDay ? S.dsrMyDay.from : (S.dsrDate || iso(new Date()));
+  var t = S.dsrMyDay ? S.dsrMyDay.to   : f;
+  renderDsrTxTab(S.dsrData || [], f, t);
+  var el = document.getElementById('dmd-detail');
+  if (el && S.dsrBox) { try { el.scrollIntoView({ behavior:'smooth', block:'nearest' }); } catch(e){} }
+}
+function _dsrMyDayHtml() {
+  var d = S.dsrMyDay;
+  if (!d) return '<div class="card" style="text-align:center;color:var(--re);padding:16px">⚠️ হিসাব লোড করা যায়নি — পেজ রিফ্রেশ করে আবার চেষ্টা করুন</div>';
+  var open = S.dsrBox || '';
+  var boxes = [
+    {k:'given',      ic:'📤', lb:'দেওয়া',   v:d.given.total,      c:'var(--bl)'},
+    {k:'ret',        ic:'↩️', lb:'ফেরত',    v:d.ret.total,        c:'var(--te)'},
+    {k:'damage',     ic:'⚠️', lb:'ড্যামেজ',  v:d.damage.total,     c:'var(--re)'},
+    {k:'commission', ic:'🤝', lb:'কমিশন',   v:d.commission.total, c:'var(--pu)'},
+    {k:'discount',   ic:'🏷️', lb:'ছাড়',     v:d.discount.total,   c:'var(--am)'}
+  ];
+  var h = '<div class="dsr-grid" style="grid-template-columns:repeat(2,1fr)">';
+  boxes.forEach(function(b) {
+    h += '<div class="dsr-cell" onclick="dsrToggleBox(\''+b.k+'\')" style="cursor:pointer;border-color:'+b.c+(open===b.k?';box-shadow:0 0 0 2px '+b.c:'')+'">'
+      + '<div style="font-size:11px;color:'+b.c+';font-weight:700;margin-bottom:6px">'+b.ic+' '+b.lb+'</div>'
+      + '<div class="dv2" style="color:'+b.c+'">৳'+fm(b.v)+'</div>'
+      + '<div class="ds2">'+(open===b.k?'▲ বন্ধ করুন':'▼ বিস্তারিত দেখুন')+'</div></div>';
+  });
+  // ৫টি বক্সের শেষে — হাতে থাকা নগদ (ম্যানেজার/মালিককে জমা দিতে হবে)
+  var c = d.cash, cashOpen = open === 'cash';
+  h += '<div class="dsr-cell" onclick="dsrToggleBox(\'cash\')" style="cursor:pointer;grid-column:1/-1;border-color:var(--gr);background:var(--grl)'+(cashOpen?';box-shadow:0 0 0 2px var(--gr)':'')+'">'
+    + '<div style="font-size:12px;color:var(--gr);font-weight:800;margin-bottom:6px">💰 ম্যানেজার/মালিককে জমা দিতে হবে (আপনার হাতে থাকা নগদ)</div>'
+    + '<div class="dv2" style="color:var(--gr);font-size:26px">৳'+fm(c.inHand)+'</div>'
+    + '<div class="ds2">বিক্রয়ে নগদ ৳'+fm(c.cashAtSale)+' + বাকি আদায় ৳'+fm(c.dueCollected)+' − ড্যামেজে দেওয়া ৳'+fm(c.damageMoneyPaid)+'</div>'
+    + (c.handedOver > 0 ? '<div class="ds2" style="margin-top:3px">ইতিমধ্যে জমা হয়েছে ৳'+fm(c.handedOver)+' · এখনো বাকি <b>৳'+fm(Math.max(0,c.stillToHandOver))+'</b></div>' : '')
+    + '<div class="ds2" style="margin-top:3px">'+(cashOpen?'▲ বন্ধ করুন':'▼ বিস্তারিত দেখুন')+'</div></div>';
+  h += '</div>';
+  if (open) {
+    var ttl = {given:'📤 দেওয়া',ret:'↩️ ফেরত',damage:'⚠️ ড্যামেজ',commission:'🤝 কমিশন',discount:'🏷️ ছাড়',cash:'💰 হাতে থাকা নগদ'}[open];
+    h += '<div class="card" id="dmd-detail" style="margin-top:2px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:13px;font-weight:800">'+ttl+' — বিস্তারিত ইতিহাস</div><button class="btn btn-gh btn-sm" onclick="dsrToggleBox(\''+open+'\')">✕ বন্ধ</button></div>'+_dmdDetail(open, d)+'</div>';
+  }
+  return h;
 }
 
 function renderDsrTxTab(txs, fromDate, toDate) {
@@ -4370,12 +4589,7 @@ function renderDsrTxTab(txs, fromDate, toDate) {
 
   var dateLabel=(fromDate===toDate)?fmtBn(fromDate):fmtBn(fromDate)+' — '+fmtBn(toDate);
   h+='<div style="font-size:12px;font-weight:700;color:var(--mt);margin-bottom:8px">লেনদেন সারসংক্ষেপ — '+dateLabel+'</div>';
-  h+='<div class="dsr-grid">';
-  h+='<div class="dsr-cell" style="border-color:var(--bl)"><div style="font-size:11px;color:var(--bl);font-weight:700;margin-bottom:6px">📤 দেওয়া</div><div class="dv2" style="color:var(--bl)">'+given.cases+'<small style="font-size:12px">ইউনিট</small></div><div class="ds2">'+given.pcs+' পিস</div></div>';
-  h+='<div class="dsr-cell" style="border-color:var(--te)"><div style="font-size:11px;color:var(--te);font-weight:700;margin-bottom:6px">↩️ ফেরত</div><div class="dv2" style="color:var(--te)">'+ret.cases+'<small style="font-size:12px">ইউনিট</small></div><div class="ds2">'+ret.pcs+' পিস</div></div>';
-  h+='<div class="dsr-cell" style="border-color:var(--re)"><div style="font-size:11px;color:var(--re);font-weight:700;margin-bottom:6px">⚠️ ড্যামেজ</div><div class="dv2" style="color:var(--re)">'+dmg.cases+'<small style="font-size:12px">ইউনিট</small></div><div class="ds2">'+dmg.pcs+' পিস</div></div>';
-  h+='</div>';
-  h+='<div style="font-size:12px;font-weight:600;color:var(--gr);margin-bottom:6px">মোট বিক্রয় মূল্য: ৳'+fm(given.rev)+'</div>';
+  h+=_dsrMyDayHtml();
   if (txs.length) {
     h+='<div class="ct">লেনদেনের বিস্তারিত</div><div class="card" style="padding:0;overflow:hidden">';
     var grp={};
@@ -8457,8 +8671,7 @@ function renderSoRptArea() {
   }).join('');
 
   if (!S.soRptGenDate) {
-    var y = new Date(); y.setDate(y.getDate() - 1);
-    S.soRptGenDate = y.toISOString().slice(0, 10);
+    S.soRptGenDate = bdtToday(-1);
   }
 
   var html = '<div class="fg"><label class="fl">SO নির্বাচন করুন</label><select id="so-rpt-sel" onchange="soRptOnSoChange(this.value)">' + opts + '</select></div>';
@@ -8618,18 +8831,29 @@ function renderRepResult(r) {
     }
     el.innerHTML=eh; return;
   }
-  var t=r.totals, pc=t.grossProfit>=0?'var(--gr)':'var(--re)';
+  var t=r.totals; var np=(t.netProfit!==undefined&&t.netProfit!==null)?t.netProfit:t.grossProfit; var pc=np>=0?'var(--gr)':'var(--re)';
   var isOwner=S.role==='owner';
   var h='<div class="gib">সময়কাল: '+(r.from===r.to?fmtBn(r.from):fmtBn(r.from)+' → '+fmtBn(r.to))+'</div>'
     +_genStampHtml(r.generatedAt)
-    +'<div class="prof" style="background:'+(t.grossProfit>=0?'var(--gr)':'var(--re)')+'">'
-    +'<div class="prof-l">'+(t.grossProfit>=0?'মোট লাভ':'মোট ক্ষতি')+'</div>'
-    +'<div class="prof-v">৳'+fm(Math.abs(t.grossProfit))+'</div></div>'
+    +'<div class="prof" style="background:'+(np>=0?'var(--gr)':'var(--re)')+'">'
+    +'<div class="prof-l">'+(np>=0?'নীট লাভ':'নীট ক্ষতি')+'</div>'
+    +'<div class="prof-v">৳'+fm(Math.abs(np))+'</div></div>'
     +'<div class="card" style="padding:10px">';
   h+='<div class="pay-row"><span>মোট বিক্রয় (বিক্রয় মূল্যে)</span><span style="font-weight:700;color:var(--bl)">৳'+fm(t.netRevenue)+'</span></div>';
   if(isOwner)h+='<div class="pay-row"><span>মোট খরচ (ক্রয় মূল্যে)</span><span style="font-weight:700;color:var(--am)">৳'+fm(t.netCost)+'</span></div>';
-  h+='<div class="pay-row"><span>ড্যামেজ লোকসান</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.dmgLoss)+'</span></div>';
-  h+='<div class="pay-row" style="font-size:13px"><span style="font-weight:700">'+(t.grossProfit>=0?'মোট লাভ':'মোট ক্ষতি')+'</span><span style="font-weight:700;color:'+pc+'">৳'+fm(Math.abs(t.grossProfit))+'</span></div></div>';
+  if(isOwner){
+    h+='<div class="pay-row"><span>মোট লাভ (বিক্রয় − ক্রয় মূল্য)</span><span style="font-weight:700">৳'+fm(t.grossProfit)+'</span></div>';
+    if(t.netProfit!==undefined){
+      h+='<div class="pay-row"><span>− কমিশন</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.commission||0)+'</span></div>';
+      h+='<div class="pay-row"><span>− ডিসকাউন্ট</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.discount||0)+'</span></div>';
+    }
+  }
+  h+='<div class="pay-row"><span>'+(t.netProfit!==undefined?'− ':'')+'ড্যামেজ লোকসান</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.dmgLoss)+'</span></div>';
+  if(isOwner&&t.netProfit!==undefined){
+    h+='<div class="pay-row"><span>− বোনাস (দোকানকে)</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.bonus||0)+'</span></div>';
+    h+='<div class="pay-row"><span>− খরচ (Expenses)</span><span style="font-weight:700;color:var(--re)">৳'+fm(t.expenses||0)+'</span></div>';
+  }
+  h+='<div class="pay-row" style="font-size:13px"><span style="font-weight:700">'+(np>=0?'নীট লাভ':'নীট ক্ষতি')+'</span><span style="font-weight:700;color:'+pc+'">৳'+fm(Math.abs(np))+'</span></div></div>';
   h+='<div class="mets">'
     +'<div class="met met-b"><div class="ml">বিক্রয় (পিস)</div><div class="mv">'+fn(t.soldUnits)+'</div></div>'
     +'<div class="met met-g"><div class="ml">পেমেন্ট আদায়</div><div class="mv">৳'+fm(t.payments)+'</div></div>'
@@ -8648,8 +8872,10 @@ function renderRepResult(r) {
     +'<div class="pay-row" style="border-left:3px solid var(--re)"><span>ড্যামেজ (Damage)</span><span style="font-weight:700;color:var(--re)">'+fn(t.dmgUnits)+' পিস · ৳'+fm(t.dmgLoss)+'</span></div>'
     +'<div class="pay-row" style="border-left:3px solid var(--gr)"><span>বিক্রয় (Sold)</span><span style="font-weight:700;color:var(--gr)">'+fn(t.soldUnits)+' পিস</span></div>'
     +'<div class="pay-row" style="background:#f7f8ff"><span>মোট বিক্রয় মূল্য</span><span style="font-weight:700;color:var(--bl)">৳'+fm(t.netRevenue)+'</span></div>'
-    +'<div class="pay-row" style="background:#f7f8ff;border-bottom:none"><span style="font-weight:700">'+(t.grossProfit>=0?'নীট লাভ':'নীট ক্ষতি')+' (মোট)</span><span style="font-weight:800;color:'+pc+'">৳'+fm(Math.abs(t.grossProfit))+'</span></div>'
+    +'<div class="pay-row" style="background:#f7f8ff;border-bottom:none"><span style="font-weight:700">'+(np>=0?'নীট লাভ':'নীট ক্ষতি')+' (মোট)</span><span style="font-weight:800;color:'+pc+'">৳'+fm(Math.abs(np))+'</span></div>'
     +'</div>';
+
+  if(isOwner) h+='<div style="font-size:10.5px;color:var(--mt2);margin:6px 2px 10px;line-height:1.5">* পণ্য/তারিখ ভিত্তিক টেবিলের “মোট লাভ” = বিক্রয় − ক্রয় মূল্য (কমিশন, ডিসকাউন্ট, ড্যামেজ, বোনাস ও খরচ বাদ দেওয়ার আগে)। উপরের “নীট লাভ” এগুলো বাদ দিয়ে হিসাব করা।</div>';
 
   // ── Update #43: two due figures on every report — this period's own
   // due (created inside [from,to]) and the running cumulative due
@@ -8681,7 +8907,7 @@ function renderRepResult(r) {
   }
 
   if(r.byProduct&&r.byProduct.length){
-    h+='<div class="ct">📦 পণ্য ভিত্তিক রিপোর্ট</div><div class="card" style="padding:0;overflow:hidden"><div class="tbl-w"><table><thead><tr><th>পণ্য</th><th>দেওয়া</th><th>ফেরত</th><th>ড্যামেজ</th><th>বিক্রয়</th><th>বিক্রয় মূল্য</th>'+(isOwner?'<th>লাভ</th>':'')+'</tr></thead><tbody>';
+    h+='<div class="ct">📦 পণ্য ভিত্তিক রিপোর্ট</div><div class="card" style="padding:0;overflow:hidden"><div class="tbl-w"><table><thead><tr><th>পণ্য</th><th>দেওয়া</th><th>ফেরত</th><th>ড্যামেজ</th><th>বিক্রয়</th><th>বিক্রয় মূল্য</th>'+(isOwner?'<th>মোট লাভ*</th>':'')+'</tr></thead><tbody>';
     r.byProduct.forEach(function(p){
       var ti=thumbImg(p,'3px');
       h+='<tr><td><strong>'+esc(p.name)+'</strong><div style="font-size:9px;color:var(--mt2)">'+esc(p.sku)+'<br>বিক্রয়:৳'+fm(p.sellingPrice)+'/পিস</div></td>'
@@ -8696,7 +8922,7 @@ function renderRepResult(r) {
   }
 
   if(r.byDate&&r.byDate.length){
-    h+='<div class="ct">📅 তারিখ ভিত্তিক রিপোর্ট</div><div class="card" style="padding:0;overflow:hidden"><div class="tbl-w"><table><thead><tr><th>তারিখ</th><th>দেওয়া</th><th>ফেরত</th><th>বিক্রয়</th><th>লাভ</th></tr></thead><tbody>';
+    h+='<div class="ct">📅 তারিখ ভিত্তিক রিপোর্ট</div><div class="card" style="padding:0;overflow:hidden"><div class="tbl-w"><table><thead><tr><th>তারিখ</th><th>দেওয়া</th><th>ফেরত</th><th>বিক্রয়</th><th>মোট লাভ*</th></tr></thead><tbody>';
     r.byDate.forEach(function(d){
       h+='<tr><td style="font-weight:600;white-space:nowrap">'+fmtBn(d.date)+'</td><td>'+fn(d.givenUnits)+'</td><td style="color:var(--am)">'+fn(d.returnUnits)+'</td><td>৳'+fm(d.revenue)+'</td><td style="color:'+(d.profit>=0?'var(--gr)':'var(--re)')+';font-weight:700">৳'+fm(d.profit)+'</td></tr>';
     });
@@ -8712,11 +8938,11 @@ function renderRepResult(r) {
 
 function repMemo() {
   var r = S._lastRep; if (!r || !r.totals) return toast('আগে রিপোর্ট দেখুন');
-  var M = MEMO, t = r.totals, isOwner = S.role === 'owner', blocks = [], profit = t.grossProfit >= 0;
+  var M = MEMO, t = r.totals, isOwner = S.role === 'owner', blocks = [], npv = (t.netProfit !== undefined && t.netProfit !== null) ? t.netProfit : t.grossProfit, profit = npv >= 0;
   var per = r.from === r.to ? M.dmy(r.from) : M.dmy(r.from) + ' → ' + M.dmy(r.to);
   blocks.push(M.kv('রিপোর্টের সময়কাল', [['সময়কাল:', '<b>' + per + '</b>'], ['প্রস্তুতকারী:', esc(_memoBy())]]));
   blocks.push(M.stats([['বিক্রয় (পিস)', M.int(t.soldUnits)], ['পেমেন্ট আদায়', '৳' + M.money(t.payments)], ['দেওয়া (পিস)', M.int(t.givenUnits), 'w'], ['ড্যামেজ (পিস)', M.int(t.dmgUnits), 'd']]));
-  blocks.push(M.stats([['মোট বিক্রয় মূল্য', '৳' + M.money(t.netRevenue)], isOwner ? ['মোট খরচ (ক্রয় মূল্যে)', '৳' + M.money(t.netCost)] : ['ফেরত (পিস)', M.int(t.returnUnits)], ['ড্যামেজ লোকসান', '৳' + M.money(t.dmgLoss), 'd'], [profit ? 'মোট লাভ' : 'মোট ক্ষতি', '৳' + M.money(Math.abs(t.grossProfit)), 't']]));
+  blocks.push(M.stats([['মোট বিক্রয় মূল্য', '৳' + M.money(t.netRevenue)], isOwner ? ['মোট খরচ (ক্রয় মূল্যে)', '৳' + M.money(t.netCost)] : ['ফেরত (পিস)', M.int(t.returnUnits)], ['ড্যামেজ লোকসান', '৳' + M.money(t.dmgLoss), 'd'], [profit ? 'নীট লাভ' : 'নীট ক্ষতি', '৳' + M.money(Math.abs(npv)), 't']]));
   if (t.periodDue != null || t.cumulativeDue != null) blocks.push(M.stats([['এই সময়ের বকেয়া', '৳' + M.money(t.periodDue || 0), 'w'], ['সর্বমোট বকেয়া (' + M.dmy(r.to) + ' পর্যন্ত)', '৳' + M.money(t.cumulativeDue || 0), 'd']]));
   if (r.srPerformance && r.srPerformance.length) {
     blocks.push(M.sec('DSR/SO পারফরম্যান্স'));
@@ -8740,7 +8966,7 @@ function repMemo() {
   }
   var g = r.generatedAt ? new Date(r.generatedAt) : new Date(); if (isNaN(g.getTime())) g = new Date();
   _memoShow({ title: 'ব্যবসায়িক রিপোর্ট', en: 'BUSINESS REPORT', no: 'RPT-' + String(r.from || '').replace(/-/g, '') + (r.from === r.to ? '' : '-' + String(r.to || '').replace(/-/g, '')), date: iso(g), time: M.hm(g), period: per, blocks: blocks,
-    closing: { total: t.netRevenue, words: t.netRevenue, wordsLabel: 'কথায় (মোট বিক্রয় মূল্য):', summary: [['মোট বিক্রয় মূল্য', '৳ ' + M.money(t.netRevenue)], ['ড্যামেজ লোকসান', '৳ ' + M.money(t.dmgLoss), 'a'], [profit ? 'মোট লাভ' : 'মোট ক্ষতি', '৳ ' + M.money(Math.abs(t.grossProfit)), profit ? 'big' : 'r']], sigs: [['প্রস্তুতকারী', ''], ['যাচাইকারী', 'মালিক']] } });
+    closing: { total: t.netRevenue, words: t.netRevenue, wordsLabel: 'কথায় (মোট বিক্রয় মূল্য):', summary: [['মোট বিক্রয় মূল্য', '৳ ' + M.money(t.netRevenue)], ['ড্যামেজ লোকসান', '৳ ' + M.money(t.dmgLoss), 'a'], [profit ? 'নীট লাভ' : 'নীট ক্ষতি', '৳ ' + M.money(Math.abs(npv)), profit ? 'big' : 'r']], sigs: [['প্রস্তুতকারী', ''], ['যাচাইকারী', 'মালিক']] } });
 }
 
 async function loadDmgPage(from, to) {
@@ -10011,15 +10237,17 @@ async function _gcInitRealtime() {
 function _gcStartPolling() {
   if (_gcPollTimer) return;
   _gcPollTimer = setInterval(async function() {
-    if (S.tab !== 'chat') return;
-    var lastId = _gcMsgs.length ? _gcMsgs[_gcMsgs.length-1].createdAt : '';
-    var r = await apiGet('/api/expenses?action=chat-msgs');
+    if (S.tab !== 'chat' || document.hidden) return;
+    // PERF-6 — only ask for messages newer than the newest one on screen.
+    var lastAt = '';
+    for (var i = _gcMsgs.length - 1; i >= 0; i--) { if (_gcMsgs[i].id.indexOf('opt-') !== 0 && _gcMsgs[i].createdAt) { lastAt = _gcMsgs[i].createdAt; break; } }
+    var r = await apiGet('/api/expenses?action=chat-msgs' + (lastAt ? '&since=' + encodeURIComponent(lastAt) : ''));
     if (!r || !r.ok) return;
     var newMsgs = (r.messages||[]).filter(function(m){
       return !_gcMsgs.find(function(x){ return x.id===m.id; });
     });
     newMsgs.forEach(function(m){ _gcMsgs.push(m); _gcAppendMsg(m); });
-  }, 4000);
+  }, 20000);
 }
 
 async function gcLoadAndInit() {
@@ -10806,7 +11034,7 @@ table.mt{width:100%;border-collapse:collapse;font-size:11.5px}
   function waNumber(p) { p = String(p || '').replace(/\D/g, ''); if (!p) return ''; if (p.indexOf('880') === 0) return p; if (p.charAt(0) === '0') return '88' + p; return p.length === 10 ? '880' + p : p; }
 
   function show(sp) {
-    sp.time = sp.time || hm(new Date()); sp.date = sp.date || new Date().toISOString().slice(0, 10);
+    sp.time = sp.time || hm(new Date()); sp.date = sp.date || bdtToday();
     var file = String(sp.file || sp.no || 'memo').replace(/[^\w\-]+/g, '_');
     var ov = document.createElement('div'); ov.id = 'memo-overlay';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,44,34,.62);z-index:9998;display:flex;align-items:center;justify-content:center;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif';

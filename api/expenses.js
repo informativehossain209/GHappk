@@ -1,6 +1,6 @@
 const {
   supabase, cors, num, ds, now_, today, mapExpCat, mapExpRecord, mapDue, mapChatMsg, safeErr,
-  cyclePeriodForDate, cyclePeriodBounds, bdtToday, fetchAll
+  cyclePeriodForDate, cyclePeriodBounds, bdtToday, fetchAll, idemRun
 } = require('./_lib/db');
 
 module.exports = async (req, res) => {
@@ -33,21 +33,23 @@ module.exports = async (req, res) => {
       if (error) throw error;
       return res.json({ ok: true });
     }
-    if (req.method === 'POST' && action === 'record') {
-      const d = req.body;
+    if (req.method === 'POST' && action === 'record') return idemRun(req, res, 'exp-record', async () => {
+      const d = req.body || {};
+      const amount = Math.round(num(d.amount) * 100) / 100;
+      if (amount <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
       const { error } = await supabase.from('exp_records').insert({
         category_id: String(d.categoryId||''), category_name: String(d.categoryName||''),
-        date: d.date, amount: num(d.amount), note: d.note||'', created_at: now_()
+        date: /^\d{4}-\d{2}-\d{2}$/.test(d.date||'') ? d.date : bdtToday(), amount, note: d.note||'', created_at: now_()
       });
       if (error) throw error;
       return res.json({ ok: true });
-    }
+    });
     if (req.method === 'GET' && action === 'report') {
       const { from, to } = req.query;
       if (!from || !to) return res.json({ ok: false, error: 'from/to প্রয়োজন' });
       const [catRes, recRes] = await Promise.all([
         supabase.from('exp_cats').select('*').order('created_at'),
-        supabase.from('exp_records').select('*').gte('date',from).lte('date',to).order('date')
+        supabase.from('exp_records').select('id,category_id,category_name,date,amount,note,created_at').gte('date',from).lte('date',to).order('date')
       ]);
       const cats = (catRes.data||[]).map(mapExpCat);
       const rows = (recRes.data||[]).map(mapExpRecord);
@@ -78,7 +80,7 @@ module.exports = async (req, res) => {
       // fetchAll (1000-row cap) + a real last-day-of-month (the old
       // month+'-31' is an invalid date for Feb/Apr/Jun/Sep/Nov).
       const data = await fetchAll(() => {
-        let q = supabase.from('due_calendar').select('*').order('due_date');
+        let q = supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id').order('due_date');
         if (month) {
           const [cy, cm] = month.split('-').map(Number);
           const last = new Date(Date.UTC(cy, cm, 0)).getUTCDate();
@@ -110,7 +112,7 @@ module.exports = async (req, res) => {
     if (req.method === 'GET' && action === 'pay-report') {
       const { from, to } = req.query;
       const rows = await fetchAll(() => {
-        let q = supabase.from('sr_payments').select('*').order('date');
+        let q = supabase.from('sr_payments').select('id,sr_id,sr_name,date,amount,cash_amount,commission_amt,discount_amt,damage_amt,note,created_at').order('date');
         if (from) q = q.gte('date', from);
         if (to)   q = q.lte('date', to);
         return q;
@@ -141,11 +143,17 @@ module.exports = async (req, res) => {
       });
     }
     if (req.method === 'GET' && action === 'chat-msgs') {
-      const { data, error } = await supabase
-        .from('group_chat_messages')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .limit(80);
+      // PERF-6: ?since=<ISO time of the newest message the screen already has>
+      // returns only newer messages (usually none) instead of the last 80 again.
+      const since = String(req.query.since || '');
+      let cq = supabase.from('group_chat_messages').select('id,sender_id,sender_name,sender_role,message,created_at');
+      let data, error;
+      if (since && !isNaN(new Date(since).getTime())) {
+        ({ data, error } = await cq.gt('created_at', since).order('created_at', { ascending: true }).limit(80));
+      } else {
+        ({ data, error } = await cq.order('created_at', { ascending: false }).limit(80));
+        data = (data || []).reverse();
+      }
       if (error) throw error;
       return res.json({ ok: true, messages: (data || []).map(mapChatMsg) });
     }

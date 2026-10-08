@@ -1,13 +1,27 @@
-# AXIION DMS — Setup
+# AXIION DMS — Setup (v5.2.0)
 
-## 1. Supabase — database
-Create a project, open the SQL editor, and run `schema.sql` once. It is the complete schema for a fresh deployment: all tables, indexes, functions, triggers, security policies, seed data and the photo bucket.
+## 1. Supabase — database  ⚠️ read this first
+There are TWO SQL files. Use exactly one of them:
+
+| Situation | File to run | Effect |
+|---|---|---|
+| **Brand-new Supabase project** (empty) | `schema_fresh.sql` | Creates everything: tables, indexes, functions, triggers, policies, seed data, photo bucket. |
+| **Already running / has real data** | `migrations/001_v5_1_fixes.sql` | Adds only the v5.1 changes. Safe to run more than once. Never deletes data. |
+
+`schema_fresh.sql` begins with a safety stop: if the database already contains
+sales/transactions it refuses to run (the old `schema.sql` dropped tables and wiped data).
+Even so — **never run `schema_fresh.sql` on production**, and take a backup first
+(Supabase → Database → Backups, or `pg_dump`) before running any migration.
+
+The app keeps working if the migration has not been run yet (every new database function
+has an identical JavaScript fallback), but it will be slower and the stock guard / audit log /
+idempotency features stay off until the SQL is run.
 
 ## 2. Supabase — Storage (product/staff photos)
-**Update (Glass Frosted Animation Beta 1):** `schema.sql` now creates the public `thumbs` bucket automatically. The manual steps below are only needed if that statement fails on your project.
+**Update:** `schema_fresh.sql` now creates the public `thumbs` bucket automatically. The manual steps below are only needed if that statement fails on your project.
 
 The app uploads product and staff profile photos to Supabase Storage, not
-the database. Create the bucket manually — `schema.sql` can't do this part:
+the database. Create the bucket manually — `schema_fresh.sql` can't do this part:
 
 1. Supabase dashboard → **Storage** → **New bucket**
 2. Name it exactly `thumbs` (the code has this name hardcoded)
@@ -26,7 +40,11 @@ Environment Variables), not a "password":
 | `SUPABASE_URL`         | Project Settings → API → Project URL                    |
 | `SUPABASE_SERVICE_KEY` | Project Settings → API → Project API keys → `service_role` |
 
-Add both, then redeploy (env var changes don't apply to a build already in
+Optional but recommended: `CRON_SECRET` (any long random text). Vercel then sends it
+automatically as `Authorization: Bearer …` to the nightly report cron. It is no longer
+accepted in the URL.
+
+Add them, then redeploy (env var changes don't apply to a build already in
 progress).
 
 ## 4. GitHub / Vercel deploy
@@ -47,6 +65,8 @@ The schema seeds one login:
 - Password: `12345`
 
 You'll be forced to set a new password on first login.
+
+> **Older version notes below are historical.** Wherever they say `schema.sql`, use `schema_fresh.sql` (new install only) or `migrations/` (existing data) as described in section 1.
 
 ## 7. What's new in 4.7.0
 `schema.sql` already includes everything (new `return_company` transaction type, order
@@ -117,3 +137,45 @@ Every shop now has a full transaction page. Open any shop (Owner / Manager / SO:
 Older dues without `tx_id` are matched to their sale automatically (same shop + date + amount), so existing history appears in the ledger immediately.
 
 Still 12 API files — the ledger lives inside `api/shops.js` (`action=ledger`, `action=ledger-sale`).
+
+
+---
+## 11. What's new in 5.1.0 — calculations, free-tier speed, safe deploy
+Full list: `CHANGELOG.md`. Highlights:
+
+**Calculations**
+- **Net profit** (`নীট লাভ`) is now ONE definition on every screen:
+  `revenue − cost of goods − commission − discount − damage loss − shop bonus − expenses`.
+  Each deduction can be switched on/off in ⚙️ Settings → "হিসাব ও স্টক নিয়ম".
+  The report shows the whole breakdown. The per-product / per-date tables still show *gross*
+  profit (marked `*`).
+- Prices and costs are read from the products table **on the server**; numbers sent by the
+  phone are ignored. Money is rounded per bill line to 2 decimals and whole cases use the case price.
+- Bonus rules are stored on each sale row, so changing a product's bonus later no longer rewrites old bonus.
+- **Van stock carries over across days** (a DSR's unsold stock from yesterday still counts today).
+  ⚠️ If, before this update, DSRs never returned/settled old stock, those old loads will now show
+  up as stock still on the van. Do one settlement/return round after deploying to clear them.
+- Every money-writing request carries a `requestId`; a double tap / retry / second tab is answered
+  with the first result instead of recording twice.
+- Sales that touch several tables (shop sale + due + visit) are saved in one database transaction.
+- **Stock guard**: giving/selling more than is in stock is refused (toggle in Settings). The check is
+  also inside the database trigger, so two people at once cannot both succeed.
+- Edits/deletes of dues and similar changes are written to `audit_log`.
+- Due "mark cleared" now records a real payment for the remaining balance (shows in the collections log).
+- Dates use the Dhaka calendar day (no more wrong date between 00:00–06:00).
+
+**Free-tier performance**
+- Totals are computed inside Postgres (functions `sales_summary`, `sr_sales_totals`, `shop_due_totals`, …)
+  instead of downloading thousands of rows into the serverless function.
+- Lists have explicit columns, optional paging, DB-side search and `openOnly` filters.
+- GPS ping every ~3 min (was 60 s) and only when moved ~50 m (heartbeat every 10 min);
+  chat polling 20 s with `?since=` and paused while the tab is hidden.
+- Nightly cron processes SOs 3 at a time and logs to `cron_runs` (`/api/report?action=cron-status`).
+
+**Deploy**
+- `vercel.json` now uses `rewrites` (the old `routes` + `headers` combination is invalid on Vercel).
+- Still exactly 12 files in `api/`.
+- Keep the Supabase keep-alive/cron ping you use (free projects pause after 7 idle days) — nothing here replaces it.
+
+**Not changed on purpose:** the PIN/login system (SEC-1…4 of the audit plan) is untouched as requested.
+Known note: damage loss is the `total_cost` stored on each damage claim (purchase-cost based).

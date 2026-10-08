@@ -1,9 +1,15 @@
 const {
   supabase, cors, num, ds,
-  mapProduct, mapSR, mapTx, mapPayment, mapDmg, mapBonus,
-  mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf,
-  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals, _bonusSign
+  mapProduct, mapSR, mapTx, mapPayment,
+  mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf, addDaysStr,
+  safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals,
+  computeProfit, computeBonusRangeSummary, getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement
 } = require('./_lib/db');
+
+// PERF-5 — only the columns the screens read
+const TX_FULL = 'id,tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at';
+const TX_LITE = 'id,type,sr_id,date,product_id,product_name,total_units,total_revenue,total_cost,created_at';
+const PAY_COLS = 'id,sr_id,sr_name,date,amount,cash_amount,commission_amt,discount_amt,damage_amt,note,created_at';
 
 // V41 update 7 — every "this month" figure on the dashboard is scoped to
 // the company pay cycle (26th of previous month → 25th of current month),
@@ -67,10 +73,10 @@ module.exports = async (req, res) => {
     if (action === 'sr-perf') {
       const period = /^\d{4}-\d{2}$/.test(req.query.period || '') ? req.query.period : cyclePeriodForDate(bdtToday());
       const { start, end } = cyclePeriodBounds(period);
-      const [srRes, tgRes, txRows] = await Promise.all([
+      const [srRes, tgRes, totals] = await Promise.all([
         supabase.from('srs').select('id,name,role,so_id,so_name,thumb,area,display_no').in('role', ['dsr', 'so']),
         supabase.from('targets').select('user_key,target_amount').eq('period', period),
-        fetchAll(() => supabase.from('transactions').select('sr_id,type,total_units,total_revenue').in('type', ['give', 'return', 'point_sale', 'point_damage_return']).gte('date', start).lte('date', end))
+        getSrSalesTotals(start, end)       // PERF-3: summed in Postgres
       ]);
       if (srRes.error) throw srRes.error;
       const people = srRes.data || [];
@@ -78,12 +84,9 @@ module.exports = async (req, res) => {
       (tgRes.data || []).forEach(t => { tMap[String(t.user_key)] = num(t.target_amount); });
 
       const own = {};   // sr_id → { rev, units }
-      (txRows || []).forEach(r => {
-        const id = String(r.sr_id || ''); if (!id) return;
-        if (!own[id]) own[id] = { rev: 0, units: 0 };
-        const sign = (r.type === 'give' || r.type === 'point_sale') ? 1 : -1;
-        own[id].rev   += sign * num(r.total_revenue);
-        own[id].units += sign * num(r.total_units);
+      Object.keys(totals).forEach(id => {
+        const t = totals[id];
+        own[id] = { rev: t.outRev - t.inRev, units: t.outUnits - t.inUnits };
       });
 
       const dsrsBySo = {};
@@ -140,11 +143,9 @@ module.exports = async (req, res) => {
       const range = String(req.query.range || 'today');
       let from = today, to = today, label = 'আজ';
       if (range === '7d') {
-        const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 6);
-        from = d.toISOString().slice(0, 10); label = 'গত ৭ দিন';
+        from = addDaysStr(today, -6); label = 'গত ৭ দিন';
       } else if (range === '30d') {
-        const d = new Date(today + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 29);
-        from = d.toISOString().slice(0, 10); label = 'গত ৩০ দিন';
+        from = addDaysStr(today, -29); label = 'গত ৩০ দিন';
       } else if (range === 'month') {
         from = _cycleMonthStart(today); label = 'এই মাস';
       } else if (range === 'year') {
@@ -156,17 +157,15 @@ module.exports = async (req, res) => {
       }
       if (from > to) { const t = from; from = to; to = t; } // guard against a swapped custom range
 
-      const txRows = await fetchAll(() => supabase.from('transactions').select('type,total_units,total_revenue,total_cost').gte('date', from).lte('date', to));
-      const tx = txRows.map(mapTx);
-      const gU  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalUnits), 0);
-      const rtU = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalUnits), 0);
-      const gR  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalRevenue), 0);
-      const rtR = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalRevenue), 0);
-      const gC  = tx.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalCost), 0);
-      const rtC = tx.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalCost), 0);
-      const revenue = gR - rtR;
-      const profit  = revenue - (gC - rtC);
-      return res.json({ ok: true, range, label, from, to, revenue, profit, givenUnits: gU, returnUnits: rtU });
+      // CALC-1 — ONE profit definition for every screen (see computeProfit in _lib/db.js).
+      // `profit` is now the NET profit; the full breakdown rides along.
+      const P = await computeProfit(from, to);
+      return res.json({
+        ok: true, range, label, from, to,
+        revenue: P.revenue, profit: P.netProfit, netProfit: P.netProfit, grossProfit: P.grossProfit,
+        commission: P.commission, discount: P.discount, damageLoss: P.damageLoss, bonus: P.bonus, expenses: P.expenses,
+        profitRules: P.rules, givenUnits: P.givenUnits, returnUnits: P.returnUnits
+      });
     }
 
     // ══════════════════════════════════════════════════════
@@ -204,18 +203,18 @@ module.exports = async (req, res) => {
       // exactly like the lifetime "due calculation" query below already
       // does, or the cap will just as silently reappear.
       const txTodayFactory = () => {
-        let q = supabase.from('transactions').select('*').eq('date', today).order('created_at');
+        let q = supabase.from('transactions').select(TX_LITE).eq('date', today).order('created_at');
         if (allIds.length) q = q.in('sr_id', allIds);
         return q;
       };
       const txMonthFactory = () => {
-        let q = supabase.from('transactions').select('*').gte('date', monthStart).lte('date', today).order('created_at');
+        let q = supabase.from('transactions').select(TX_LITE).gte('date', monthStart).lte('date', today).order('created_at');
         if (allIds.length) q = q.in('sr_id', allIds);
         return q;
       };
       // Custom range query — only fired when both from/to are supplied
       const hasRange = !!(allIds.length && rangeFrom && rangeTo);
-      const txRangeFactory = () => supabase.from('transactions').select('*')
+      const txRangeFactory = () => supabase.from('transactions').select(TX_LITE)
         .gte('date', rangeFrom).lte('date', rangeTo).in('sr_id', allIds).order('created_at');
 
       // Lifetime due is now computed by the shared getDueTotals() helper
@@ -248,14 +247,18 @@ module.exports = async (req, res) => {
       const rangeSplit = (rangeFrom && rangeTo) ? { from: rangeFrom, to: rangeTo, ...buildSalesSplit(txRange) } : null;
 
       // SO's own payments — fetchAll: a bare query is capped at 1000 rows.
-      const soPayData = await fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false }));
+      // PERF-1/3: only the newest 30 are listed, the lifetime total comes from
+      // the shared Postgres SUM (dueTotals) — no download of the whole history.
+      const { data: soPayData, error: soPayErr } = await supabase.from('sr_payments').select(PAY_COLS).eq('sr_id', userId)
+        .order('date', { ascending: false }).order('created_at', { ascending: false }).limit(30);
+      if (soPayErr) throw soPayErr;
       const soPayments = (soPayData || []).map(mapPayment);
-      const soTotalPaid = soPayments.reduce((s, r) => s + num(r.amount), 0);
+      const soTotalPaid = (dueTotals[String(userId)] || { payments: 0 }).payments;
 
       // DSR month payments
       let dsrPayMonthData = { data: [] };
       if (dsrIds.length) {
-        dsrPayMonthData = { data: await fetchAll(() => supabase.from('sr_payments').select('*')
+        dsrPayMonthData = { data: await fetchAll(() => supabase.from('sr_payments').select('amount')
           .in('sr_id', dsrIds).gte('date', monthStart).lte('date', today).order('date')) };
       }
       const dsrPayMonth = (dsrPayMonthData.data || []).map(mapPayment);
@@ -369,14 +372,8 @@ module.exports = async (req, res) => {
       // Warehouse stock is global, so "yesterday's closing stock" is the
       // live stock with today's warehouse movement (all users) reversed.
       // Movement signs mirror the apply_stock_delta trigger in schema.sql.
-      const STOCK_SIGN = { buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1, return_company: -1 };
-      const dayMoveRows = await fetchAll(() => supabase.from('transactions')
-        .select('product_id,type,total_units').eq('date', today).in('type', Object.keys(STOCK_SIGN)));
-      const dayMove = {};
-      (dayMoveRows || []).forEach(r => {
-        const k = String(r.product_id || ''); if (!k) return;
-        dayMove[k] = (dayMove[k] || 0) + STOCK_SIGN[r.type] * num(r.total_units);
-      });
+      // PERF-3: the day's warehouse movement per product, summed in Postgres.
+      const dayMove = await getStockMovement(today);
 
       // ALL SKUs, zero when nothing sold today (sold desc, then catalogue order).
       const todayProductSales = products.map((p, idx) => {
@@ -430,9 +427,10 @@ module.exports = async (req, res) => {
         getDueTotals([String(userId)]),
         // fetchAll (was a bare query, silently capped at 1000 rows → the
         // DSR's total-paid was understated and his due showed too high).
-        fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).order('date', { ascending: false })),
-        fetchAll(() => supabase.from('transactions').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('created_at')),
-        fetchAll(() => supabase.from('sr_payments').select('*').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('date'))
+        // only the newest 30 are listed — the lifetime total is in dueTotals
+        supabase.from('sr_payments').select(PAY_COLS).eq('sr_id', userId).order('date', { ascending: false }).order('created_at', { ascending: false }).limit(30).then(r => { if (r.error) throw r.error; return r.data || []; }),
+        fetchAll(() => supabase.from('transactions').select(TX_FULL).eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('created_at')),
+        fetchAll(() => supabase.from('sr_payments').select('amount').eq('sr_id', userId).gte('date', monthStart).lte('date', today).order('date'))
       ]);
 
       const products = (prodRes.data || []).map(mapProduct);
@@ -526,63 +524,39 @@ module.exports = async (req, res) => {
     // made last month's revenue/profit figures go quietly wrong. Both now
     // go through fetchAll, same as the lifetime bonus/dues queries already
     // did.
-    const [pRes, sRes, txTodayRaw, txMonthRaw, payMonthRaw, dmgRes, bonRes] = await Promise.all([
+    // v5.1 (PERF-3): no raw transaction rows are downloaded any more. Every
+    // total below is summed inside Postgres (see the SQL functions in
+    // schema_fresh.sql / migrations/001) and arrives as a handful of numbers.
+    const [pRes, sRes, todaySales, monthSales, todayProfitP, monthProfitP, srToday, srMonth, prodToday, prodMonth, payToday, payMonthTotal, dmgPendRows] = await Promise.all([
       supabase.from('products').select('*').order('sort_order').order('created_at'),
       supabase.from('srs').select('*').order('created_at'),
-      fetchAll(() => supabase.from('transactions').select('*').eq('date', today).order('created_at')),
-      fetchAll(() => supabase.from('transactions').select('*').gte('date', monthStart).lte('date', today).order('created_at')),
-      fetchAll(() => supabase.from('sr_payments').select('*').gte('date', monthStart).lte('date', today).order('date')),
-      fetchAll(() => supabase.from('dmg_claims').select('*').eq('status', 'pending').order('created_at')).then(d => ({ data: d })),
-      fetchAll(() => supabase.from('bonus').select('*').order('created_at')).then(d => ({ data: d }))
+      getSrSalesTotals(today, today),
+      getSrSalesTotals(monthStart, today),
+      computeProfit(today, today),
+      computeProfit(monthStart, today),
+      Promise.resolve(null), Promise.resolve(null),
+      getProductNetUnits(today, today),
+      getProductNetUnits(monthStart, today),
+      getPaymentsTotal(today, today),
+      getPaymentsTotal(monthStart, today),
+      fetchAll(() => supabase.from('dmg_claims').select('total_cost').eq('status', 'pending'))
     ]);
 
     const products    = (pRes.data  || []).map(mapProduct);
     const srs         = (sRes.data  || []).map(mapSR);
-    const txToday     = txTodayRaw.map(mapTx);
-    const txMonth     = txMonthRaw.map(mapTx);
-    const payMonth    = (payMonthRaw || []).map(mapPayment);
-    const dmgPending  = (dmgRes.data      || []).map(mapDmg);
-    const bonusRecs   = (bonRes.data      || []).map(mapBonus);
 
-    // Bonus needs 'give' history only for products that HAVE a bonus rule,
-    // and only since the oldest "last cleared" date among them — not the
-    // entire lifetime of every product like before (this was the single
-    // biggest download on every Owner dashboard refresh).
-    const _bonusProds = products.filter(p => num(p.bonusFreeUnits) > 0 || num(p.bonusFreeMoney) > 0);
-    let _bonusFrom = null;
-    _bonusProds.forEach(p => {
-      const cl = bonusRecs.filter(b => String(b.productId) === String(p.id) && b.status === 'cleared' && b.clearedDate)
-        .map(b => String(b.clearedDate)).sort().pop() || '2000-01-01';
-      if (_bonusFrom === null || cl < _bonusFrom) _bonusFrom = cl;
-    });
-    const txAll = _bonusProds.length
-      ? await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units,date')
-          .in('type', ['give','return','point_sale','point_damage_return']).gt('date', _bonusFrom).in('product_id', _bonusProds.map(p => String(p.id))).order('date'))
-      : [];
-
-    // ── Stock map — straight from products.current_stock, no full
-    //    transaction history refetch needed any more ────────────────
+    // ── Stock map — straight from products.current_stock ───────────
     const stockMap = {};
     products.forEach(p => { stockMap[p.id] = p.currentStock; });
 
-    // ── TODAY stats ────────────────────────────────────────
-    const gU  = txToday.filter(r=>r.type==='give'||r.type==='point_sale').reduce((s,r)=>s+num(r.totalUnits),0);
-    const rtU = txToday.filter(r=>r.type==='return'||r.type==='point_damage_return').reduce((s,r)=>s+num(r.totalUnits),0);
-    const gR  = txToday.filter(r=>r.type==='give'||r.type==='point_sale').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const rtR = txToday.filter(r=>r.type==='return'||r.type==='point_damage_return').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const gC  = txToday.filter(r=>r.type==='give'||r.type==='point_sale').reduce((s,r)=>s+num(r.totalCost),0);
-    const rtC = txToday.filter(r=>r.type==='return'||r.type==='point_damage_return').reduce((s,r)=>s+num(r.totalCost),0);
-    const todayRevenue = gR - rtR;
-    const todayProfit  = todayRevenue - (gC - rtC);
-
-    // ── MONTH stats ────────────────────────────────────────
-    const mgR  = txMonth.filter(r=>r.type==='give'||r.type==='point_sale').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const mrtR = txMonth.filter(r=>r.type==='return'||r.type==='point_damage_return').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const mgC  = txMonth.filter(r=>r.type==='give'||r.type==='point_sale').reduce((s,r)=>s+num(r.totalCost),0);
-    const mrtC = txMonth.filter(r=>r.type==='return'||r.type==='point_damage_return').reduce((s,r)=>s+num(r.totalCost),0);
-    const monthRevenue = mgR - mrtR;
-    const monthProfit  = monthRevenue - (mgC - mrtC);
-    const monthPayments = payMonth.reduce((s,r)=>s+num(r.amount),0);
+    // ── TODAY / MONTH stats (CALC-1: profit is NET profit now) ─────
+    const sumT = (m, f) => Object.keys(m).reduce((s, k) => s + num(m[k][f]), 0);
+    const gU  = sumT(todaySales, 'outUnits'), rtU = sumT(todaySales, 'inUnits');
+    const todayRevenue = todayProfitP.revenue;
+    const todayProfit  = todayProfitP.netProfit;
+    const monthRevenue = monthProfitP.revenue;
+    const monthProfit  = monthProfitP.netProfit;
+    const monthPayments = payMonthTotal;
 
     // ── STOCK list ─────────────────────────────────────────
     const stockList = products.map(p => {
@@ -628,31 +602,19 @@ module.exports = async (req, res) => {
     const totalDue = duesList.reduce((s,sr)=>s+(sr.due>0?sr.due:0),0);
 
     // ── TODAY'S NEW DUE — same formula, filtered to today (AXIION §6) ──
-    const todayGivenRev  = txToday.filter(r=>r.type==='give').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const todayReturnRev = txToday.filter(r=>r.type==='return').reduce((s,r)=>s+num(r.totalRevenue),0);
-    const todayPayAmt    = payMonth.filter(r=>r.date===today).reduce((s,r)=>s+num(r.amount),0);
+    const todayGivenRev  = sumT(todaySales, 'giveRev');
+    const todayReturnRev = sumT(todaySales, 'retRev');
+    const todayPayAmt    = payToday;
     const todayNewDue    = (todayGivenRev - todayReturnRev) - todayPayAmt;
 
     // ── DAMAGE pending ─────────────────────────────────────
-    const dmgPendingAmt = dmgPending.reduce((s,r)=>s+num(r.totalCost),0);
+    const dmgPendingAmt = dmgPendRows.reduce((s,r)=>s+num(r.total_cost),0);
 
-    // ── BONUS pending ──────────────────────────────────────
-    let bonusPendingAmt = 0;
-    products.filter(p=>num(p.bonusFreeUnits)>0||num(p.bonusFreeMoney)>0).forEach(p => {
-      const cleared = bonusRecs.filter(b=>String(b.productId)===String(p.id)&&b.status==='cleared'&&b.clearedDate)
-        .sort((a,b)=>String(b.clearedDate).localeCompare(String(a.clearedDate)));
-      const lastCleared = cleared.length>0?String(cleared[0].clearedDate):'';
-      const fromDate = lastCleared||'2000-01-01';
-      const txSince = txAll.filter(r=>String(r.product_id)===String(p.id)&&ds(r.date)>fromDate);
-      const totalGiven = Math.max(0, txSince.reduce((s,r)=>s+_bonusSign(r.type)*num(r.total_units),0));
-      const cs = num(p.caseSize)||1, bcr = num(p.bonusCasesReq)||1;
-      const totalCases = Math.floor(totalGiven/cs);
-      const accUnits = Math.floor(totalCases/bcr)*num(p.bonusFreeUnits);
-      const accMoney = Math.floor(totalCases/bcr)*num(p.bonusFreeMoney||0);
-      const accAmount = accUnits*num(p.purchasePrice)+accMoney;
-      const totalRec = bonusRecs.filter(b=>String(b.productId)===String(p.id)&&b.status==='cleared').reduce((s,b)=>s+num(b.bonusAmount),0);
-      bonusPendingAmt += Math.max(0, accAmount - totalRec);
-    });
+    // ── BONUS (CALC-3) — earned this pay cycle, one shared calculation ──
+    // (The old "pending" figure compared a since-last-clear amount with an
+    // ALL-TIME received total and came out too low after the first clearing.)
+    const bonusRows = await computeBonusRangeSummary(monthStart, today);
+    const bonusPendingAmt = bonusRows.reduce((s, b) => s + num(b.amount), 0);
 
     // ── TOTAL STOCK VALUES ─────────────────────────────────
     // (Update #48 — the old "Recent Transactions" widget and its backing
@@ -671,14 +633,12 @@ module.exports = async (req, res) => {
     //    SKUs with zero sales that day/month, so the owner sees the
     //    complete picture, not just the winners. Ranking + case-
     //    conversion math is unchanged from the old buildTopSellers.)
-    function buildRankedSellers(txList) {
+    function buildRankedSellers(netByProduct) {
       const sales = {};
       products.forEach(p => { sales[p.id] = { productId: p.id, productName: p.name, units: 0 }; });
-      txList.forEach(r => {
-        const pid = String(r.productId || ''); if (!pid) return;
-        if (!sales[pid]) sales[pid] = { productId: pid, productName: r.productName || '', units: 0 };
-        if (r.type === 'give' || r.type === 'point_sale') sales[pid].units += num(r.totalUnits);
-        if (r.type === 'return' || r.type === 'point_damage_return') sales[pid].units -= num(r.totalUnits);
+      Object.keys(netByProduct).forEach(pid => {
+        if (!sales[pid]) sales[pid] = { productId: pid, productName: '', units: 0 };
+        sales[pid].units += num(netByProduct[pid]);
       });
       return Object.values(sales).sort((a, b) => b.units - a.units)
         .map((p, i) => {
@@ -698,29 +658,31 @@ module.exports = async (req, res) => {
           };
         });
     }
-    const rankedToday = buildRankedSellers(txToday);
-    const rankedMonth = buildRankedSellers(txMonth);
+    const rankedToday = buildRankedSellers(prodToday);
+    const rankedMonth = buildRankedSellers(prodMonth);
 
     // ── SR PERFORMANCE (this month) ────────────────────────
     const srPerf = {};
     srs.forEach(sr=>{ srPerf[sr.id]={srId:sr.id,name:sr.name,area:sr.area||'',thumb:sr.thumb||'',soldUnits:0,returnUnits:0,revenue:0,due:0}; });
-    txMonth.forEach(r=>{
-      const sid=String(r.srId||''); if(!sid) return;
-      if(!srPerf[sid]) srPerf[sid]={srId:sid,name:r.srName||'',area:'',thumb:'',soldUnits:0,returnUnits:0,revenue:0,due:0};
-      if(r.type==='give'){srPerf[sid].soldUnits+=num(r.totalUnits);srPerf[sid].revenue+=num(r.totalRevenue);}
-      if(r.type==='return'){srPerf[sid].returnUnits+=num(r.totalUnits);srPerf[sid].revenue-=num(r.totalRevenue);}
+    Object.keys(monthSales).forEach(sid => {
+      const t = monthSales[sid];
+      if (!srPerf[sid]) srPerf[sid]={srId:sid,name:'',area:'',thumb:'',soldUnits:0,returnUnits:0,revenue:0,due:0};
+      srPerf[sid].soldUnits += t.giveUnits; srPerf[sid].returnUnits += t.retUnits;
+      srPerf[sid].revenue += t.giveRev - t.retRev;
     });
     duesList.forEach(d=>{ if(srPerf[d.srId]) srPerf[d.srId].due=d.due; });
     const srPerfList = Object.values(srPerf).filter(s=>s.soldUnits>0||s.returnUnits>0).sort((a,b)=>b.revenue-a.revenue);
 
     res.json({
       ok: true,
-      today: { revenue: todayRevenue, profit: todayProfit, givenUnits: gU, returnUnits: rtU },
-      month: { revenue: monthRevenue, profit: monthProfit, payments: monthPayments },
+      // `profit` = NET profit (CALC-1). The pieces are returned too so a screen
+      // can show: gross − commission − discount − damage − bonus − expenses.
+      today: { revenue: todayRevenue, profit: todayProfit, givenUnits: gU, returnUnits: rtU, breakdown: todayProfitP },
+      month: { revenue: monthRevenue, profit: monthProfit, payments: monthPayments, breakdown: monthProfitP },
       stock: { list: stockList, totalSell, totalBuyValue, totalSellValue, estimatedProfit },
       dues:  { total: totalDue, todayNew: todayNewDue, list: duesList },
       damage: { pendingAmt: dmgPendingAmt },
-      bonus:  { pendingAmt: bonusPendingAmt },
+      bonus:  { pendingAmt: bonusPendingAmt, from: monthStart, to: today, byProduct: bonusRows.filter(b => num(b.amount) > 0) },
       lowStock: lowStockList,
       rankedToday,
       rankedMonth,

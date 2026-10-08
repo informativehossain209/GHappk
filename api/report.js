@@ -1,8 +1,12 @@
 const {
   supabase, cors, num, ds, str, now_, safeErr,
   mapTx, mapPayment, mapProduct, mapSR, mapDue,
-  bdtYesterday, fetchAll
+  bdtYesterday, fetchAll, computeProfit, getDueTotals
 } = require('./_lib/db');
+
+const TX_COLS = 'id,tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at';
+const DUE_COLS = 'id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id';
+
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -24,7 +28,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // V47 update #40: productMetaMap now carries caseSize alongside unitType
 // so the frontend can render "X কেস Y পিস" instead of a raw piece count.
 async function buildRouteChallan(routeId, routeName, routePhone, routeArea, reportDate, productMetaMap, routeRoadName) {
-  const data = await fetchAll(() => supabase.from('transactions').select('*')
+  const data = await fetchAll(() => supabase.from('transactions').select(TX_COLS)
     .eq('sr_id', routeId).eq('date', reportDate)
     .in('type', ['give', 'return', 'damage'])
     .order('created_at', { ascending: true }));
@@ -97,8 +101,9 @@ async function buildRouteChallan(routeId, routeName, routePhone, routeArea, repo
 // Companion Due Report — today's due, previous carried-over due, and a
 // shop-wise breakdown, scoped to an SO + every DSR assigned to it.
 async function buildDueReportData(soId, reportDate, allIds) {
-  const data = await fetchAll(() => supabase.from('due_calendar').select('*')
-    .in('dsr_id', allIds).eq('client_type', 'shop'));
+  // PERF-4: cleared rows owe nothing — do not download them
+  const data = await fetchAll(() => supabase.from('due_calendar').select(DUE_COLS)
+    .in('dsr_id', allIds).eq('client_type', 'shop').neq('status', 'cleared'));
   const rows = (data || []).map(mapDue);
 
   let todayTotal = 0, prevTotal = 0;
@@ -203,16 +208,24 @@ async function generateDailyReportForSO(soRow, reportDate, generatedBy, productM
 // daily SO/Due report already gives via buildDueReportData above, just
 // company-wide instead of scoped to one SO's routes.
 async function computePeriodDueTotals(from, to) {
-  const rows = await fetchAll(() => supabase.from('due_calendar')
-    .select('due_date,amount,paid_amount').lte('due_date', to));
-  let periodDue = 0, cumulativeDue = 0;
-  (rows || []).forEach(r => {
-    const remaining = num(r.amount) - num(r.paid_amount);
-    if (remaining <= 0) return;
-    cumulativeDue += remaining;
-    if (r.due_date >= from && r.due_date <= to) periodDue += remaining;
-  });
-  return { periodDue: +periodDue.toFixed(4), cumulativeDue: +cumulativeDue.toFixed(4) };
+  // PERF-3/4: summed in Postgres over OPEN rows only; same numbers as before.
+  try {
+    const { data, error } = await supabase.rpc('period_due', { p_from: from, p_to: to });
+    if (error) throw error;
+    const r = (data && data[0]) || {};
+    return { periodDue: +num(r.period_due).toFixed(4), cumulativeDue: +num(r.cumulative_due).toFixed(4) };
+  } catch (e) {
+    const rows = await fetchAll(() => supabase.from('due_calendar')
+      .select('due_date,amount,paid_amount').lte('due_date', to).neq('status', 'cleared'));
+    let periodDue = 0, cumulativeDue = 0;
+    (rows || []).forEach(r => {
+      const remaining = num(r.amount) - num(r.paid_amount);
+      if (remaining <= 0) return;
+      cumulativeDue += remaining;
+      if (r.due_date >= from && r.due_date <= to) periodDue += remaining;
+    });
+    return { periodDue: +periodDue.toFixed(4), cumulativeDue: +cumulativeDue.toFixed(4) };
+  }
 }
 
 async function fetchProductMetaMap() {
@@ -229,9 +242,9 @@ async function fetchProductMetaMap() {
 async function handleCronGenerate(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const authHeader = req.headers.authorization || '';
-  const secretQ = str(req.query.secret || '', 200);
   const cronSecret = process.env.CRON_SECRET || '';
-  const authed = !!cronSecret && (authHeader === 'Bearer ' + cronSecret || secretQ === cronSecret);
+  // header only — a secret in the URL ends up in logs
+  const authed = !!cronSecret && authHeader === 'Bearer ' + cronSecret;
   if (!authed) return res.status(401).json({ ok: false, error: 'Unauthorized' });
 
   const reportDate = (req.query.date && DATE_RE.test(req.query.date)) ? req.query.date : bdtYesterday();
@@ -239,15 +252,35 @@ async function handleCronGenerate(req, res) {
   if (error) throw error;
   const productMetaMap = await fetchProductMetaMap();
   const results = [];
-  for (const so of (soRows || [])) {
-    try {
-      await generateDailyReportForSO(so, reportDate, 'auto', productMetaMap);
-      results.push({ soId: so.id, soName: so.name, ok: true });
-    } catch (e) {
-      results.push({ soId: so.id, soName: so.name, ok: false, error: safeErr(e) });
-    }
+  // PERF-8: a few SOs at a time (was one after another) so the 30-second
+  // limit is not hit as the business grows; every failure is recorded.
+  const list = soRows || [];
+  for (let i = 0; i < list.length; i += 3) {
+    await Promise.all(list.slice(i, i + 3).map(async (so) => {
+      try {
+        await generateDailyReportForSO(so, reportDate, 'auto', productMetaMap);
+        results.push({ soId: so.id, soName: so.name, ok: true });
+      } catch (e) {
+        results.push({ soId: so.id, soName: so.name, ok: false, error: safeErr(e) });
+      }
+    }));
   }
+  try {
+    await supabase.from('cron_runs').insert({
+      report_date: reportDate, ok_count: results.filter(r => r.ok).length,
+      fail_count: results.filter(r => !r.ok).length, details: results
+    });
+    await supabase.from('cron_runs').delete().lt('ran_at', new Date(Date.now() - 60 * 86400000).toISOString());
+  } catch (e) { /* log table not installed yet */ }
   return res.json({ ok: true, reportDate, count: results.length, results });
+}
+
+// GET ?action=cron-status — the owner can see whether last night's reports ran.
+async function handleCronStatus(req, res) {
+  const { data, error } = await supabase.from('cron_runs').select('ran_at,report_date,ok_count,fail_count,details')
+    .order('ran_at', { ascending: false }).limit(5);
+  if (error) return res.json({ ok: true, runs: [], note: 'cron_runs table not installed' });
+  return res.json({ ok: true, runs: data || [] });
 }
 
 // POST ?action=daily-generate — Owner-triggered manual (re)generate.
@@ -333,6 +366,7 @@ module.exports = async (req, res) => {
 
   try {
     if (action === 'cron-generate')   return await handleCronGenerate(req, res);
+    if (action === 'cron-status')     return await handleCronStatus(req, res);
     if (action === 'daily-generate')  return await handleDailyGenerate(req, res);
     if (action === 'daily-list')      return await handleDailyList(req, res);
     if (action === 'daily-get')       return await handleDailyGet(req, res);
@@ -344,15 +378,17 @@ module.exports = async (req, res) => {
 
     // Paginated: a wide owner-picked range (e.g. a full month/year report)
     // can pass 1000 transaction rows well within the business's first year.
-    const [txRows, payRows, srRes, prodRes, dueTotals, claimRows] = await Promise.all([
-      fetchAll(() => supabase.from('transactions').select('*').gte('date', from).lte('date', to).order('date')),
-      fetchAll(() => supabase.from('sr_payments').select('*').gte('date', from).lte('date', to).order('date')),
+    const [txRows, payRows, srRes, prodRes, dueTotals, claimRows, lifeDue, profitP] = await Promise.all([
+      fetchAll(() => supabase.from('transactions').select(TX_COLS).gte('date', from).lte('date', to).order('date')),
+      fetchAll(() => supabase.from('sr_payments').select('id,sr_id,sr_name,date,amount,cash_amount,commission_amt,discount_amt,damage_amt,note,created_at').gte('date', from).lte('date', to).order('date')),
       supabase.from('srs').select('*').order('created_at'),
       supabase.from('products').select('*').order('sort_order').order('created_at'),
       computePeriodDueTotals(from, to),
       // Every damage claim in the window — van damage AND damage-collection
       // (tx_id 'dc:…') — the complete company loss, purchase-price based.
-      fetchAll(() => supabase.from('dmg_claims').select('total_units,total_cost').gte('date', from).lte('date', to))
+      fetchAll(() => supabase.from('dmg_claims').select('total_units,total_cost').gte('date', from).lte('date', to)),
+      getDueTotals(null),
+      computeProfit(from, to)      // CALC-1: the SAME definition the dashboard uses
     ]);
 
     const txs   = (txRows  || []).map(mapTx);
@@ -384,7 +420,11 @@ module.exports = async (req, res) => {
       givenUnits: gU, returnUnits: rtU, dmgUnits: dmgU, buyUnits: byU,
       // sold = given − returned − damaged (same rule as the SR / product rows)
       soldUnits: gU - rtU - dmgU, netRevenue: netRev, netCost,
-      grossProfit: netRev - netCost, dmgLoss: claimCost, dmgClaimUnits: claimUnits, payments: totalPay,
+      grossProfit: netRev - netCost,
+      // CALC-1 — net profit and each deduction (same numbers as the dashboard)
+      netProfit: profitP.netProfit, commission: profitP.commission, discount: profitP.discount,
+      damageLoss: profitP.damageLoss, bonus: profitP.bonus, expenses: profitP.expenses, profitRules: profitP.rules,
+      dmgLoss: claimCost, dmgClaimUnits: claimUnits, payments: totalPay,
       // Update #43 — two due figures: this period's own due, and the
       // running cumulative due outstanding as of the period's end date.
       periodDue: dueTotals.periodDue, cumulativeDue: dueTotals.cumulativeDue
@@ -429,7 +469,9 @@ module.exports = async (req, res) => {
       sr.netRev  = sr.givenRev  - sr.returnRev;
       sr.netCost = sr.givenCost - sr.returnCost;
       sr.profit  = sr.netRev  - sr.netCost;
-      sr.due     = sr.netRev  - sr.payments;
+      sr.due     = sr.netRev  - sr.payments;          // PERIOD figure (this date range only)
+      sr.periodDue = sr.due;
+      { const t = lifeDue[sr.srId]; sr.lifetimeDue = t ? (t.givenRev - t.returnRev) - t.payments : 0; }   // CALC-10: all-time due
       Object.values(sr.products).forEach(p => {
         p.sold    = p.given - p.returned - p.damage;
         p.netRev  = p.givenRev  - p.returnRev;

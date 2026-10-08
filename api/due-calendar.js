@@ -1,9 +1,11 @@
-const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment, fetchAll } = require('./_lib/db');
+const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment, fetchAll, bdtToday, auditLog, idemRun, pageParams } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 
 // Merged with the former api/settings.js (app-wide shop-name setting) to
 // stay within the Vercel Hobby plan's 12-Serverless-Function limit — both
 // live in one file, distinguished by ?action=.
+const DUE_COLS = 'id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id';
+
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -14,10 +16,12 @@ module.exports = async (req, res) => {
     // GET — app-wide shop/business identity (used on every printed
     // challan, memo, report and slip letterhead).
     if (req.method === 'GET' && action === 'settings-get') {
-      const { data, error } = await supabase.from('app_settings').select('*').eq('id', 1).maybeSingle();
+      const { data, error } = await supabase.from('app_settings').select('shop_name,shop_address,shop_phone,distributor_name,logo_text,block_negative_stock,profit_rules').eq('id', 1).maybeSingle();
       if (error) throw error;
       return res.json({
         ok: true,
+        blockNegativeStock: !(data && data.block_negative_stock === false),
+        profitRules: Object.assign({ commission: true, discount: true, damage: true, bonus: true, expenses: true }, (data && data.profit_rules) || {}),
         shopName:        (data && data.shop_name)        || '',
         shopAddress:     (data && data.shop_address)      || '',
         shopPhone:       (data && data.shop_phone)        || '',
@@ -38,39 +42,64 @@ module.exports = async (req, res) => {
       const distributorName = str(d.distributorName, 120);
       const logoText        = str(d.logoText, 4);
 
-      const { error } = await supabase.from('app_settings').upsert({
+      const row = {
         id: 1, shop_name: shopName, shop_address: shopAddress, shop_phone: shopPhone,
         distributor_name: distributorName, logo_text: logoText,
         set_by: str(d.setBy, 60), updated_at: now_()
-      });
+      };
+      // v5.1 — owner switches (only written when the screen sends them, so an
+      // old client never resets them): stock guard + what reduces net profit.
+      if (typeof d.blockNegativeStock === 'boolean') row.block_negative_stock = d.blockNegativeStock;
+      if (d.profitRules && typeof d.profitRules === 'object') {
+        row.profit_rules = {
+          commission: d.profitRules.commission !== false, discount: d.profitRules.discount !== false,
+          damage: d.profitRules.damage !== false, bonus: d.profitRules.bonus !== false, expenses: d.profitRules.expenses !== false
+        };
+      }
+      let { error } = await supabase.from('app_settings').upsert(row);
+      if (error && /block_negative_stock|profit_rules/.test(String(error.message))) {
+        // migration 001 not run yet — save the business info anyway
+        delete row.block_negative_stock; delete row.profit_rules;
+        ({ error } = await supabase.from('app_settings').upsert(row));
+      }
       if (error) throw error;
       return res.json({ ok: true, shopName, shopAddress, shopPhone, distributorName, logoText });
     }
 
     // GET — fetch dues filtered by month and/or dsrId
     if (req.method === 'GET') {
-      const { month, dsrId, shopId } = req.query;
-      // fetchAll: a busy month (or an all-time per-DSR/shop history) can
-      // pass PostgREST's silent 1000-row cap.
-      const data = await fetchAll(() => {
-        let q = supabase.from('due_calendar').select('*').order('due_date');
+      const { month, dsrId, shopId, openOnly } = req.query;
+      const pg = pageParams(req.query, 50);
+      const applyFilters = (q) => {
         if (month) {
           const [calY, calM] = month.split('-').map(Number);
-          const lastDay  = new Date(calY, calM, 0).getDate();
+          const lastDay  = new Date(Date.UTC(calY, calM, 0)).getUTCDate();
           const lastDate = month + '-' + String(lastDay).padStart(2, '0');
           q = q.gte('due_date', month + '-01').lte('due_date', lastDate);
         }
-        // dsrId filter: DSR or SO can only see their own calendar dues
         if (dsrId) q = q.eq('dsr_id', dsrId);
-        // shopId filter: pull a single shop's due history (used by shops.js detail view)
         if (shopId) q = q.eq('shop_id', shopId);
+        // PERF-4 — cleared rows owe nothing; screens that only need what is
+        // still unpaid ask for ?openOnly=1 and skip downloading them.
+        if (openOnly === '1' || openOnly === 'true') q = q.neq('status', 'cleared');
         return q;
+      };
+      if (pg) {
+        const { data, error, count } = await applyFilters(supabase.from('due_calendar').select(DUE_COLS, { count: 'exact' }).order('due_date', { ascending: false }).order('id')).range(pg.from, pg.to);
+        if (error) throw error;
+        return res.json({ ok: true, dues: (data || []).map(mapDue), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
+      }
+      // fetchAll: a busy month (or an all-time per-DSR/shop history) can
+      // pass PostgREST's silent 1000-row cap.
+      const data = await fetchAll(() => {
+        let q = supabase.from('due_calendar').select(DUE_COLS).order('due_date');
+        return applyFilters(q);
       });
       return res.json({ ok: true, dues: (data || []).map(mapDue) });
     }
 
     // POST — add a new due entry
-    if (req.method === 'POST') {
+    if (req.method === 'POST') return idemRun(req, res, 'due-add', async () => {
       const d = req.body;
       if (!d.dueDate || !d.amount) return res.json({ ok: false, error: 'dueDate ও amount প্রয়োজন' });
       const { data, error } = await supabase.from('due_calendar').insert({
@@ -90,12 +119,13 @@ module.exports = async (req, res) => {
       }).select().single();
       if (error) throw error;
       return res.json({ ok: true, due: mapDue(data) });
-    }
+    });
 
-    // PUT — partial/full payment, undo, or edit fields
-    if (req.method === 'PUT') {
-      const d = req.body;
+    // PUT — partial/full payment, mark cleared, or edit fields
+    if (req.method === 'PUT') return idemRun(req, res, 'due-put', async () => {
+      const d = req.body || {};
       if (!d.id) return res.json({ ok: false, error: 'id প্রয়োজন' });
+      const actor = { id: d.actorId || d.collectorId || '', role: d.actorRole || '' };
 
       if (typeof d.payAmount !== 'undefined') {
         const pay = num(d.payAmount);
@@ -110,18 +140,27 @@ module.exports = async (req, res) => {
         return res.json({ ok: true, paidAmount: r1.paidAmount, remaining: r1.remaining, status: r1.status });
       }
 
-      // V44 update #11: the "take back to previous" control (reverting a
-      // cleared entry back to pending, wiping its payment info) has been
-      // removed entirely — 'cleared' is the only status transition this
-      // endpoint still performs.
-      const updates = {};
+      // CALC-7 — "mark cleared" used to just overwrite paid_amount = amount
+      // with NO collection record, so the ledger and the day's settlement
+      // treated the missing part as "paid at delivery". It now pays the
+      // remaining balance through the same helper as every other payment,
+      // so it is logged in due_collections (and dated in Asia/Dhaka time).
       if (d.status === 'cleared') {
-        updates.status       = 'cleared';
-        updates.cleared_date = new Date().toISOString().slice(0, 10);
-        const { data: cur } = await supabase
-          .from('due_calendar').select('amount').eq('id', d.id).single();
-        if (cur) updates.paid_amount = num(cur.amount);
+        const { data: cur, error: cErr } = await supabase.from('due_calendar').select('amount,paid_amount,status').eq('id', d.id).single();
+        if (cErr) throw cErr;
+        const remaining = Math.max(0, num(cur.amount) - num(cur.paid_amount));
+        if (remaining > 0.0001) {
+          const r1 = await applyDuePayment(d.id, remaining, { dsrId: d.collectorId || '', dsrName: d.collectorName || '' });
+          if (r1.conflict) return res.json({ ok: false, error: 'অন্য একটি আপডেট চলছিল — আবার চেষ্টা করুন' });
+        } else if (cur.status !== 'cleared') {
+          await supabase.from('due_calendar').update({ status: 'cleared', cleared_date: bdtToday() }).eq('id', d.id);
+        }
+        await auditLog(actor, 'due-mark-cleared', 'due_calendar', d.id, { amount: cur.amount, paid_amount: cur.paid_amount, status: cur.status }, { status: 'cleared' });
       }
+
+      // Field edits (date / amount / owner / note). The old row is written to
+      // audit_log first so an amount can never change without a trace.
+      const updates = {};
       if (d.dueDate)            updates.due_date    = d.dueDate;
       if (d.amount)             updates.amount      = num(d.amount);
       if (d.dsrName)            updates.dsr_name    = d.dsrName;
@@ -130,18 +169,24 @@ module.exports = async (req, res) => {
       if (d.shopId !== undefined)   updates.shop_id   = d.shopId;
       if (d.shopName !== undefined) updates.shop_name = d.shopName;
       if (d.note !== undefined) updates.note        = d.note;
-
-      const { error } = await supabase.from('due_calendar').update(updates).eq('id', d.id);
-      if (error) throw error;
+      if (Object.keys(updates).length) {
+        const { data: before } = await supabase.from('due_calendar').select(DUE_COLS).eq('id', d.id).maybeSingle();
+        const { error } = await supabase.from('due_calendar').update(updates).eq('id', d.id);
+        if (error) throw error;
+        await auditLog(actor, 'due-edit', 'due_calendar', d.id, before, updates);
+      }
       return res.json({ ok: true });
-    }
+    });
 
     // DELETE — remove a due entry
     if (req.method === 'DELETE') {
-      const d = req.body;
+      const d = req.body || {};
       if (!d.id) return res.json({ ok: false, error: 'id প্রয়োজন' });
+      // CALC-7 — keep a copy of what was deleted
+      const { data: before } = await supabase.from('due_calendar').select(DUE_COLS).eq('id', d.id).maybeSingle();
       const { error } = await supabase.from('due_calendar').delete().eq('id', d.id);
       if (error) throw error;
+      await auditLog({ id: d.actorId || '', role: d.actorRole || '' }, 'due-delete', 'due_calendar', d.id, before, null);
       return res.json({ ok: true });
     }
 
