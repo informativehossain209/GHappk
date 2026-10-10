@@ -1,4 +1,4 @@
-const { supabase, cors, num, now_, mapTx, safeErr, fetchAll, pageParams, idemRun, blockNegativeStock, bdtToday } = require('./_lib/db');
+const { supabase, cors, num, now_, mapTx, safeErr, fetchAll, pageParams, idemRun, blockNegativeStock, bdtToday, cpGroups } = require('./_lib/db');
 const { priceItems, txRow, stockShortage, r2, r4 } = require('./_lib/money');
 const { randomUUID } = require('crypto');
 
@@ -166,10 +166,15 @@ module.exports = async (req, res) => {
         if (t.type === 'damage')   { pm[k].damageUnits += u; }
       });
       const products = Object.values(pm).sort((a, b) => b.givenAmt - a.givenAmt);
+      // v5.4 — case size per product so the client can show cases (+ loose pcs), never bare pieces
+      const _csMap = {};
+      try { const { data: _pr } = await supabase.from('products').select('id,case_size,unit_type'); (_pr || []).forEach(p => { _csMap[String(p.id)] = num(p.case_size) || 1; }); products.forEach(p => { p.caseSize = _csMap[String(p.productId)] || 1; const x = (_pr || []).find(z => String(z.id) === String(p.productId)); p.unitType = x ? (x.unit_type || '') : ''; }); } catch (_) { }
+      const _cpR = cpGroups(txs, _csMap, { given: ['give'], returned: ['return'], shop: ['dsr_sale'], damage: ['damage'] });
 
       const totals = {
         givenRev, returnRev, payments, due,
         givenUnits: sumUn('give'), returnUnits: sumUn('return'),
+        givenCP: _cpR.given, returnCP: _cpR.returned, shopSalesCP: _cpR.shop, damageCP: _cpR.damage,
         shopSalesRev: sumRev('dsr_sale'), shopSalesUnits: sumUn('dsr_sale'),
         damageRev: sumRev('damage'), damageUnits: sumUn('damage'),
         cash: pays.reduce((s, p) => s + num(p.cash_amount), 0),

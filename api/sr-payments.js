@@ -461,6 +461,9 @@ async function _handle(req, res, action) {
     //    damage     van damage + damage taken back from shops (money/exchange)
     //    commission Σ commission_amt on 'dsr_sale' rows    (per shop / product)
     //    discount   Σ discount_amt   on 'dsr_sale' rows    (per shop / product)
+    //    todayDue   remaining (unpaid) credit on this DSR's due rows dated inside from..to
+    //    prevDue    remaining (unpaid) credit on this DSR's / his shops' due rows dated BEFORE from
+    //               (same today/previous split the companion Due Report uses)
     //    cashInHand = cash shops paid at the sale
     //               + old dues collected
     //               − cash paid to shops for damaged goods
@@ -480,7 +483,7 @@ async function _handle(req, res, action) {
 
       const [txs, dueRows, dueCols, dmgCols, settled] = await Promise.all([
         fetchAll(() => supabase.from('transactions')
-          .select('tx_id,type,date,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
+          .select('tx_id,type,date,product_id,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
           .eq('sr_id', sid).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
         fetchAll(() => supabase.from('due_calendar').select('id,shop_id,shop_name,due_date,amount,paid_amount')
           .eq('client_type', 'shop').eq('dsr_id', sid).gte('due_date', from).lte('due_date', to)),
@@ -499,6 +502,44 @@ async function _handle(req, res, action) {
         const { data: shRows } = await supabase.from('shops').select('id,name').in('id', shopIds);
         (shRows || []).forEach(r => { shopName[String(r.id)] = r.name || ''; });
       }
+
+      // case size per product — lets every line be shown as "X কেস Y পিস"
+      // (never a bare total-piece number)
+      const csMap = {}, csByName = {};
+      {
+        const { data: prRows } = await supabase.from('products').select('id,name,case_size');
+        (prRows || []).forEach(r => { const c = Math.max(1, Math.round(num(r.case_size)) || 1); csMap[String(r.id)] = c; csByName[String(r.name || '')] = c; });
+      }
+      const split = (units, pid, pname) => {
+        const cs = csMap[String(pid || '')] || csByName[String(pname || '')] || 1;
+        const u = Math.max(0, Math.round(num(units)));
+        return { cases: Math.floor(u / cs), pcs: u % cs };
+      };
+
+      // today's due / previous due (unpaid credit only)
+      let myShopIds2 = [];
+      {
+        const { data: mine } = await supabase.from('shops').select('id').eq('assigned_dsr_id', sid);
+        myShopIds2 = (mine || []).map(x => String(x.id));
+      }
+      const DUE_SEL = 'id,shop_id,shop_name,due_date,amount,paid_amount,note,status';
+      const [dueA, dueB] = await Promise.all([
+        fetchAll(() => supabase.from('due_calendar').select(DUE_SEL).eq('client_type', 'shop').eq('dsr_id', sid).neq('status', 'cleared').lte('due_date', to)),
+        myShopIds2.length
+          ? fetchAll(() => supabase.from('due_calendar').select(DUE_SEL).eq('client_type', 'shop').in('shop_id', myShopIds2).neq('status', 'cleared').lt('due_date', from))
+          : Promise.resolve([])
+      ]);
+      const seenDue = {}, todayDueLines = [], prevDueLines = [];
+      [...(dueA || []), ...(dueB || [])].forEach(r => {
+        if (seenDue[String(r.id)]) return; seenDue[String(r.id)] = 1;
+        const rem = num(r.amount) - num(r.paid_amount);
+        if (rem <= 0.004) return;
+        const dd = String(r.due_date || '').slice(0, 10);
+        const line = { date: dd, shopName: r.shop_name || '', amount: _m2(rem), original: _m2(r.amount), paid: _m2(r.paid_amount), note: r.note || '' };
+        if (dd >= from && dd <= to) todayDueLines.push(line); else if (dd < from) prevDueLines.push(line);
+      });
+      const sumL = (arr) => _m2(arr.reduce((a, r) => a + r.amount, 0));
+      todayDueLines.sort((a, b) => b.amount - a.amount); prevDueLines.sort((a, b) => b.amount - a.amount);
 
       // cash shops handed over AT the sale (same rule as _computeSettlement:
       // paid_amount also grows on later collections, so subtract every logged one)
@@ -533,7 +574,7 @@ async function _handle(req, res, action) {
 
       const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
         date: r.date, shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
-        units: num(r.total_units), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
+        units: num(r.total_units), ...split(r.total_units, r.product_id, r.product_name), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
       }));
       const commLines = perSale('commission_amt'), discLines = perSale('discount_amt');
 
@@ -549,15 +590,17 @@ async function _handle(req, res, action) {
           total: damageTotal,
           vanDamage: { total: sumV(vanDamage), slips: vanDamage },
           shopDamage: (dmgCols || []).map(r => ({
-            date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units),
+            date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units), ...split(r.units, r.product_id, r.product_name),
             damagedValue: _m2(r.damaged_value), resolution: r.resolution,
-            refundAmt: _m2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units),
+            refundAmt: _m2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exch: split(r.exch_units, r.exch_product_id, r.exch_product_name),
             exchValue: _m2(Math.min(num(r.exch_value), num(r.damaged_value)))
           })),
           moneyRefunded: _m2(damageMoney), exchanged: _m2(damageExchange)
         },
         commission: { total: _m2(commLines.reduce((a, r) => a + r.amount, 0)), lines: commLines },
         discount:   { total: _m2(discLines.reduce((a, r) => a + r.amount, 0)), lines: discLines },
+        todayDue:   { total: sumL(todayDueLines), lines: todayDueLines },
+        prevDue:    { total: sumL(prevDueLines),  lines: prevDueLines },
         cash: {
           cashAtSale: _m2(cashAtSale), dueCollected: _m2(dueCollected), damageMoneyPaid: _m2(damageMoney),
           inHand: cashInHand, handedOver, stillToHandOver: _m2(cashInHand - handedOver),

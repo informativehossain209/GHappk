@@ -114,7 +114,9 @@ async function handleDamage(req, res) {
     }).sort((a, b) => b.cost - a.cost);
     const totalCost  = byProduct.reduce((s, p) => s + p.cost, 0);
     const totalUnits = byProduct.reduce((s, p) => s + p.units, 0);
-    return res.json({ ok: true, from, to, generatedAt: now_(), totalCost, totalUnits, byProduct });
+    // v5.4 — total quantity as exact cases + loose pieces (never a bare piece total)
+    const totalCP = { cases: byProduct.reduce((s, p) => s + p.cases, 0), pcs: byProduct.reduce((s, p) => s + Math.round(p.pieces), 0) };
+    return res.json({ ok: true, from, to, generatedAt: now_(), totalCost, totalUnits, totalCP, byProduct });
   }
   res.status(405).json({ ok: false, error: 'এই রিপোর্ট এখন শুধু দেখার জন্য — POST সমর্থিত নয়' });
 }

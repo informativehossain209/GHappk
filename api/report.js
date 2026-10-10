@@ -1,7 +1,7 @@
 const {
   supabase, cors, num, ds, str, now_, safeErr,
   mapTx, mapPayment, mapProduct, mapSR, mapDue,
-  bdtYesterday, fetchAll, computeProfit, getDueTotals
+  bdtYesterday, fetchAll, computeProfit, getDueTotals, cpSplit, cpGroups
 } = require('./_lib/db');
 
 const TX_COLS = 'id,tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at';
@@ -416,7 +416,12 @@ module.exports = async (req, res) => {
     const netRev  = gR - rtR, netCost = gC - rtC;
     const totalPay = pays.reduce((s, r) => s + num(r.amount), 0);
 
+    // v5.4 — exact "cases + loose pieces" for every quantity total (per-product split)
+    const _cs = {}; prods.forEach(p => { _cs[String(p.id)] = num(p.caseSize) || 1; });
+    const _cpT = cpGroups(txs, _cs, { given: ['give', 'point_sale'], returned: ['return', 'point_damage_return'], damage: ['damage'], buy: ['buy'] });
+    const _soldBy = {}; txs.forEach(r => { const k = String(r.productId || ''), u = num(r.totalUnits); if (r.type === 'give' || r.type === 'point_sale') _soldBy[k] = (_soldBy[k] || 0) + u; else if (r.type === 'return' || r.type === 'point_damage_return' || r.type === 'damage') _soldBy[k] = (_soldBy[k] || 0) - u; });
     const totals = {
+      givenCP: _cpT.given, returnCP: _cpT.returned, dmgCP: _cpT.damage, buyCP: _cpT.buy, soldCP: cpSplit(_soldBy, _cs),
       givenUnits: gU, returnUnits: rtU, dmgUnits: dmgU, buyUnits: byU,
       // sold = given − returned − damaged (same rule as the SR / product rows)
       soldUnits: gU - rtU - dmgU, netRevenue: netRev, netCost,
@@ -472,6 +477,8 @@ module.exports = async (req, res) => {
       sr.due     = sr.netRev  - sr.payments;          // PERIOD figure (this date range only)
       sr.periodDue = sr.due;
       { const t = lifeDue[sr.srId]; sr.lifetimeDue = t ? (t.givenRev - t.returnRev) - t.payments : 0; }   // CALC-10: all-time due
+      { const g = {}, r = {}, d = {}, so = {}; Object.keys(sr.products).forEach(k => { const q = sr.products[k]; g[k] = q.given; r[k] = q.returned; d[k] = q.damage; so[k] = q.given - q.returned - q.damage; });
+        sr.givenCP = cpSplit(g, _cs); sr.returnCP = cpSplit(r, _cs); sr.dmgCP = cpSplit(d, _cs); sr.soldCP = cpSplit(so, _cs); }
       Object.values(sr.products).forEach(p => {
         p.sold    = p.given - p.returned - p.damage;
         p.netRev  = p.givenRev  - p.returnRev;
@@ -491,6 +498,7 @@ module.exports = async (req, res) => {
           purchasePrice: pi ? num(pi.purchasePrice) : num(r.purchasePrice),
           sellingPrice:  pi ? num(pi.sellingPrice)  : num(r.sellingPrice),
           buy: 0, given: 0, returned: 0, damage: 0, sold: 0,
+          caseSize: pi ? (num(pi.caseSize) || 1) : 1, unitType: pi ? (pi.unitType || '') : '',
           revenue: 0, cost: 0, profit: 0
         };
       }
@@ -506,13 +514,15 @@ module.exports = async (req, res) => {
     const dayMap = {};
     txs.forEach(r => {
       const d = ds(r.date);
-      if (!dayMap[d]) dayMap[d] = { date: d, givenUnits: 0, returnUnits: 0, dmgUnits: 0, revenue: 0, cost: 0, profit: 0 };
-      const day = dayMap[d], u = num(r.totalUnits);
+      if (!dayMap[d]) dayMap[d] = { date: d, givenUnits: 0, returnUnits: 0, dmgUnits: 0, revenue: 0, cost: 0, profit: 0, _g: {}, _r: {} };
+      const day = dayMap[d], u = num(r.totalUnits), _pk = String(r.productId || '');
+      if (r.type === 'give' || r.type === 'point_sale') day._g[_pk] = (day._g[_pk] || 0) + u;
+      if (r.type === 'return' || r.type === 'point_damage_return') day._r[_pk] = (day._r[_pk] || 0) + u;
       if (r.type === 'give'   || r.type === 'point_sale')          { day.givenUnits  += u; day.revenue += num(r.totalRevenue); day.cost += num(r.totalCost); }
       if (r.type === 'return' || r.type === 'point_damage_return') { day.returnUnits += u; day.revenue -= num(r.totalRevenue); day.cost -= num(r.totalCost); }
       if (r.type === 'damage')   day.dmgUnits    += u;
     });
-    Object.values(dayMap).forEach(d => { d.profit = d.revenue - d.cost; });
+    Object.values(dayMap).forEach(d => { d.profit = d.revenue - d.cost; d.givenCP = cpSplit(d._g, _cs); d.returnCP = cpSplit(d._r, _cs); delete d._g; delete d._r; });
 
     const byDate  = Object.values(dayMap).sort((a, b) => b.date.localeCompare(a.date));
     const srPerf  = Object.values(srMap).filter(sr => sr.givenUnits + sr.payments > 0).sort((a, b) => b.soldUnits - a.soldUnits);

@@ -3,7 +3,8 @@ const {
   mapProduct, mapSR, mapTx, mapPayment,
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf, addDaysStr,
   safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals,
-  computeProfit, computeBonusRangeSummary, getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement
+  computeProfit, computeBonusRangeSummary, getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement,
+  cpGroups, getCaseTotals, cpSplit
 } = require('./_lib/db');
 
 // PERF-5 — only the columns the screens read
@@ -229,6 +230,8 @@ module.exports = async (req, res) => {
 
       // ── Full sales visibility, split regular (DSR-given) vs SO's own
       //    point-sale, for any date range (AXIION §17) ──────────────
+      const _csSo = {};
+      try { const { data: _pr } = await supabase.from('products').select('id,case_size'); (_pr || []).forEach(p => { _csSo[String(p.id)] = num(p.case_size) || 1; }); } catch (_) { }
       function buildSalesSplit(txList) {
         const regular = txList.filter(r => dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return'));
         const point   = txList.filter(r => r.srId === userId && (r.type === 'point_sale' || r.type === 'point_damage_return'));
@@ -240,7 +243,11 @@ module.exports = async (req, res) => {
                               - regular.filter(r => r.type === 'return').reduce((s, r) => s + num(r.totalUnits), 0);
         const pointUnits     = point.filter(r => r.type === 'point_sale').reduce((s, r) => s + num(r.totalUnits), 0)
                               - point.filter(r => r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalUnits), 0);
-        return { regularRevenue, pointRevenue, regularUnits, pointUnits, totalRevenue: regularRevenue + pointRevenue };
+        // v5.4 — exact cases + pcs (net per product, then split by that product's case size)
+        const net = (list, plus, minus) => { const m = {}; list.forEach(r => { const k = String(r.productId || ''); if (r.type === plus) m[k] = (m[k] || 0) + num(r.totalUnits); else if (r.type === minus) m[k] = (m[k] || 0) - num(r.totalUnits); }); return m; };
+        const _rm = net(regular, 'give', 'return'), _pm = net(point, 'point_sale', 'point_damage_return'), _tm = Object.assign({}, _rm);
+        Object.keys(_pm).forEach(k => { _tm[k] = (_tm[k] || 0) + _pm[k]; });
+        return { regularRevenue, pointRevenue, regularUnits, pointUnits, regularCP: cpSplit(_rm, _csSo), pointCP: cpSplit(_pm, _csSo), totalCP: cpSplit(_tm, _csSo), totalRevenue: regularRevenue + pointRevenue };
       }
       const todaySplit = buildSalesSplit(txToday);
       const monthSplit = buildSalesSplit(txMonth);
@@ -453,6 +460,8 @@ module.exports = async (req, res) => {
       const mGivenU  = txMonth.filter(r => r.type === 'give').reduce((s, r) => s + num(r.totalUnits), 0);
       const mReturnU = txMonth.filter(r => r.type === 'return').reduce((s, r) => s + num(r.totalUnits), 0);
       const mPayAmt  = payMonth.reduce((s, r) => s + num(r.amount), 0);
+      const _csM = {}; (products || []).forEach(p => { _csM[String(p.id)] = num(p.caseSize) || 1; });
+      const mCP = cpGroups(txMonth, _csM, { given: ['give'], returned: ['return'] });   // v5.4: exact cases + pcs
 
       // ── V31 reconcile — today's given vs. sold-to-shops vs. still on
       //    van, plus cash actually collected today from shop sales. Pure
@@ -490,7 +499,7 @@ module.exports = async (req, res) => {
         returnRev,
         totalPaid,
         payments: payments.slice(0, 30),
-        month: { revenue: mGiven - mReturn, givenUnits: mGivenU, returnUnits: mReturnU, payments: mPayAmt },
+        month: { revenue: mGiven - mReturn, givenUnits: mGivenU, returnUnits: mReturnU, givenCP: mCP.given, returnCP: mCP.returned, payments: mPayAmt },
         txMonth: txMonth.slice(0, 60),
         reconcile: {
           givenTodayRev, returnTodayRev, damageTodayCost, soldToShopsToday: dsrSaleToday,
@@ -552,6 +561,7 @@ module.exports = async (req, res) => {
     // ── TODAY / MONTH stats (CALC-1: profit is NET profit now) ─────
     const sumT = (m, f) => Object.keys(m).reduce((s, k) => s + num(m[k][f]), 0);
     const gU  = sumT(todaySales, 'outUnits'), rtU = sumT(todaySales, 'inUnits');
+    const todayCP = await getCaseTotals(today, today, { given: ['give', 'point_sale'], returned: ['return', 'point_damage_return'] });   // v5.4: exact cases + pcs
     const todayRevenue = todayProfitP.revenue;
     const todayProfit  = todayProfitP.netProfit;
     const monthRevenue = monthProfitP.revenue;
@@ -677,7 +687,7 @@ module.exports = async (req, res) => {
       ok: true,
       // `profit` = NET profit (CALC-1). The pieces are returned too so a screen
       // can show: gross − commission − discount − damage − bonus − expenses.
-      today: { revenue: todayRevenue, profit: todayProfit, givenUnits: gU, returnUnits: rtU, breakdown: todayProfitP },
+      today: { revenue: todayRevenue, profit: todayProfit, givenUnits: gU, returnUnits: rtU, givenCP: todayCP.given, returnCP: todayCP.returned, breakdown: todayProfitP },
       month: { revenue: monthRevenue, profit: monthProfit, payments: monthPayments, breakdown: monthProfitP },
       stock: { list: stockList, totalSell, totalBuyValue, totalSellValue, estimatedProfit },
       dues:  { total: totalDue, todayNew: todayNewDue, list: duesList },

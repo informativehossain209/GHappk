@@ -696,6 +696,39 @@ async function getSrSalesTotals(from, to) {
 }
 
 // per product: net pieces sold (give+point_sale − return − point_damage_return)
+// ── v5.4 display helpers: exact "cases + loose pieces" totals ─────────────
+// Units are summed PER PRODUCT first and then split with THAT product's own
+// case size, so the answer is exact (never a bare total-piece count).
+function cpSplit(unitsByProduct, csMap) {
+  let cases = 0, pcs = 0;
+  Object.keys(unitsByProduct || {}).forEach(k => {
+    const cs = Math.max(1, Math.round(num((csMap || {})[k])) || 1);
+    const u  = Math.max(0, Math.round(num(unitsByProduct[k])));
+    cases += Math.floor(u / cs); pcs += u % cs;
+  });
+  return { cases, pcs };
+}
+// rows: [{type, productId|product_id, totalUnits|total_units}]  groups: { name: [types…] }
+function cpGroups(rows, csMap, groups) {
+  const acc = {}; Object.keys(groups).forEach(g => { acc[g] = {}; });
+  (rows || []).forEach(r => {
+    const pid = String(r.productId != null ? r.productId : (r.product_id || ''));
+    const u = num(r.totalUnits != null ? r.totalUnits : r.total_units);
+    Object.keys(groups).forEach(g => { if (groups[g].indexOf(r.type) >= 0) acc[g][pid] = (acc[g][pid] || 0) + u; });
+  });
+  const out = {}; Object.keys(groups).forEach(g => { out[g] = cpSplit(acc[g], csMap); });
+  return out;
+}
+async function getCaseTotals(from, to, groups, srId) {
+  const types = Array.from(new Set([].concat.apply([], Object.keys(groups).map(g => groups[g]))));
+  const [tx, pr] = await Promise.all([
+    fetchAll(() => { let q = supabase.from('transactions').select('product_id,type,total_units').in('type', types).gte('date', from).lte('date', to); if (srId) q = q.eq('sr_id', srId); return q; }),
+    fetchAll(() => supabase.from('products').select('id,case_size'))
+  ]);
+  const cs = {}; pr.forEach(p => { cs[String(p.id)] = num(p.case_size) || 1; });
+  return cpGroups(tx, cs, groups);
+}
+
 async function getProductNetUnits(from, to) {
   const rows = await _rpcOr('product_sales_totals', { p_from: from, p_to: to }, async () => {
     const tx = await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units')
@@ -966,5 +999,6 @@ module.exports = {
   computeVanStock, computeVanDetail, applyDuePayment, _bonusSign,
   getSalesSummary, getProfitExtras, getProfitRules, computeProfit, DEFAULT_PROFIT_RULES,
   getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement,
-  auditLog, idemRun, blockNegativeStock
+  auditLog, idemRun, blockNegativeStock,
+  cpSplit, cpGroups, getCaseTotals
 };
