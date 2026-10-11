@@ -43,9 +43,9 @@
   --inp-bg:#FFFFFF;--nav-bg:#FFFFFF;--seg-bg:#EAF3EF;
   --hdr1:#03130D;--hdr2:#0B2B1E;
   --ease:cubic-bezier(.22,.9,.3,1);
-  --font-ui:'Hind Siliguri','Noto Sans',sans-serif;
-  --font-disp:'Poppins','Hind Siliguri','Noto Sans',sans-serif;
-  --font-num:'Inter','Hind Siliguri','Noto Sans',sans-serif;
+  --font-ui:'Noto Sans','Hind Siliguri',sans-serif;
+  --font-disp:'Poppins','Noto Sans','Hind Siliguri',sans-serif;
+  --font-num:'Noto Sans','Hind Siliguri',sans-serif;
 }
 body.dark{
   --bg:#06120D;--card:#0E1E17;--bdr:#173226;--bd:#173226;
@@ -3598,7 +3598,7 @@ function _animateNum(el, target, isMoney) {
     var p = Math.min(1, (ts - t0) / dur);
     var eased = 1 - Math.pow(1 - p, 3);
     var v = Math.round(start + (target - start) * eased);
-    el.textContent = (isMoney ? '৳' : '') + fm(v);
+    el.textContent = (v < 0 ? '−' : '') + (isMoney ? '৳' : '') + fm(Math.abs(v));
     if (p < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
@@ -3662,7 +3662,7 @@ function svgDonut(items, centerTop, centerSub) {
   });
   return '<div class="donut-wrap"><svg width="'+sz+'" height="'+sz+'" viewBox="0 0 140 140">'+seg
     +'<text x="70" y="68" text-anchor="middle" style="font:800 20px Inter,sans-serif;fill:var(--txt);font-feature-settings:\'tnum\' 1">'+esc(centerTop)+'</text>'
-    +'<text x="70" y="86" text-anchor="middle" style="font:600 10px Hind Siliguri,sans-serif;fill:var(--mt)">'+esc(centerSub)+'</text></svg>'
+    +'<text x="70" y="86" text-anchor="middle" style="font:600 10px Noto Sans,Hind Siliguri,sans-serif;fill:var(--mt)">'+esc(centerSub)+'</text></svg>'
     +'<div class="donut-legend">'+legend+'</div></div>';
 }
 function svgGauge(pct, color, size) {
@@ -3853,7 +3853,7 @@ function renderDash(d) {
   // instead of a full page of static cards (V59 minimalist redesign).
   h+='<div class="hero-grid" style="grid-template-columns:1fr 1fr">';
   h+='<div class="hero-card"><div class="hero-l" id="hv-rev-lbl">আজ বিক্রি</div><div class="hero-v" id="hv-rev">৳0</div></div>';
-  if(isOwner) h+='<div class="hero-card" id="hv-prof-card"><div class="hero-l" id="hv-prof-lbl">আজ '+(t.profit>=0?'নীট লাভ':'নীট ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div></div>';
+  if(isOwner) h+='<div class="hero-card" id="hv-prof-card"><div class="hero-l" id="hv-prof-lbl">আজ '+(t.profit>=0?'নীট লাভ':'নীট ক্ষতি')+'</div><div class="hero-v" id="hv-prof">৳0</div><div id="hv-prof-sub" style="font-size:9.5px;line-height:1.4;color:var(--mt2);margin-top:4px"></div></div>';
   h+='<div class="hero-card"><div class="hero-l">পেমেন্ট আদায় (মাস)</div><div class="hero-v" style="color:var(--te)">৳'+fm(m.payments)+'</div></div>';
   h+='<div class="hero-card" style="border-top-color:var(--re)"><div class="hero-l">মোট বাকি</div><div class="hero-v" style="color:var(--re)">৳'+fm(dues.total)+'</div></div>';
   h+='</div>';
@@ -3984,14 +3984,20 @@ function renderDash(d) {
   //    _dashRangeSelect above). Falls back to today's figures if a
   //    range other than 'today' has no data yet (e.g. custom range
   //    with dates not applied).
-  var heroData = (S.dashRange !== 'today' && S.dashRangeData) ? S.dashRangeData : { revenue: t.revenue, profit: t.profit, label: 'আজ' };
+  var heroData = (S.dashRange !== 'today' && S.dashRangeData) ? S.dashRangeData : Object.assign({ revenue: t.revenue, profit: t.profit, label: 'আজ' }, t.breakdown || {});
   var revLbl = document.getElementById('hv-rev-lbl'); if (revLbl) revLbl.textContent = heroData.label + ' বিক্রি';
   _animateNum(document.getElementById('hv-rev'), heroData.revenue, true);
   if (isOwner) {
     var profLbl = document.getElementById('hv-prof-lbl'); if (profLbl) profLbl.textContent = heroData.label + ' ' + (heroData.profit>=0?'নীট লাভ':'নীট ক্ষতি');
     var profCard = document.getElementById('hv-prof-card');
     if (profCard) { profCard.style.borderTopColor = heroData.profit>=0?'var(--bl2)':'var(--re)'; var pv=document.getElementById('hv-prof'); if(pv) pv.style.color = heroData.profit>=0?'var(--bl)':'var(--re)'; }
-    _animateNum(document.getElementById('hv-prof'), Math.abs(heroData.profit), true);
+    _animateNum(document.getElementById('hv-prof'), heroData.profit, true);   // signed: −৳ when it is a loss
+    // WHY the number is what it is: gross profit minus everything the owner's profit rules deduct
+    var psub = document.getElementById('hv-prof-sub');
+    if (psub && heroData.grossProfit != null) {
+      var _ded = num(heroData.commission) + num(heroData.discount) + num(heroData.damageLoss) + num(heroData.bonus) + num(heroData.expenses);
+      psub.innerHTML = 'মোট লাভ ৳' + fm(heroData.grossProfit) + (_ded > 0 ? ' − কমিশন/ছাড়/ড্যামেজ/বোনাস/খরচ ৳' + fm(_ded) : '');
+    }
   }
   _animateBarsIn(document.getElementById('pg-dash'));
 }
@@ -4468,22 +4474,58 @@ function _dmdCP(cases, pcs, units) {
 }
 function _dmdQty(it) { return _dmdCP(it.cases, it.pcs, it.units); }
 function _dmdEmpty() { return '<div style="text-align:center;color:var(--mt2);padding:12px;font-size:12px">এই সময়ে কোনো রেকর্ড নেই</div>'; }
-function _dmdSlips(slips, color) {
+// Time of a slip, Bangladesh time, e.g. "৩:৪৫ PM" → shown as "3:45 PM"
+function _dmdTime(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', hour: 'numeric', minute: '2-digit', hour12: true }); } catch (e) { return ''; }
+}
+// One slip = DSR name on top · items · a straight line · total + the time it was given
+function _dmdSlips(slips, color, dsrName, multiDay) {
   if (!slips || !slips.length) return _dmdEmpty();
   var h = '';
   slips.forEach(function(g) {
-    h += '<div style="padding:7px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mt2);margin-bottom:3px"><span>'+esc(fmtBn(g.date))+'</span><b style="color:'+color+'">৳'+fm(g.total)+'</b></div>';
+    var tm = _dmdTime(g.createdAt);
+    h += '<div style="padding:8px 0;border-bottom:1px solid var(--bdr)">'
+      + '<div style="font-size:12px;font-weight:800;color:var(--txt);margin-bottom:4px">👤 '+esc(dsrName || '—')+'</div>';
     g.items.forEach(function(it) { h += '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:1px 0"><span>'+esc(it.productName)+' × '+_dmdQty(it)+'</span><span style="color:var(--mt);white-space:nowrap">৳'+fm(it.value)+'</span></div>'; });
-    h += '</div>';
+    h += '<div style="border-top:2px solid '+color+';margin-top:5px;padding-top:4px;display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
+      + '<span style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm) : '')+(multiDay ? (tm?' · ':'')+esc(fmtBn(g.date)) : '')+'</span>'
+      + '<b style="font-size:13px;color:'+color+'">মোট ৳'+fm(g.total)+'</b></div></div>';
   });
   return h;
 }
-function _dmdSaleLines(lines, color) {
+// Shop name that can be tapped to call the owner (if a number is saved) and verify the entry
+function _dmdShopCall(name, phone, what) {
+  var nm = esc(name || '—');
+  if (!phone) return '<b>🏪 '+nm+'</b>';
+  return '<b style="cursor:pointer;color:var(--bl);text-decoration:underline" onclick="event.stopPropagation();dmdCallShop(\''+esc(String(phone)).replace(/\'/g,'')+'\',\''+esc(String(name||'')).replace(/\'/g,'')+'\',\''+esc(what||'')+'\')">🏪 '+nm+' 📞</b>';
+}
+function dmdCallShop(phone, name, what) {
+  var msg = name+' এর মালিককে কল করে '+(what||'এই এন্ট্রি')+' ঠিক আছে কিনা যাচাই করবেন?\n'+phone;
+  if (confirm(msg)) window.location.href = 'tel:'+phone;
+}
+// A date appears once as a header; every row under it shows only the time
+function _dmdByDate(lines) {
+  var order = [], map = {};
+  lines.forEach(function(l) { var k = l.date || ''; if (!map[k]) { map[k] = []; order.push(k); } map[k].push(l); });
+  order.sort(function(x, y) { return String(y).localeCompare(String(x)); });
+  order.forEach(function(k) { map[k].sort(function(x, y) { return String(x.createdAt||'').localeCompare(String(y.createdAt||'')); }); });
+  return { order: order, map: map };
+}
+function _dmdDateHead(date, total, color) {
+  return '<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 2px;padding:5px 8px;background:var(--bll);border-radius:8px;font-size:12px;font-weight:800"><span>📅 '+esc(fmtBn(date))+'</span><span style="color:'+color+'">৳'+fm(total)+'</span></div>';
+}
+function _dmdSaleLines(lines, color, what) {
   if (!lines || !lines.length) return _dmdEmpty();
-  var h = '';
-  lines.forEach(function(l) {
-    h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><b>🏪 '+esc(l.shopName||'—')+'</b><b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
-      + '<div style="font-size:11px;color:var(--mt2)">'+esc(l.productName)+' × '+_dmdCP(l.cases, l.pcs, l.units)+' · বিক্রয় ৳'+fm(l.saleValue)+' · '+esc(fmtBn(l.date))+'</div></div>';
+  var g = _dmdByDate(lines), h = '';
+  g.order.forEach(function(dt) {
+    var rows = g.map[dt], tot = rows.reduce(function(a, l) { return a + num(l.amount); }, 0);
+    h += _dmdDateHead(dt, tot, color);
+    rows.forEach(function(l) {
+      var tm = _dmdTime(l.createdAt);
+      h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, what)+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
+        + '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm)+' · ' : '')+esc(l.productName)+' × '+_dmdCP(l.cases, l.pcs, l.units)+' · বিক্রয় ৳'+fm(l.saleValue)+'</div></div>';
+    });
   });
   return h;
 }
@@ -4500,22 +4542,28 @@ function _dmdList(arr, fmtLine, none) {
   return arr.length ? arr.map(fmtLine).join('') : '<div style="font-size:11px;color:var(--mt2);padding:3px 0">'+(none||'নেই')+'</div>';
 }
 function _dmdDetail(key, d) {
-  if (key === 'given')      return _dmdSlips(d.given.slips, 'var(--bl)');
-  if (key === 'ret')        return _dmdSlips(d.ret.slips, 'var(--te)');
-  if (key === 'commission') return _dmdSaleLines(d.commission.lines, 'var(--pu)');
-  if (key === 'discount')   return _dmdSaleLines(d.discount.lines, 'var(--am)');
+  var _nm = d.dsrName || S.userName || '', _md = d.from !== d.to;
+  if (key === 'given')      return _dmdSlips(d.given.slips, 'var(--bl)', _nm, _md);
+  if (key === 'ret')        return _dmdSlips(d.ret.slips, 'var(--te)', _nm, _md);
+  if (key === 'commission') return _dmdSaleLines(d.commission.lines, 'var(--pu)', 'কমিশন');
+  if (key === 'discount')   return _dmdSaleLines(d.discount.lines, 'var(--am)', 'ছাড়');
   if (key === 'todayDue')   return _dmdDueLines((d.todayDue || {}).lines, 'var(--re)');
   if (key === 'prevDue')    return _dmdDueLines((d.prevDue || {}).lines, 'var(--or,#c27c00)');
   if (key === 'damage') {
     var dm = d.damage, h = '';
     if (!dm.vanDamage.slips.length && !dm.shopDamage.length) return _dmdEmpty();
-    if (dm.vanDamage.slips.length) h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:4px 0">🚚 গাড়ির ড্যামেজ — ৳'+fm(dm.vanDamage.total)+'</div>' + _dmdSlips(dm.vanDamage.slips, 'var(--re)');
+    if (dm.vanDamage.slips.length) h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:4px 0">🚚 গাড়ির ড্যামেজ — ৳'+fm(dm.vanDamage.total)+'</div>' + _dmdSlips(dm.vanDamage.slips, 'var(--re)', _nm, _md);
     if (dm.shopDamage.length) {
       h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:8px 0 4px">🏪 দোকান থেকে নেওয়া ড্যামেজ</div>';
-      dm.shopDamage.forEach(function(x) {
-        var ex = x.exch || {};
-        h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px"><b>🏪 '+esc(x.shopName||'—')+' — '+esc(x.productName)+' × '+_dmdCP(x.cases, x.pcs, x.units)+'</b><b style="color:var(--re)">৳'+fm(x.damagedValue)+'</b></div>'
-          + '<div style="font-size:11px;color:var(--mt2)">'+esc(fmtBn(x.date))+' · '+(x.resolution==='money' ? '💵 টাকা ফেরত ৳'+fm(x.refundAmt) : '🔁 বদল: '+esc(x.exchProductName)+' × '+_dmdCP(ex.cases, ex.pcs, x.exchUnits)+' (৳'+fm(x.exchValue)+')')+'</div></div>';
+      var gd = _dmdByDate(dm.shopDamage);
+      gd.order.forEach(function(dt) {
+        var rows = gd.map[dt], tot = rows.reduce(function(a, x) { return a + num(x.damagedValue); }, 0);
+        h += _dmdDateHead(dt, tot, 'var(--re)');
+        rows.forEach(function(x) {
+          var ex = x.exch || {}, tm = _dmdTime(x.createdAt);
+          h += '<div style="padding:6px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(x.shopName, x.shopPhone, 'ড্যামেজ')+'<b style="color:var(--re)">৳'+fm(x.damagedValue)+'</b></div>'
+            + '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm)+' · ' : '')+esc(x.productName)+' × '+_dmdCP(x.cases, x.pcs, x.units)+' · '+(x.resolution==='money' ? '💵 টাকা ফেরত ৳'+fm(x.refundAmt) : '🔁 বদল: '+esc(x.exchProductName)+' × '+_dmdCP(ex.cases, ex.pcs, x.exchUnits)+' (৳'+fm(x.exchValue)+')')+'</div></div>';
+        });
       });
     }
     return h;
@@ -7664,12 +7712,12 @@ function buildProdForm() {
     +'</div>'
     +'<div class="ib" style="margin-bottom:8px">🎁 অফার সিস্টেম</div>'
     +'<div class="g3">'
-    +'<div class="fg"><label class="fl" id="pf-bcr-lbl">প্রতি কত '+(p?p.unitType||'কেস':'কেস')+'</label><input id="pf-bcr" type="number" value="'+(p?p.bonusCasesReq:1)+'" min="1"></div>'
-    +'<div class="fg"><label class="fl">ফ্রি পিস (বোতল)</label><input id="pf-bfu" type="number" value="'+(p?p.bonusFreeUnits:0)+'" min="0" placeholder="0"></div>'
-    +'<div class="fg"><label class="fl">ফ্রি টাকা (৳)</label><input id="pf-bfm" type="number" value="'+(p?p.bonusFreeMoney:0)+'" min="0" step="0.001" placeholder="0"></div>'
+    +'<div class="fg"><label class="fl" id="pf-bcr-lbl">প্রতি কত '+(p?p.unitType||'কেস':'কেস')+'</label><input id="pf-bcr" type="number" inputmode="decimal" step="any" value="'+(p?p.bonusCasesReq:1)+'" min="0.01"></div>'
+    +'<div class="fg"><label class="fl">ফ্রি পিস (বোতল)</label><input id="pf-bfu" type="number" inputmode="decimal" step="any" value="'+(p?p.bonusFreeUnits:0)+'" min="0" placeholder="0 / 0.5 / 3"></div>'
+    +'<div class="fg"><label class="fl">ফ্রি টাকা (৳)</label><input id="pf-bfm" type="number" inputmode="decimal" value="'+(p?p.bonusFreeMoney:0)+'" min="0" step="any" placeholder="0"></div>'
     +'</div>'
     +'<div class="fg"><label class="fl">🗂️ ক্যাটাগরি (ঐচ্ছিক)</label><input id="pf-cat" list="pf-cat-list" value="'+(p?esc(p.category||''):'')+'" placeholder="যেমন: কোল্ড ড্রিংকস, স্ন্যাকস" maxlength="100"><datalist id="pf-cat-list">'+_prodCategoryList().map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
-    +'<div class="fg"><label class="fl">⚠️ লো স্টক অ্যালার্ট (পিস)</label><input id="pf-lsa" type="number" value="'+(p?p.lowStockAlert:0)+'" min="0" placeholder="0 = বন্ধ"></div>'
+    +'<div class="fg"><label class="fl">⚠️ লো স্টক অ্যালার্ট (পিস)</label><input id="pf-lsa" type="number" inputmode="decimal" step="any" value="'+(p?p.lowStockAlert:0)+'" min="0" placeholder="0 = বন্ধ"></div>'
     +'<div style="display:flex;gap:7px;margin-top:10px">'
     +'<button class="btn btn-bl" style="flex:1" onclick="saveProd()">'+(p?'✏️ আপডেট করুন':'➕ পণ্য যোগ করুন')+'</button>'
     +(p?'<button class="btn btn-gh" onclick="cxProd()">বাতিল</button>':'')
@@ -9324,7 +9372,7 @@ function buildExpRep(){
   return'<div class="card">'
     +'<div class="fg"><label class="fl">রিপোর্টের ধরন</label>'
     +'<select id="exp-rmode" onchange="document.getElementById(\'exp-date-row\').style.display=this.value===\'custom\'?\'block\':\'none\'">'
-    +'<option value="daily">আজকের খরচ</option><option value="monthly">এই মাসের খরচ</option><option value="custom">নির্দিষ্ট সময়</option>'
+    +'<option value="daily">আজকের খরচ</option><option value="monthly">এই মাসের খরচ (২৬–২৫)</option><option value="custom">নির্দিষ্ট সময়</option>'
     +'</select></div>'
     +'<div id="exp-date-row" style="display:none"><div class="g2">'
     +'<div class="fg"><label class="fl">শুরু</label><input type="date" id="exp-fr" value="'+iso(new Date())+'"></div>'
@@ -9334,9 +9382,9 @@ function buildExpRep(){
     +'<div id="exp-rep-result"></div>';
 }
 async function loadExpReport(){
-  var mode=v('exp-rmode'),td=iso(new Date()),mo=td.slice(0,7),from,to;
+  var mode=v('exp-rmode'),td=iso(new Date()),from,to;
   if(mode==='daily'){from=td;to=td;}
-  if(mode==='monthly'){from=mo+'-01';to=mo+'-31';}
+  if(mode==='monthly'){var _cb=_cycleBounds(_cyclePeriodForDate(td));from=_cb.start;to=_cb.end;}   // ২৬ → ২৫ চক্র
   if(mode==='custom'){from=v('exp-fr');to=v('exp-to');}
   if(!from||!to)return toast('তারিখ নির্বাচন করুন');
   showOvl('খরচ রিপোর্ট তৈরি হচ্ছে...');
@@ -9490,10 +9538,12 @@ function toast(m){var e=document.getElementById('tst');e.textContent=m;e.style.d
 // ════════════════════════════════════════════════════
 var CAL = { month:'', dues:[], selDate:'' };
 
+// CAL.month is a pay-cycle label 'YYYY-MM' = 26th of the previous month → 25th of
+// that month (same rule as salary / targets / reports — see _cycleBounds).
 function calMonthStr(offset) {
-  var d = new Date(); d.setDate(1);
-  d.setMonth(d.getMonth() + (offset||0));
-  return d.toISOString().slice(0,7);
+  var per = _cyclePeriodToday();
+  for (var i = 0; i < Math.abs(offset||0); i++) per = (offset > 0) ? nextCalMonth(per) : prevCalMonth(per);
+  return per;
 }
 
 async function loadCal(monthStr) {
@@ -9513,11 +9563,10 @@ function renderCal() {
   var el = document.getElementById('pg-cal');
   var canEdit = S.role === 'owner' || S.role === 'manager';
   var today = iso(new Date());
-  var [yr, mo] = CAL.month.split('-').map(Number);
-  var monthDate = new Date(yr, mo-1, 1);
-  var monthName = monthDate.toLocaleDateString('bn-BD', {year:'numeric', month:'long'});
-  var daysInMonth = new Date(yr, mo, 0).getDate();
-  var firstDay = new Date(yr, mo-1, 1).getDay();
+  // Pay cycle: 26th of previous month → 25th of CAL.month (e.g. 2026-10 = 26 Sep → 25 Oct)
+  var cycBounds = _cycleBounds(CAL.month), cycDates = _cycleDates(CAL.month);
+  var monthName = fmtBn(cycBounds.start) + ' – ' + fmtBn(cycBounds.end);
+  var firstDay = new Date(cycDates[0] + 'T00:00:00Z').getUTCDay();
 
   var dueMap = {};
   CAL.dues.forEach(function(d) {
@@ -9538,7 +9587,7 @@ function renderCal() {
   var h = '';
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
   h += '<button class="btn btn-gh btn-sm" onclick="loadCal(prevCalMonth())">◀ আগের মাস</button>';
-  h += '<div style="font-size:15px;font-weight:700;color:var(--bl)">📅 '+monthName+'</div>';
+  h += '<div style="text-align:center"><div style="font-size:15px;font-weight:700;color:var(--bl)">📅 '+esc(new Date(CAL.month+'-15T00:00:00').toLocaleDateString('bn-BD',{year:'numeric',month:'long'}))+'</div><div style="font-size:10.5px;color:var(--mt2);margin-top:1px">'+monthName+'</div></div>';
   h += '<button class="btn btn-gh btn-sm" onclick="loadCal(nextCalMonth())">পরের মাস ▶</button>';
   h += '</div>';
 
@@ -9589,9 +9638,8 @@ function renderCal() {
 
   for (var i=0; i<firstDay; i++) h += '<div class="cal-cell empty"></div>';
 
-  for (var day=1; day<=daysInMonth; day++) {
-    var mm = String(mo).padStart(2,'0'), dd = String(day).padStart(2,'0');
-    var dateStr = yr+'-'+mm+'-'+dd;
+  for (var di=0; di<cycDates.length; di++) {
+    var dateStr = cycDates[di], day = Number(dateStr.slice(8,10));
     var dayDues  = dueMap[dateStr] || [];
     var hasDue   = dayDues.length > 0;
     var allPaid    = hasDue && dayDues.every(function(d){return d.status==='cleared';});
@@ -9620,6 +9668,8 @@ function renderCal() {
 
     h += '<div class="'+cls+'" onclick="calDayClick(\''+dateStr+'\')">';
     h += '<div class="cal-day-num" style="color:'+(isTdy?'var(--bl)':'var(--txt)')+'">'+(isTdy?'<strong>'+day+'</strong>':day)+'</div>';
+    // cycle spans two calendar months → small month tag on the first cell and on every 1st
+    if (di === 0 || day === 1) h += '<div style="font-size:7.5px;color:var(--bl);font-weight:700;line-height:1">'+['জানু','ফেব্রু','মার্চ','এপ্রিল','মে','জুন','জুলাই','আগস্ট','সেপ্টে','অক্টো','নভে','ডিসে'][Number(dateStr.slice(5,7))-1]+'</div>';
     h += dotHtml;
     if (hasDue) {
       h += '<div style="font-size:7.5px;color:var(--mt);margin-top:1px">'+dayDues.length+'টি</div>';
@@ -9676,13 +9726,13 @@ function renderCal() {
   el.innerHTML = h;
 }
 
-function prevCalMonth() {
-  var [yr,mo] = CAL.month.split('-').map(Number);
+function prevCalMonth(per) {
+  var [yr,mo] = (per || CAL.month).split('-').map(Number);
   mo--; if(mo<1){mo=12;yr--;}
   return yr+'-'+String(mo).padStart(2,'0');
 }
-function nextCalMonth() {
-  var [yr,mo] = CAL.month.split('-').map(Number);
+function nextCalMonth(per) {
+  var [yr,mo] = (per || CAL.month).split('-').map(Number);
   mo++; if(mo>12){mo=1;yr++;}
   return yr+'-'+String(mo).padStart(2,'0');
 }
@@ -10792,6 +10842,10 @@ window.onlineDepositSave=async function(){
 (function () {
   var PW = 794, PH = 1123, SCALE = 3;
   var THM = { mm: 50 };                       // thermal paper width (mm)
+  // v5.5 — a long receipt is NO LONGER one giant image (phone browsers cap canvas size and
+  // silently shrink it → blurry text). It is cut at row boundaries into parts of at most
+  // T_SLICE css-px (≈ 275 mm) and every part is drawn at a fixed T_SCALE (≈ 385 dpi).
+  var T_SLICE = 1040, T_SCALE = 4;
   var PWT = Math.round(THM.mm / 25.4 * 96);   // = 189 px @96dpi
   var CFG = { bnDigits: false };            // true → ০১২৩ instead of 0123
   var LIB = {
@@ -11126,7 +11180,21 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
     (sp.blocks || []).forEach(function (b) { if (b.t === 'html') h += b.html; else if (b.t === 'tbl') h += thermalTable(b); });
     h += thermalClosing(sp, si);
     var pg = doc.createElement('div'); pg.className = 'tpg'; pg.innerHTML = h; host.appendChild(pg);
-    return Math.ceil(pg.getBoundingClientRect().height);
+    var pr = pg.getBoundingClientRect(), cuts = [];
+    Array.prototype.forEach.call(pg.children, function (c) { cuts.push(Math.ceil(c.getBoundingClientRect().bottom - pr.top)); });   // safe places to cut (between rows)
+    return { h: Math.ceil(pr.height), cuts: cuts };
+  }
+  // [[y0,y1],…] — parts no taller than T_SLICE, cut between rows
+  function thermalSlices(total, cuts) {
+    var out = [], y = 0;
+    while (total - y > T_SLICE + 1) {
+      var lim = y + T_SLICE, c = 0;
+      for (var i = 0; i < cuts.length; i++) if (cuts[i] <= lim && cuts[i] > y + T_SLICE * 0.35) c = cuts[i];
+      if (!c) c = lim;
+      out.push([y, c]); y = c;
+    }
+    out.push([y, total]);
+    return out;
   }
 
   /* ── lib loader ───────────────────────────────────────────── */
@@ -11160,17 +11228,21 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
     }).catch(function () { _fontCss = null; return ''; }));
   }
   function viaNative(el, fcss, o) {
-    o = o || {}; var W = o.w || PW, H = o.h || PH, SC = o.scale || SCALE, CSSX = o.css || CSS, PROBE = o.probe || 17;
+    o = o || {}; var W = o.w || PW, H = o.h || PH, SC = o.scale || SCALE, CSSX = o.css || CSS, PROBE = o.probe || 17, Y = o.y || 0;
     return new Promise(function (res, rej) {
       var xml = new XMLSerializer().serializeToString(el);
+      if (Y || o.slice) xml = '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + W + 'px;height:' + H + 'px;overflow:hidden;background:#fff"><div style="margin-top:-' + Y + 'px">' + xml + '</div></div>';
       var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '"><foreignObject x="0" y="0" width="' + W + '" height="' + H + '"><style xmlns="http://www.w3.org/1999/xhtml">' + fcss + CSSX + '</style>' + xml + '</foreignObject></svg>';
       var img = new Image();
       img.onload = function () {
         try {
           var cv = document.createElement('canvas'); cv.width = Math.round(W * SC); cv.height = Math.round(H * SC);
           var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
-          var px = cx.getImageData(Math.round(cv.width / 2), Math.round(PROBE * SC), 1, 1).data;   // top accent bar must not be white
-          if (px[0] > 240 && px[1] > 240 && px[2] > 240) return rej(new Error('blank'));
+          if (o.slice) { if (!hasInk(cv)) return rej(new Error('blank')); }                        // a part must contain some ink
+          else {
+            var px = cx.getImageData(Math.round(cv.width / 2), Math.round(PROBE * SC), 1, 1).data;   // top accent bar must not be white
+            if (px[0] > 240 && px[1] > 240 && px[2] > 240) return rej(new Error('blank'));
+          }
           cv.toDataURL('image/jpeg', 0.5);                                                          // throws if tainted
           res(cv);
         } catch (x) { rej(x); }
@@ -11179,9 +11251,15 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
       img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     });
   }
+  function hasInk(cv) {
+    var w = 64, h = Math.max(1, Math.round(w * cv.height / cv.width)), t = document.createElement('canvas'); t.width = w; t.height = h;
+    var c = t.getContext('2d'); c.drawImage(cv, 0, 0, w, h); var d = c.getImageData(0, 0, w, h).data;
+    for (var i = 0; i < d.length; i += 4) if (d[i] < 235) return true;
+    return false;
+  }
   function viaH2C(el, o) {
     o = o || {}; var W = o.w || PW, H = o.h || PH, SC = o.scale || SCALE;
-    return needH2C().then(function () { return window.html2canvas(el, { scale: SC, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false, width: W, height: H, windowWidth: W + 20 }); });
+    return needH2C().then(function () { return window.html2canvas(el, { scale: SC, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false, x: 0, y: o.y || 0, scrollX: 0, scrollY: 0, width: W, height: H, windowWidth: W + 20 }); });
   }
 
   /* ── render spec → {html, pages:[dataURL…]} ───────────────── */
@@ -11196,7 +11274,7 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
         var d = fr.contentDocument; d.open();
         d.write('<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><link href="' + FONT + '" rel="stylesheet"><style>' + CSSX + '</style></head><body><div id="host"></div></body></html>'); d.close();
         var done = false;
-        function lay() { return thermal ? { n: 1, h: thermalDoc(d, sp) } : { n: paginate(d, sp) }; }
+        function lay() { if (!thermal) return { n: paginate(d, sp) }; var t = thermalDoc(d, sp); return { n: 1, h: t.h, cuts: t.cuts }; }
         function go() {
           if (done) return; done = true;
           try {
@@ -11207,14 +11285,19 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
               var out = { n: L.n, thermal: thermal, html: '<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><link href="' + FONT + '" rel="stylesheet"><style>' + CSSX + (thermal ? TPRINT : PRINT_CSS) + '</style></head><body>' + d.getElementById('host').innerHTML + '</body></html>', imgs: [], dims: [] };
               if (!wantImages) { fr.remove(); return resolve(out); }
               var els = d.querySelectorAll(thermal ? '.tpg' : '.mpg');
-              var ro = thermal ? { w: PWT, h: L.h, scale: Math.max(1, Math.min(3, Math.sqrt(14e6 / (PWT * L.h)))), css: TCSS, probe: 1.5 } : {};
+              // thermal: one job per PART (fixed height, fixed high scale); A4: one job per page
+              var jobs = [];
+              if (thermal) thermalSlices(L.h, L.cuts).forEach(function (sl) { jobs.push({ el: els[0], o: { w: PWT, h: sl[1] - sl[0], y: sl[0], slice: true, scale: T_SCALE, css: TCSS } }); });
+              else for (var k = 0; k < els.length; k++) jobs.push({ el: els[k], o: {} });
+              if (thermal) out.n = jobs.length;
               fontEmbedCss().then(function (fcss) {
                 var i = 0, useH2C = false; out.renderer = 'native';
                 (function next() {
-                  if (i >= els.length) { fr.remove(); return resolve(out); }
-                  var p = useH2C ? viaH2C(els[i], ro) : viaNative(els[i], fcss, ro).catch(function () { useH2C = true; out.renderer = 'fallback'; return viaH2C(els[i], ro); });
+                  if (i >= jobs.length) { fr.remove(); return resolve(out); }
+                  var jb = jobs[i];
+                  var p = useH2C ? viaH2C(jb.el, jb.o) : viaNative(jb.el, fcss, jb.o).catch(function () { useH2C = true; out.renderer = 'fallback'; return viaH2C(jb.el, jb.o); });
                   p.then(function (cv) {
-                    out.imgs.push(cv.toDataURL('image/jpeg', 0.96));
+                    out.imgs.push(cv.toDataURL('image/jpeg', 0.95));
                     out.dims.push(thermal ? { W: cv.width, H: cv.height, pw: THM.mm / 25.4 * 72, ph: THM.mm / 25.4 * 72 * cv.height / cv.width } : null);
                     i++; setTimeout(next, 0);
                   }).catch(function (er) { fr.remove(); reject(er); });
@@ -11268,6 +11351,98 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
   function dataToBlob(u) { var b = atob(u.split(',')[1]), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return new Blob([a], { type: 'image/jpeg' }); }
   function waNumber(p) { p = String(p || '').replace(/\D/g, ''); if (!p) return ''; if (p.indexOf('880') === 0) return p; if (p.charAt(0) === '0') return '88' + p; return p.length === 10 ? '880' + p : p; }
 
+
+  /* ══ BLUETOOTH THERMAL PRINT (ESC/POS raster, Web Bluetooth / BLE) ══════════
+     Bengali cannot be sent as printer text, so the receipt picture is converted
+     to a 1-bit bitmap at the printer's real dot width (58 mm printer = 384 dots,
+     80 mm = 576 dots) and sent with the ESC/POS "GS v 0" raster command.
+     Works in Chrome / Edge on Android and desktop (HTTPS). Not in iOS Safari.   */
+  var BT = { dev: null, ch: null };
+  var BT_SERVICES = ['000018f0-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+    '0000ff00-0000-1000-8000-00805f9b34fb', '0000ffe0-0000-1000-8000-00805f9b34fb', '0000ffe5-0000-1000-8000-00805f9b34fb', '0000ff12-0000-1000-8000-00805f9b34fb',
+    '0000fee7-0000-1000-8000-00805f9b34fb', '0000ae30-0000-1000-8000-00805f9b34fb', '0000fff0-0000-1000-8000-00805f9b34fb', '0000fe59-0000-1000-8000-00805f9b34fb',
+    '0000ae00-0000-1000-8000-00805f9b34fb', '0000a2f0-0000-1000-8000-00805f9b34fb', '0000ffb0-0000-1000-8000-00805f9b34fb', '0000fd00-0000-1000-8000-00805f9b34fb'];
+  function btDots() { try { var v = parseInt(localStorage.getItem('axiion_bt_dots'), 10); return v === 576 || v === 832 ? v : 384; } catch (x) { return 384; } }
+  function btSetDots(v) { try { localStorage.setItem('axiion_bt_dots', String(v)); } catch (x) { } }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function btConnect() {
+    if (!navigator.bluetooth) return Promise.reject(new Error('NOBT'));
+    if (BT.ch && BT.dev && BT.dev.gatt && BT.dev.gatt.connected) return Promise.resolve(BT.ch);
+    var getDev = BT.dev ? Promise.resolve(BT.dev) : navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: BT_SERVICES });
+    return getDev.then(function (dev) {
+      BT.dev = dev; dev.addEventListener('gattserverdisconnected', function () { BT.ch = null; });
+      return dev.gatt.connect();
+    }).then(function (srv) { return srv.getPrimaryServices(); }).then(function (svcs) {
+      var i = 0;
+      return (function nextSvc() {
+        if (i >= svcs.length) throw new Error('NOCHAR');
+        return svcs[i++].getCharacteristics().then(function (chs) {
+          var best = null;
+          chs.forEach(function (c) { if (c.properties.writeWithoutResponse && !best) best = c; });
+          chs.forEach(function (c) { if (c.properties.write && !best) best = c; });
+          return best || nextSvc();
+        }).catch(function () { return nextSvc(); });
+      })();
+    }).then(function (ch) { BT.ch = ch; return ch; });
+  }
+  function btRaster(dataUrl, dots) {          // JPEG part → { bytes: ESC/POS raster chunks[], rows }
+    return new Promise(function (res, rej) {
+      var im = new Image();
+      im.onload = function () {
+        var w = dots, h = Math.max(1, Math.round(im.height * dots / im.width)), cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+        var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h); cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high'; cx.drawImage(im, 0, 0, w, h);
+        var px = cx.getImageData(0, 0, w, h).data, wb = w >> 3, parts = [];
+        for (var y0 = 0; y0 < h; y0 += 96) {                      // bands of 96 rows → small commands, steady stream
+          var rows = Math.min(96, h - y0), buf = new Uint8Array(8 + rows * wb);
+          buf.set([0x1D, 0x76, 0x30, 0x00, wb & 255, wb >> 8, rows & 255, rows >> 8]);
+          for (var y = 0; y < rows; y++) for (var xb = 0; xb < wb; xb++) {
+            var by = 0;
+            for (var b = 0; b < 8; b++) { var o = ((y0 + y) * w + xb * 8 + b) * 4; var lum = px[o] * 0.299 + px[o + 1] * 0.587 + px[o + 2] * 0.114; if (lum < 175) by |= 0x80 >> b; }   // dark → dot
+            buf[8 + y * wb + xb] = by;
+          }
+          parts.push(buf);
+        }
+        res(parts);
+      };
+      im.onerror = function () { rej(new Error('IMG')); }; im.src = dataUrl;
+    });
+  }
+  function btWrite(ch, data, st) {            // st.chunk adapts down if the printer's MTU is small
+    var i = 0;
+    return (function loop() {
+      if (i >= data.length) return Promise.resolve();
+      var part = data.subarray(i, i + st.chunk);
+      var p = ch.writeValueWithoutResponse ? ch.writeValueWithoutResponse(part) : ch.writeValue(part);
+      return Promise.resolve(p).then(function () { i += part.length; return sleep(st.delay); }, function (er) {
+        if (st.chunk > 20) { st.chunk = st.chunk > 100 ? 100 : 20; st.delay = 20; return loop(); }
+        throw er;
+      }).then(function () { return loop(); });
+    })();
+  }
+  function btPrint(r, onProgress) {
+    var dots = btDots(), st = { chunk: 180, delay: 8 };
+    return btConnect().then(function (ch) {
+      return btWrite(ch, new Uint8Array([0x1B, 0x40]), st).then(function () {            // ESC @  (reset)
+        var k = 0;
+        return (function nextImg() {
+          if (k >= r.imgs.length) return btWrite(ch, new Uint8Array([0x1B, 0x64, 0x04]), st);   // feed 4 lines so the text clears the tear bar
+          if (onProgress) onProgress(k + 1, r.imgs.length);
+          return btRaster(r.imgs[k++], dots).then(function (parts) {
+            var j = 0;
+            return (function nextPart() { if (j >= parts.length) return nextImg(); return btWrite(ch, parts[j++], st).then(nextPart); })();
+          });
+        })();
+      });
+    });
+  }
+  function btExplain(er) {
+    var m = String(er && (er.message || er.name) || er);
+    if (m === 'NOBT') return 'এই ব্রাউজারে ব্লুটুথ প্রিন্ট চলে না — Android-এ Chrome দিয়ে খুলুন (iPhone-এ সম্ভব নয়)';
+    if (/NotFound|cancel|chosen/i.test(m)) return 'প্রিন্টার বাছাই করা হয়নি';
+    if (m === 'NOCHAR') return 'এই প্রিন্টার BLE ব্লুটুথে ডেটা নিচ্ছে না (পুরনো ক্লাসিক ব্লুটুথ প্রিন্টার হতে পারে) — "প্রিন্ট" বাটন বা RawBT অ্যাপ ব্যবহার করুন';
+    return 'ব্লুটুথ প্রিন্ট ব্যর্থ: ' + m;
+  }
+
   function show(sp) {
     sp.time = sp.time || hm(new Date()); sp.date = sp.date || bdtToday();
     var file = String(sp.file || sp.no || 'memo').replace(/[^\w\-]+/g, '_');
@@ -11285,14 +11460,18 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
       // Native Android wrapper keeps its own print/share UI
       if (window.AndroidSlip && window.AndroidSlip.receiveSlip) { ov.remove(); window.AndroidSlip.receiveSlip(r.html, ''); return; }
       var pv = document.getElementById('mm-pv'); pv.innerHTML = '';
+      var tw = null;
+      if (r.thermal) { tw = document.createElement('div'); tw.style.cssText = 'margin:0 auto 12px;max-width:300px;box-shadow:0 2px 10px rgba(0,0,0,.18);border-radius:4px;overflow:hidden;background:#fff'; pv.appendChild(tw); }
       r.imgs.forEach(function (u, i) {
+        if (r.thermal) { var im = document.createElement('img'); im.src = u; im.style.cssText = 'width:100%;display:block'; tw.appendChild(im); return; }
         var w = document.createElement('div'); w.style.cssText = 'margin:0 auto 12px;max-width:' + (r.thermal ? '300px' : '560px') + ';position:relative';
         w.innerHTML = '<img src="' + u + '" style="width:100%;display:block;background:#fff;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,.18)"><div style="font-size:10.5px;color:#64748b;margin-top:4px">' + (r.thermal ? '' : 'পৃষ্ঠা ' + dg(i + 1) + ' / ' + dg(r.n) + ' &nbsp;·&nbsp; ') + '<a href="#" data-p="' + i + '" style="color:#0891b2;font-weight:700;text-decoration:none">⬇ ' + (r.thermal ? 'JPG' : 'এই পৃষ্ঠা JPG') + '</a></div>';
         w.querySelector('a').onclick = function (ev) { ev.preventDefault(); saveBlob(dataToBlob(u), file + (r.n > 1 ? '_p' + (i + 1) : '') + '.jpg'); };
         pv.appendChild(w);
       });
+      if (r.thermal && r.n > 1) { var note = document.createElement('div'); note.style.cssText = 'font-size:10.5px;color:#64748b;margin-top:-4px'; note.textContent = 'লম্বা মেমো — ' + dg(r.n) + ' অংশে স্পষ্ট মানে ভাগ করা (জোড়া লাগানো দেখাচ্ছে)'; pv.appendChild(note); }
       document.getElementById('mm-t').textContent = '✅ ' + sp.title + (sp.no ? ' — ' + sp.no : '');
-      document.getElementById('mm-s').textContent = (r.thermal ? 'থার্মাল ' + THM.mm + ' মিমি' : 'A4 · ' + dg(r.n) + ' পৃষ্ঠা') + ' · ' + (r.renderer === 'fallback' ? '⚠ এই ব্রাউজারে ছবি কম স্পষ্ট — সেরা মানের জন্য "প্রিন্ট" থেকে PDF সেভ করুন' : 'হাই-কোয়ালিটি (৩০০ dpi)');
+      document.getElementById('mm-s').textContent = (r.thermal ? 'থার্মাল ' + THM.mm + ' মিমি' : 'A4 · ' + dg(r.n) + ' পৃষ্ঠা') + ' · ' + (r.renderer === 'fallback' ? '⚠ এই ব্রাউজারে ছবি কম স্পষ্ট — সেরা মানের জন্য "প্রিন্ট" থেকে PDF সেভ করুন' : 'হাই-কোয়ালিটি (' + (r.thermal ? '৩৮৫' : '৩০০') + ' dpi)');
       var ac = document.getElementById('mm-ac'); ac.style.display = 'grid';
       function btn(label, bg, fn, span) { var b = document.createElement('button'); b.innerHTML = label; b.style.cssText = 'padding:12px 6px;border:none;border-radius:10px;color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;background:' + bg + (span ? ';grid-column:1/3' : ''); b.onclick = function () { fn(b); }; ac.appendChild(b); return b; }
       var pdfBlob = null;
@@ -11314,6 +11493,18 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
         });
         if (r.n > 1) toastMsg(dg(r.n) + 'টি পৃষ্ঠা ডাউনলোড হচ্ছে — ব্রাউজার অনুমতি চাইলে "Allow" দিন');
       });
+      if (r.thermal) {
+        var sel = document.createElement('div'); sel.style.cssText = 'grid-column:1/3;display:flex;align-items:center;gap:8px;font-size:11.5px;color:#475569';
+        sel.innerHTML = '<span>🔵 ব্লুটুথ প্রিন্টার:</span><select style="flex:1;padding:6px;border-radius:8px;border:1px solid #cbd5e1;font-size:12px;font-family:inherit"><option value="384">৫৮ মিমি (৩৮৪ ডট) — সাধারণ</option><option value="576">৮০ মিমি (৫৭৬ ডট)</option></select>';
+        var sl = sel.querySelector('select'); sl.value = String(btDots()); sl.onchange = function () { btSetDots(sl.value); }; ac.appendChild(sel);
+        btn('🔵 ব্লুটুথ প্রিন্ট (সরাসরি)', '#1d4ed8', function (b) {
+          var orig = b.innerHTML; busy(b, true); b.textContent = '⏳ সংযোগ হচ্ছে…';
+          btPrint(r, function (k, n) { b.textContent = '⏳ প্রিন্ট হচ্ছে… ' + dg(k) + '/' + dg(n); })
+            .then(function () { toastMsg('✅ প্রিন্ট পাঠানো হয়েছে'); })
+            .catch(function (er) { BT.ch = null; toastMsg(btExplain(er)); })
+            .then(function () { busy(b, false); b.innerHTML = orig; });
+        }, true);
+      }
       btn(r.thermal ? '🖨️ প্রিন্ট (থার্মাল ' + dg(THM.mm) + ' মিমি)' : '🖨️ প্রিন্ট (A4)', '#334155', function () {
         var f = document.createElement('iframe'); f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'; document.body.appendChild(f);
         var d = f.contentDocument; d.open(); d.write(r.html); d.close();

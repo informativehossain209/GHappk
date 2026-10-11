@@ -1,4 +1,4 @@
-const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment, fetchAll, bdtToday, auditLog, idemRun, pageParams } = require('./_lib/db');
+const { supabase, cors, num, str, now_, mapDue, safeErr, applyDuePayment, fetchAll, bdtToday, auditLog, idemRun, pageParams, cyclePeriodBounds } = require('./_lib/db');
 const { randomUUID } = require('crypto');
 
 // Merged with the former api/settings.js (app-wide shop-name setting) to
@@ -72,10 +72,10 @@ module.exports = async (req, res) => {
       const pg = pageParams(req.query, 50);
       const applyFilters = (q) => {
         if (month) {
-          const [calY, calM] = month.split('-').map(Number);
-          const lastDay  = new Date(Date.UTC(calY, calM, 0)).getUTCDate();
-          const lastDate = month + '-' + String(lastDay).padStart(2, '0');
-          q = q.gte('due_date', month + '-01').lte('due_date', lastDate);
+          // v5.5 — "month" is the company pay-cycle label 'YYYY-MM' = 26th of the
+          // previous month → 25th of that month (same rule as salary / targets).
+          const cb = cyclePeriodBounds(String(month).slice(0, 7));
+          q = q.gte('due_date', cb.start).lte('due_date', cb.end);
         }
         if (dsrId) q = q.eq('dsr_id', dsrId);
         if (shopId) q = q.eq('shop_id', shopId);

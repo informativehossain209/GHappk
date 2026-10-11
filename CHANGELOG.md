@@ -1,5 +1,32 @@
 # Changelog
 
+## 5.5.1
+No database change. API: `dsr-my-day` commission / discount / shop-damage lines now also return `createdAt`, `shopId`, `shopPhone`.
+- DSR লেনদেন → কমিশন / ছাড় / ড্যামেজ boxes: the date is shown once as a header (with that day's total); each row shows only the time.
+- Shop name is tappable (📞) when the shop has a saved phone number: asks to confirm, then calls so the owner can verify the entry.
+
+## 5.5.0
+No database change. API files: still 12 (small additions inside `due-calendar.js` and `sr-payments.js`).
+
+### Memo / receipt clarity (thermal)
+- Long receipts are no longer drawn as ONE very tall image (phone browsers cap canvas size and silently shrink it → blurry text). The receipt is now cut between rows into parts of at most ~275 mm and each part is drawn at a fixed ~385 dpi. Preview, PDF (one page per part, 50 mm wide), JPG and WhatsApp use the sharp parts.
+- **Direct Bluetooth print** button (🔵 ব্লুটুথ প্রিন্ট) in the memo panel: converts the sharp image to a 1-bit bitmap at the printer's dot width (58 mm = 384 dots, 80 mm = 576 dots — selectable) and sends ESC/POS raster over BLE. Needs Chrome/Edge on Android (HTTPS). Not available in iOS Safari. Classic-only (non-BLE) printers cannot be used from a web page — use the normal "প্রিন্ট" button or the RawBT app for those.
+
+### Digit "1" / fonts
+- `--font-ui`, `--font-num`, `--font-disp` still listed Hind Siliguri / Inter first, so digits (especially 1) used their odd shapes. Noto Sans is now first everywhere; Bengali letters still fall through to Hind Siliguri.
+
+### Product settings
+- অফার fields (ফ্রি পিস, প্রতি কত কেস, ফ্রি টাকা, লো স্টক অ্যালার্ট) now accept decimals (0.5 etc.) with a decimal keypad.
+
+### Calendar
+- Due calendar now follows the pay cycle like salary/targets: 26th of the previous month → 25th of the month (screen + `GET /api/due-calendar?month=YYYY-MM`). Expense report "এই মাসের খরচ" uses the same cycle.
+
+### Owner home — profit panel
+- The 2nd panel already was the profit panel (label flips নীট লাভ ↔ নীট ক্ষতি). It now shows a − sign for a loss and a line explaining the figure: মোট লাভ − (কমিশন/ছাড়/ড্যামেজ/বোনাস/খরচ).
+
+### DSR লেনদেন → দেওয়া / ফেরত / ড্যামেজ বিস্তারিত
+- Each slip: DSR name on top → items → straight line → total + the time the slip was saved (Bangladesh time). `dsr-my-day` now returns `dsrName` and `createdAt` per slip.
+
 ## 5.4.0
 No database change — `schema_fresh.sql` is unchanged and is still the full schema for a new deploy. API files: still 12 (no new function; extra fields were added inside existing ones).
 

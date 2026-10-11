@@ -497,10 +497,13 @@ async function _handle(req, res, action) {
 
       // shop names for the commission / discount history
       const shopIds = [...new Set((txs || []).filter(r => r.type === 'dsr_sale' && r.shop_id).map(r => String(r.shop_id)))];
-      const shopName = {};
-      if (shopIds.length) {
-        const { data: shRows } = await supabase.from('shops').select('id,name').in('id', shopIds);
-        (shRows || []).forEach(r => { shopName[String(r.id)] = r.name || ''; });
+      const shopName = {}, shopPhone = {};
+      {
+        const allIds = [...new Set([...shopIds, ...(dmgCols || []).filter(r => r.shop_id).map(r => String(r.shop_id))])];
+        if (allIds.length) {
+          const { data: shRows } = await supabase.from('shops').select('id,name,phone').in('id', allIds);
+          (shRows || []).forEach(r => { shopName[String(r.id)] = r.name || ''; shopPhone[String(r.id)] = r.phone || ''; });
+        }
       }
 
       // case size per product — lets every line be shown as "X কেস Y পিস"
@@ -563,17 +566,21 @@ async function _handle(req, res, action) {
         const g = {};
         (txs || []).filter(r => r.type === type).forEach(r => {
           const k = String(r.tx_id || r.created_at);
-          const o = g[k] = g[k] || { date: r.date, total: 0, items: [] };
+          const o = g[k] = g[k] || { date: r.date, total: 0, items: [], createdAt: '' };
           o.total += num(r.total_revenue);
+          // the slip's time = when the whole slip was saved (latest row of that tx_id)
+          if (r.created_at && String(r.created_at) > o.createdAt) o.createdAt = String(r.created_at);
           o.items.push({ productName: r.product_name || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units), value: _m2(r.total_revenue) });
         });
-        return Object.values(g).map(o => ({ date: o.date, total: _m2(o.total), items: o.items }));
+        return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, total: _m2(o.total), items: o.items }))
+          .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
       };
       const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage');
       const sumV = (arr) => _m2(arr.reduce((a, g) => a + g.total, 0));
 
       const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
-        date: r.date, shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
+        date: r.date, createdAt: r.created_at, shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
+        shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
         units: num(r.total_units), ...split(r.total_units, r.product_id, r.product_name), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
       }));
       const commLines = perSale('commission_amt'), discLines = perSale('discount_amt');
@@ -582,15 +589,19 @@ async function _handle(req, res, action) {
       const cashInHand = _m2(cashAtSale + dueCollected - damageMoney);
       const handedOver = _m2((settled || []).reduce((a, r) => a + num(r.cash_received), 0));
 
+      let dsrName = '';
+      try { const { data: srRow } = await supabase.from('srs').select('name').eq('id', sid).maybeSingle(); dsrName = (srRow && srRow.name) || ''; } catch (_) { }
+
       return res.json({
-        ok: true, dsrId: sid, from, to,
+        ok: true, dsrId: sid, dsrName, from, to,
         given:  { total: sumV(given),    slips: given },
         ret:    { total: sumV(returned), slips: returned },
         damage: {
           total: damageTotal,
           vanDamage: { total: sumV(vanDamage), slips: vanDamage },
           shopDamage: (dmgCols || []).map(r => ({
-            date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units), ...split(r.units, r.product_id, r.product_name),
+            date: r.date, createdAt: r.created_at, shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
+            shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units), ...split(r.units, r.product_id, r.product_name),
             damagedValue: _m2(r.damaged_value), resolution: r.resolution,
             refundAmt: _m2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exch: split(r.exch_units, r.exch_product_id, r.exch_product_name),
             exchValue: _m2(Math.min(num(r.exch_value), num(r.damaged_value)))
