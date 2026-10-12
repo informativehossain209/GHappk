@@ -580,13 +580,15 @@ async function computeBonusRangeSummary(from, to) {
 //  Settings page); the full breakdown is always returned so the screen can
 //  show every line.
 // ══════════════════════════════════════════════════════════════════════
-const DEFAULT_PROFIT_RULES = { commission: true, discount: true, damage: true, bonus: true, expenses: true };
+// v5.7 — NET profit = gross profit − commission ONLY. Discount, damage, bonus and expenses are
+// no longer deducted (they are still returned as separate figures for display). The rules are
+// fixed here on purpose so an old saved `profit_rules` row can never switch them back on.
+const DEFAULT_PROFIT_RULES = { commission: true, discount: false, damage: false, bonus: false, expenses: false };
 async function getProfitRules() {
   try {
     const { data, error } = await supabase.from('app_settings').select('profit_rules').eq('id', 1).maybeSingle();
     if (error) throw error;
-    const r = (data && data.profit_rules) || {};
-    return Object.assign({}, DEFAULT_PROFIT_RULES, r);
+    return Object.assign({}, DEFAULT_PROFIT_RULES);
   } catch (e) { return Object.assign({}, DEFAULT_PROFIT_RULES); }
 }
 

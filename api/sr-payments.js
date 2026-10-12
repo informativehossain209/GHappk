@@ -24,6 +24,35 @@ async function _repriceItems(items) {
   return { ok: true, items: out, amount: _m2(priced.lines.reduce((s, l) => s + l.revenue, 0)) };
 }
 
+
+// ── v5.7 — payment safety ─────────────────────────────────────────────
+// 1) every manual payment / settlement needs the acting user's own password
+// 2) a payment can never be larger than what the person actually owes right now
+// 3) the same payment cannot be saved twice within a short time (double tap / re-click)
+async function _verifyActor(actorId, pin) {
+  const p = String(pin == null ? '' : pin).trim();
+  if (!actorId || !p) return { ok: false, needPin: true, error: 'পাসওয়ার্ড দিন' };
+  const { data, error } = await supabase.from('user_passwords').select('user_key')
+    .eq('user_key', String(actorId)).eq('password', p).limit(1);
+  if (error) throw error;
+  if (!data || !data.length) return { ok: false, badPin: true, error: 'পাসওয়ার্ড ভুল — কিছুই সংরক্ষিত হয়নি' };
+  return { ok: true };
+}
+async function _currentDue(srId) {
+  const t = (await getDueTotals([String(srId)]))[String(srId)] || { givenRev: 0, returnRev: 0, payments: 0 };
+  return _m2((t.givenRev - t.returnRev) - t.payments);
+}
+async function _paymentGuard(srId, total, date) {
+  const due = await _currentDue(srId);
+  if (due <= 0.004) return 'এই ব্যক্তির কোনো বাকি নেই — আর টাকা নেওয়া যাবে না';
+  if (total > due + 0.004) return 'বাকি আছে মাত্র ৳' + due.toFixed(2) + ' — এর বেশি নেওয়া যাবে না';
+  const since = new Date(Date.now() - 120000).toISOString();
+  const { data: dup } = await supabase.from('sr_payments').select('id').eq('sr_id', String(srId))
+    .eq('amount', total).gte('created_at', since).limit(1);
+  if (dup && dup.length) return 'একই পরিমাণ টাকা এইমাত্র নেওয়া হয়েছে — আবার চাপবেন না। (ভুল হলে ২ মিনিট পর আবার চেষ্টা করুন)';
+  return null;
+}
+
 // POST actions that move money / stock — protected against double taps (CALC-8).
 const IDEM_ACTIONS = new Set(['approval_submit', 'order_submit', 'give_direct', 'due-collect', 'damage-collect']);
 
@@ -59,6 +88,9 @@ async function _handle(req, res, action) {
     // POST — Manager submits entry for approval
     if (req.method === 'POST' && action === 'approval_submit') {
       const d = req.body;
+      if (d.inputType === 'payment' || d.inputType === 'settlement') {
+        const a = await _verifyActor(d.managerId, d.pin); if (!a.ok) return res.json(a);
+      }
       const { error } = await supabase.from('manager_pending_approvals').insert({
         id:           randomUUID(),
         manager_id:   d.managerId   || '',
@@ -479,27 +511,39 @@ async function _handle(req, res, action) {
       let to   = DATE_RE.test(req.query.to   || '') ? req.query.to   : from;
       if (to < from) { const t = from; from = to; to = t; }
       if ((Date.parse(to) - Date.parse(from)) / 86400000 > 92) return res.json({ ok: false, error: 'সর্বোচ্চ ৯৩ দিনের হিসাব দেখা যায়' });
-      const sid = String(dsrId);
+      const isAll = String(dsrId) === 'all';
+      // v5.7 — dsrId=all → every DSR together (owner / manager "সব DSR একসাথে")
+      let dsrIdsAll = [];
+      const nameById = {};
+      {
+        const { data: srAll } = await supabase.from('srs').select('id,name,role');
+        (srAll || []).forEach(r => { nameById[String(r.id)] = r.name || ''; });
+        if (isAll) dsrIdsAll = (srAll || []).filter(r => (r.role || 'dsr') === 'dsr').map(r => String(r.id));
+      }
+      const sid = isAll ? 'all' : String(dsrId);
+      const ids = isAll ? dsrIdsAll : [sid];
+      if (!ids.length) return res.json({ ok: false, error: 'কোনো DSR পাওয়া যায়নি' });
 
       const [txs, dueRows, dueCols, dmgCols, settled] = await Promise.all([
         fetchAll(() => supabase.from('transactions')
-          .select('tx_id,type,date,product_id,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
-          .eq('sr_id', sid).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
-        fetchAll(() => supabase.from('due_calendar').select('id,shop_id,shop_name,due_date,amount,paid_amount')
-          .eq('client_type', 'shop').eq('dsr_id', sid).gte('due_date', from).lte('due_date', to)),
-        fetchAll(() => supabase.from('due_collections').select('shop_name,date,amount,created_at')
-          .eq('dsr_id', sid).gte('date', from).lte('date', to).order('created_at')),
+          .select('sr_id,tx_id,type,date,product_id,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
+          .in('sr_id', ids).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
+        fetchAll(() => supabase.from('due_calendar').select('id,dsr_id,shop_id,shop_name,due_date,amount,paid_amount,created_at')
+          .eq('client_type', 'shop').in('dsr_id', ids).gte('due_date', from).lte('due_date', to)),
+        fetchAll(() => supabase.from('due_collections').select('dsr_id,shop_id,shop_name,date,amount,created_at')
+          .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
         fetchAll(() => supabase.from('damage_collections').select('*')
-          .eq('dsr_id', sid).gte('date', from).lte('date', to).order('created_at')),
+          .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
         fetchAll(() => supabase.from('dsr_settlements').select('cash_received')
-          .eq('dsr_id', sid).gte('date', from).lte('date', to))
+          .in('dsr_id', ids).gte('date', from).lte('date', to))
       ]);
 
       // shop names for the commission / discount history
       const shopIds = [...new Set((txs || []).filter(r => r.type === 'dsr_sale' && r.shop_id).map(r => String(r.shop_id)))];
       const shopName = {}, shopPhone = {};
       {
-        const allIds = [...new Set([...shopIds, ...(dmgCols || []).filter(r => r.shop_id).map(r => String(r.shop_id))])];
+        const allIds = [...new Set([...shopIds, ...(dmgCols || []).filter(r => r.shop_id).map(r => String(r.shop_id)),
+          ...(dueRows || []).filter(r => r.shop_id).map(r => String(r.shop_id)), ...(dueCols || []).filter(r => r.shop_id).map(r => String(r.shop_id))])];
         if (allIds.length) {
           const { data: shRows } = await supabase.from('shops').select('id,name,phone').in('id', allIds);
           (shRows || []).forEach(r => { shopName[String(r.id)] = r.name || ''; shopPhone[String(r.id)] = r.phone || ''; });
@@ -522,27 +566,36 @@ async function _handle(req, res, action) {
       // today's due / previous due (unpaid credit only)
       let myShopIds2 = [];
       {
-        const { data: mine } = await supabase.from('shops').select('id').eq('assigned_dsr_id', sid);
+        const { data: mine } = await supabase.from('shops').select('id').in('assigned_dsr_id', ids);
         myShopIds2 = (mine || []).map(x => String(x.id));
       }
-      const DUE_SEL = 'id,shop_id,shop_name,due_date,amount,paid_amount,note,status';
+      const DUE_SEL = 'id,dsr_id,shop_id,shop_name,due_date,amount,paid_amount,note,status,created_at';
       const [dueA, dueB] = await Promise.all([
-        fetchAll(() => supabase.from('due_calendar').select(DUE_SEL).eq('client_type', 'shop').eq('dsr_id', sid).neq('status', 'cleared').lte('due_date', to)),
+        fetchAll(() => supabase.from('due_calendar').select(DUE_SEL).eq('client_type', 'shop').in('dsr_id', ids).neq('status', 'cleared').lte('due_date', to)),
         myShopIds2.length
           ? fetchAll(() => supabase.from('due_calendar').select(DUE_SEL).eq('client_type', 'shop').in('shop_id', myShopIds2).neq('status', 'cleared').lt('due_date', from))
           : Promise.resolve([])
       ]);
+      // phones of shops that only appear in the due lists (not looked up above)
+      {
+        const need = [...new Set([...(dueA || []), ...(dueB || [])].map(r => String(r.shop_id || '')).filter(x => x && shopPhone[x] === undefined))];
+        for (let i = 0; i < need.length; i += 80) {
+          const { data: shRows2 } = await supabase.from('shops').select('id,name,phone').in('id', need.slice(i, i + 80));
+          (shRows2 || []).forEach(r => { shopName[String(r.id)] = r.name || ''; shopPhone[String(r.id)] = r.phone || ''; });
+        }
+      }
       const seenDue = {}, todayDueLines = [], prevDueLines = [];
       [...(dueA || []), ...(dueB || [])].forEach(r => {
         if (seenDue[String(r.id)]) return; seenDue[String(r.id)] = 1;
         const rem = num(r.amount) - num(r.paid_amount);
         if (rem <= 0.004) return;
         const dd = String(r.due_date || '').slice(0, 10);
-        const line = { date: dd, shopName: r.shop_name || '', amount: _m2(rem), original: _m2(r.amount), paid: _m2(r.paid_amount), note: r.note || '' };
+        const line = { dsrName: nameById[String(r.dsr_id)] || '', date: dd, createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(rem), original: _m2(r.amount), paid: _m2(r.paid_amount), note: r.note || '' };
         if (dd >= from && dd <= to) todayDueLines.push(line); else if (dd < from) prevDueLines.push(line);
       });
       const sumL = (arr) => _m2(arr.reduce((a, r) => a + r.amount, 0));
-      todayDueLines.sort((a, b) => b.amount - a.amount); prevDueLines.sort((a, b) => b.amount - a.amount);
+      const _byTime = (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+      todayDueLines.sort(_byTime); prevDueLines.sort(_byTime);
 
       // cash shops handed over AT the sale (same rule as _computeSettlement:
       // paid_amount also grows on later collections, so subtract every logged one)
@@ -554,7 +607,7 @@ async function _handle(req, res, action) {
         const lm = {}; (logged || []).forEach(r => { lm[String(r.due_id)] = (lm[String(r.due_id)] || 0) + num(r.amount); });
         dueRows.forEach(r => {
           const initial = Math.max(0, num(r.paid_amount) - (lm[String(r.id)] || 0));
-          if (initial > 0.004) { cashAtSale += initial; cashSales.push({ date: r.due_date, shopName: r.shop_name || '', amount: _m2(initial) }); }
+          if (initial > 0.004) { cashAtSale += initial; cashSales.push({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.due_date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(initial) }); }
         });
       }
       const dueCollected = (dueCols || []).reduce((a, r) => a + num(r.amount), 0);
@@ -566,20 +619,20 @@ async function _handle(req, res, action) {
         const g = {};
         (txs || []).filter(r => r.type === type).forEach(r => {
           const k = String(r.tx_id || r.created_at);
-          const o = g[k] = g[k] || { date: r.date, total: 0, items: [], createdAt: '' };
+          const o = g[k] = g[k] || { date: String(r.date || '').slice(0, 10), total: 0, items: [], createdAt: '', dsrName: nameById[String(r.sr_id)] || '' };
           o.total += num(r.total_revenue);
           // the slip's time = when the whole slip was saved (latest row of that tx_id)
           if (r.created_at && String(r.created_at) > o.createdAt) o.createdAt = String(r.created_at);
           o.items.push({ productName: r.product_name || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units), value: _m2(r.total_revenue) });
         });
-        return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, total: _m2(o.total), items: o.items }))
+        return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, dsrName: o.dsrName, total: _m2(o.total), items: o.items }))
           .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
       };
       const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage');
       const sumV = (arr) => _m2(arr.reduce((a, g) => a + g.total, 0));
 
       const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
-        date: r.date, createdAt: r.created_at, shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
+        date: String(r.date || '').slice(0, 10), createdAt: r.created_at, dsrName: nameById[String(r.sr_id)] || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
         shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
         units: num(r.total_units), ...split(r.total_units, r.product_id, r.product_name), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
       }));
@@ -589,18 +642,18 @@ async function _handle(req, res, action) {
       const cashInHand = _m2(cashAtSale + dueCollected - damageMoney);
       const handedOver = _m2((settled || []).reduce((a, r) => a + num(r.cash_received), 0));
 
-      let dsrName = '';
-      try { const { data: srRow } = await supabase.from('srs').select('name').eq('id', sid).maybeSingle(); dsrName = (srRow && srRow.name) || ''; } catch (_) { }
+      const dsrName = isAll ? 'সব DSR একসাথে' : (nameById[sid] || '');
 
       return res.json({
-        ok: true, dsrId: sid, dsrName, from, to,
+        ok: true, dsrId: sid, dsrName, isAll, from, to,
+        txShops: Object.fromEntries(shopIds.map(id => [id, { name: shopName[id] || '', phone: shopPhone[id] || '' }])),
         given:  { total: sumV(given),    slips: given },
         ret:    { total: sumV(returned), slips: returned },
         damage: {
           total: damageTotal,
           vanDamage: { total: sumV(vanDamage), slips: vanDamage },
           shopDamage: (dmgCols || []).map(r => ({
-            date: r.date, createdAt: r.created_at, shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
+            dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at, shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
             shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units), ...split(r.units, r.product_id, r.product_name),
             damagedValue: _m2(r.damaged_value), resolution: r.resolution,
             refundAmt: _m2(r.refund_amt), exchProductName: r.exch_product_name || '', exchUnits: num(r.exch_units), exch: split(r.exch_units, r.exch_product_id, r.exch_product_name),
@@ -616,9 +669,9 @@ async function _handle(req, res, action) {
           cashAtSale: _m2(cashAtSale), dueCollected: _m2(dueCollected), damageMoneyPaid: _m2(damageMoney),
           inHand: cashInHand, handedOver, stillToHandOver: _m2(cashInHand - handedOver),
           saleLines: cashSales,
-          dueLines: (dueCols || []).map(r => ({ date: r.date, shopName: r.shop_name || '', amount: _m2(r.amount) })),
+          dueLines: (dueCols || []).map(r => ({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(r.amount) })),
           damageLines: (dmgCols || []).filter(r => r.resolution === 'money' && num(r.refund_amt) > 0)
-            .map(r => ({ date: r.date, shopName: r.shop_name || '', productName: r.product_name || '', amount: _m2(r.refund_amt) }))
+            .map(r => ({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', productName: r.product_name || '', amount: _m2(r.refund_amt) }))
         }
       });
     }
@@ -713,6 +766,16 @@ async function _handle(req, res, action) {
       const amount = num(d.amount);
       if (!d.dsrId || !d.shopId) return res.json({ ok: false, error: 'dsrId ও shopId প্রয়োজন' });
       if (amount <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
+      // v5.6 — every collection (full OR partial) needs the DSR's own password.
+      // Checked here on the server so it cannot be skipped from the browser.
+      {
+        const pin = String(d.pin == null ? '' : d.pin).trim();
+        if (!pin) return res.json({ ok: false, error: 'আপনার পাসওয়ার্ড দিন', needPin: true });
+        const { data: pw, error: pwErr } = await supabase.from('user_passwords').select('user_key')
+          .eq('user_key', String(d.dsrId)).eq('password', pin).limit(1);
+        if (pwErr) throw pwErr;
+        if (!pw || !pw.length) return res.json({ ok: false, error: 'পাসওয়ার্ড ভুল — আদায় হয়নি', badPin: true });
+      }
       const { data: dues, error: dErr } = await supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id')
         .eq('client_type', 'shop').eq('shop_id', String(d.shopId)).in('status', ['pending', 'partial'])
         .order('due_date').order('created_at');
@@ -873,6 +936,7 @@ async function _handle(req, res, action) {
     }
 
     if (req.method === 'POST' && action === 'settle-confirm') {
+      { const a = await _verifyActor((req.body || {}).actorId, (req.body || {}).pin); if (!a.ok) return res.json(a); }
       const r = await _performSettlement(req.body || {}, (req.body && req.body.byName) || '');
       return res.json(r);
     }
@@ -913,6 +977,8 @@ async function _handle(req, res, action) {
       const total = _m2(cashAmt + commAmt + discAmt + dmgAmt || num(d.amount));
       if (total <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
       if (!d.srId) return res.json({ ok: false, error: 'srId প্রয়োজন' });
+      { const a = await _verifyActor(d.actorId, d.pin); if (!a.ok) return res.json(a); }
+      { const g = await _paymentGuard(d.srId, total, d.date); if (g) return res.json({ ok: false, error: g }); }
       const { error } = await supabase.from('sr_payments').insert({
         sr_id:          d.srId    || '',
         sr_name:        d.srName  || '',
@@ -1011,6 +1077,7 @@ async function _doApprove(row) {
     const discAmt = _m2(d.discountAmt);
     const dmgAmt  = _m2(d.damageAmt);
     const total   = _m2(cashAmt + commAmt + discAmt + dmgAmt || num(d.amount));
+    { const g = await _paymentGuard(d.srId, total, d.date); if (g) return { ok: false, error: g }; }
     const { error } = await supabase.from('sr_payments').insert({
       sr_id:          d.srId   || '',
       sr_name:        d.srName || '',
@@ -1248,6 +1315,9 @@ async function _performSettlement(d, byName) {
 
   const returnAmt = doReturn ? c.returnValue : 0;
   const payTotal = _r2(cashRecv + comm + disc + dmg);
+  // v5.7 — never settle more than the DSR actually owes (cash + deductions + returned stock).
+  if (_r2(payTotal + returnAmt) > _r2(c.lifetimeDue) + 0.01)
+    return { ok: false, error: 'হিসাব বাকির চেয়ে বেশি হয়ে যাচ্ছে (বর্তমান বাকি ৳' + _r2(c.lifetimeDue).toFixed(2) + ') — পেজ রিফ্রেশ করে আবার দেখুন' };
   const ts = now_();
 
   // 1) Claim — UNIQUE(token) makes a concurrent second press fail right here.

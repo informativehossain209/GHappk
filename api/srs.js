@@ -77,13 +77,12 @@ module.exports = async (req, res) => {
 
       // The paired DSR is whichever `srs` row has so_id === this SO's id
       // (set automatically at registration time — Update #20).
-      const { data: pairedDsr } = await supabase.from('srs').select('id,name').eq('role', 'dsr').eq('so_id', String(so.id)).maybeSingle();
+      // v5.7 — .limit(1) instead of .maybeSingle(): maybeSingle() errors (→ no DSR) as soon as an SO has 2 DSRs paired.
+      const { data: _pd } = await supabase.from('srs').select('id,name').eq('role', 'dsr').eq('so_id', String(so.id)).order('created_at').limit(1);
+      const pairedDsr = (_pd && _pd[0]) || null;
 
-      // If this SO was previously on a different road, clear that
-      // road's so/dsr fields first so a road never shows a stale SO.
-      if (so.road_id && so.road_id !== d.roadId) {
-        await supabase.from('roads').update({ so_id: '', so_name: '', dsr_id: '', dsr_name: '' }).eq('id', so.road_id);
-      }
+      // v5.7 — one SO (and his paired DSR) can now cover MANY roads. The old code cleared the
+      // SO's previous road here, so assigning a second road silently un-assigned the first.
 
       const { error: roadUpdErr } = await supabase.from('roads').update({
         so_id: String(so.id), so_name: so.name || '',
@@ -199,6 +198,17 @@ module.exports = async (req, res) => {
       const { data: already } = await supabase.from('road_weekly_plans')
         .select('id').eq('road_id', roadId).eq('weekday', weekday).maybeSingle();
       if (already) return res.json({ ok: true, alreadyExists: true });
+
+      // v5.7 — an SO has one body: he cannot visit two different roads on the same weekday.
+      // (Different weekdays for different roads are fine — that is how one SO covers many roads.)
+      {
+        const { data: clash } = await supabase.from('road_weekly_plans')
+          .select('road_name').eq('so_id', String(road.so_id)).eq('weekday', weekday).neq('road_id', String(road.id)).limit(1);
+        if (clash && clash.length) {
+          const DAYS = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+          return res.json({ ok: false, error: road.so_name + ' ' + DAYS[weekday] + ' ইতিমধ্যে "' + (clash[0].road_name || 'অন্য রোড') + '"-এ ভিজিট করেন — একই দিনে দুই রোড দেওয়া যাবে না। অন্য দিন বাছুন।' });
+        }
+      }
 
       const { data, error } = await supabase.from('road_weekly_plans').insert({
         road_id: road.id, road_name: road.name || '',

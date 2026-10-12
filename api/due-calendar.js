@@ -6,6 +6,20 @@ const { randomUUID } = require('crypto');
 // live in one file, distinguished by ?action=.
 const DUE_COLS = 'id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id';
 
+// v5.6 — attach the shop's phone + keeper name to shop-type due rows so the
+// calendar can offer a one-tap call. One batched lookup, never one per row.
+async function _withShopPhones(dues) {
+  const ids = [...new Set((dues || []).map(d => d.shopId).filter(Boolean))];
+  if (!ids.length) return dues;
+  const info = {};
+  for (let i = 0; i < ids.length; i += 80) {
+    const { data } = await supabase.from('shops').select('id,phone,keeper_name').in('id', ids.slice(i, i + 80));
+    (data || []).forEach(s => { info[String(s.id)] = s; });
+  }
+  dues.forEach(d => { const s = info[d.shopId]; d.shopPhone = (s && s.phone) || ''; d.keeperName = (s && s.keeper_name) || ''; });
+  return dues;
+}
+
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -87,7 +101,7 @@ module.exports = async (req, res) => {
       if (pg) {
         const { data, error, count } = await applyFilters(supabase.from('due_calendar').select(DUE_COLS, { count: 'exact' }).order('due_date', { ascending: false }).order('id')).range(pg.from, pg.to);
         if (error) throw error;
-        return res.json({ ok: true, dues: (data || []).map(mapDue), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
+        return res.json({ ok: true, dues: await _withShopPhones((data || []).map(mapDue)), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
       }
       // fetchAll: a busy month (or an all-time per-DSR/shop history) can
       // pass PostgREST's silent 1000-row cap.
@@ -95,7 +109,7 @@ module.exports = async (req, res) => {
         let q = supabase.from('due_calendar').select(DUE_COLS).order('due_date');
         return applyFilters(q);
       });
-      return res.json({ ok: true, dues: (data || []).map(mapDue) });
+      return res.json({ ok: true, dues: await _withShopPhones((data || []).map(mapDue)) });
     }
 
     // POST — add a new due entry

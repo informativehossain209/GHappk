@@ -170,6 +170,99 @@ module.exports = async (req, res) => {
     }
 
     // ══════════════════════════════════════════════════════
+    //  v5.7 — SALES PANEL  (owner · manager · DSR · SO)
+    //  GET /api/dashboard?action=sales-panel&scope=so&soId=<id>   one SO's sale (bonus pieces removed)
+    //  GET /api/dashboard?action=sales-panel&scope=total          whole shop's sale (free/bonus pieces INCLUDED)
+    //  Every product is listed in the same order as the product/inventory page (sort_order);
+    //  a product that was not sold shows 0. Columns: yesterday's stock · today's sale · stock now.
+    // ══════════════════════════════════════════════════════
+    if (action === 'sales-panel') {
+      const today = bdtToday();
+      const scope = String(req.query.scope || 'so') === 'total' ? 'total' : 'so';
+      const [pRes, sRes] = await Promise.all([
+        supabase.from('products').select('*').order('sort_order').order('created_at'),
+        supabase.from('srs').select('*').order('created_at')
+      ]);
+      if (pRes.error) throw pRes.error; if (sRes.error) throw sRes.error;
+      const products = (pRes.data || []).map(mapProduct);
+      const staff = (sRes.data || []).map(mapSR);
+      const soList = staff.filter(x => x.role === 'so').map(x => ({ id: x.id, name: x.name }));
+
+      let soId = String(req.query.soId || '');
+      if (scope === 'so' && !soId && role === 'so') soId = String(userId || '');
+      if (scope === 'so' && !soId && soList.length) soId = soList[0].id;
+
+      let ids = null, dsrIds = [];
+      if (scope === 'so') {
+        dsrIds = staff.filter(x => String(x.soId || '') === soId && x.role !== 'so').map(x => x.id);
+        ids = [soId, ...dsrIds];
+      }
+      const rows = (await fetchAll(() => {
+        let q = supabase.from('transactions').select(TX_LITE).eq('date', today).in('type', ['give', 'return', 'point_sale', 'point_damage_return']).order('created_at');
+        if (ids) q = q.in('sr_id', ids);
+        return q;
+      })).map(mapTx);
+
+      const net = {};
+      rows.forEach(r => {
+        const pid = String(r.productId || ''); if (!pid) return;
+        if (scope === 'so') {
+          const isDsrLeg  = dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return');
+          const isSoPoint = r.srId === soId && (r.type === 'point_sale' || r.type === 'point_damage_return');
+          if (!isDsrLeg && !isSoPoint) return;
+        }
+        net[pid] = (net[pid] || 0) + ((r.type === 'give' || r.type === 'point_sale') ? num(r.totalUnits) : -num(r.totalUnits));
+      });
+
+      // damage swapped for product (shown separately, same as the SO tab always did)
+      const exchMap = {};
+      {
+        const exIds = scope === 'so' ? dsrIds : null;
+        if (!exIds || exIds.length) {
+          const exRows = await fetchAll(() => {
+            let q = supabase.from('damage_collections').select('exch_product_id,exch_units').eq('date', today).eq('resolution', 'exchange');
+            if (exIds) q = q.in('dsr_id', exIds.map(String));
+            return q;
+          });
+          (exRows || []).forEach(r => { const k = String(r.exch_product_id || ''); if (k) exchMap[k] = (exchMap[k] || 0) + num(r.exch_units); });
+        }
+      }
+      const dayMove = await getStockMovement(today);
+
+      const list = products.map(p => {
+        const pid = String(p.id);
+        const raw = Math.max(0, net[pid] || 0);
+        let sold = raw, bonusPieces = 0;
+        if (scope === 'so') {
+          const cs = num(p.caseSize) || 1, req_ = num(p.bonusCasesReq) || 1, free = num(p.bonusFreeUnits) || 0;
+          bonusPieces = Math.floor(Math.floor(raw / cs) / req_) * free;
+          sold = Math.max(0, raw - bonusPieces);
+        }
+        const exch = Math.min(exchMap[pid] || 0, sold);
+        const cur = num(p.currentStock);
+        return {
+          productId: p.id, productName: p.name || '', thumb: p.thumb || '', caseSize: num(p.caseSize) || 1, unitType: p.unitType || 'কেস',
+          sold, bonusPieces, exchangeUnits: exch,
+          prevStock: +(cur - (dayMove[pid] || 0)).toFixed(4), currentStock: cur
+        };
+      });
+      return res.json({ ok: true, scope, soId, sos: soList, date: today, list });
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  v5.7 — LOW-STOCK ALERT for every role
+    //  GET /api/dashboard?action=low-stock
+    // ══════════════════════════════════════════════════════
+    if (action === 'low-stock') {
+      const { data, error } = await supabase.from('products').select('*').order('sort_order').order('created_at');
+      if (error) throw error;
+      const list = (data || []).map(mapProduct)
+        .filter(p => num(p.lowStockAlert) > 0 && num(p.currentStock) <= num(p.lowStockAlert))
+        .map(p => ({ id: p.id, name: p.name, sku: p.sku, thumb: p.thumb || '', units: num(p.currentStock), alertAt: num(p.lowStockAlert), caseSize: num(p.caseSize) || 1, unitType: p.unitType || 'কেস' }));
+      return res.json({ ok: true, list });
+    }
+
+    // ══════════════════════════════════════════════════════
     //  SO DASHBOARD — isolated to SO's own data + assigned DSRs
     // ══════════════════════════════════════════════════════
     if (role === 'so' && userId) {
@@ -291,7 +384,17 @@ module.exports = async (req, res) => {
       // V44 #31 — "আজকের বিক্রয়" summary cards: damage cost reported
       // today across the SO + their assigned DSRs (uses purchase-price
       // based total_cost, same figure the damage/claims screens use).
-      const todayDamage = txToday.filter(r => r.type === 'damage').reduce((s, r) => s + num(r.totalCost), 0);
+      const vanDamageToday = txToday.filter(r => r.type === 'damage').reduce((s, r) => s + num(r.totalCost), 0);
+      // v5.6 — damage a DSR collects FROM SHOPS (ড্যামেজ কালেকশন) lives in its own
+      // table (damage_collections), not in `transactions`, so it never reached this
+      // card. Add it (same purchase-price basis as the damage claims).
+      let shopDamageToday = 0;
+      if (dsrIds.length) {
+        const dcRows = await fetchAll(() => supabase.from('damage_collections')
+          .select('units,purchase_price').in('dsr_id', dsrIds.map(String)).eq('date', today));
+        shopDamageToday = (dcRows || []).reduce((s, r) => s + num(r.units) * num(r.purchase_price), 0);
+      }
+      const todayDamage = vanDamageToday + shopDamageToday;
       const monthGiven  = txMonth.filter(r => r.type === 'give' || r.type === 'point_sale').reduce((s, r) => s + num(r.totalRevenue), 0);
       const monthReturn = txMonth.filter(r => r.type === 'return' || r.type === 'point_damage_return').reduce((s, r) => s + num(r.totalRevenue), 0);
       const monthDsrPay = dsrPayMonth.reduce((s, r) => s + num(r.amount), 0);
@@ -407,7 +510,7 @@ module.exports = async (req, res) => {
         // V44 #31 — `saleGross` (before returns), `damage`, `returns` are
         // the three "আজকের বিক্রয়" card figures; `revenue` (net) is kept
         // unchanged for everything else already reading it.
-        today: { revenue: todayGiven - todayReturn, saleGross: todayGiven, damage: todayDamage, returns: todayReturn, split: todaySplit },
+        today: { revenue: todayGiven - todayReturn, saleGross: todayGiven, damage: todayDamage, vanDamage: vanDamageToday, shopDamage: shopDamageToday, returns: todayReturn, split: todaySplit },
         month: { revenue: monthGiven - monthReturn, dsrPayments: monthDsrPay, split: monthSplit },
         range: rangeSplit,
         roadDuty
@@ -486,8 +589,14 @@ module.exports = async (req, res) => {
       // Resolved LIVE: did YESTERDAY's weekday match a rule for a road
       // this DSR is paired to, and was that rule active by yesterday?
       const yesterdayStr = bdtYesterday();
+      // v5.7 — resolve through the DSR's SO as well (the copy of dsr_id stored on a weekly rule can be
+      // stale or empty — e.g. the DSR was paired after the road was assigned), so DSR duty = every road
+      // his SO visited yesterday.
+      let _mySoId = '';
+      try { const { data: _me } = await supabase.from('srs').select('so_id').eq('id', userId).maybeSingle(); _mySoId = String((_me && _me.so_id) || ''); } catch (_) { }
+      const _dutyFilter = _mySoId ? ('dsr_id.eq.' + userId + ',so_id.eq.' + _mySoId) : ('dsr_id.eq.' + userId);
       const { data: roadDutyRows } = await supabase.from('road_weekly_plans')
-        .select('*').eq('dsr_id', userId).eq('weekday', weekdayOf(yesterdayStr)).lte('active_from', yesterdayStr);
+        .select('*').or(_dutyFilter).eq('weekday', weekdayOf(yesterdayStr)).lte('active_from', yesterdayStr);
       const roadDuty = (roadDutyRows || []).map(mapRoadWeeklyPlan);
 
       return res.json({
@@ -548,7 +657,7 @@ module.exports = async (req, res) => {
       getProductNetUnits(monthStart, today),
       getPaymentsTotal(today, today),
       getPaymentsTotal(monthStart, today),
-      fetchAll(() => supabase.from('dmg_claims').select('total_cost').eq('status', 'pending'))
+      fetchAll(() => supabase.from('dmg_claims').select('total_cost,status,date').or('status.eq.pending,date.eq.' + today))
     ]);
 
     const products    = (pRes.data  || []).map(mapProduct);
@@ -618,7 +727,8 @@ module.exports = async (req, res) => {
     const todayNewDue    = (todayGivenRev - todayReturnRev) - todayPayAmt;
 
     // ── DAMAGE pending ─────────────────────────────────────
-    const dmgPendingAmt = dmgPendRows.reduce((s,r)=>s+num(r.total_cost),0);
+    const dmgPendingAmt = dmgPendRows.filter(r => r.status === 'pending').reduce((s,r)=>s+num(r.total_cost),0);
+    const dmgTodayAmt   = dmgPendRows.filter(r => String(r.date || '').slice(0, 10) === today).reduce((s,r)=>s+num(r.total_cost),0);
 
     // ── BONUS (CALC-3) — earned this pay cycle, one shared calculation ──
     // (The old "pending" figure compared a since-last-clear amount with an
@@ -691,7 +801,7 @@ module.exports = async (req, res) => {
       month: { revenue: monthRevenue, profit: monthProfit, payments: monthPayments, breakdown: monthProfitP },
       stock: { list: stockList, totalSell, totalBuyValue, totalSellValue, estimatedProfit },
       dues:  { total: totalDue, todayNew: todayNewDue, list: duesList },
-      damage: { pendingAmt: dmgPendingAmt },
+      damage: { pendingAmt: dmgPendingAmt, todayAmt: dmgTodayAmt },
       bonus:  { pendingAmt: bonusPendingAmt, from: monthStart, to: today, byProduct: bonusRows.filter(b => num(b.amount) > 0) },
       lowStock: lowStockList,
       rankedToday,
