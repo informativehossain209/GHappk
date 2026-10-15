@@ -1,4 +1,4 @@
-# AXIION DMS — Setup (v5.7.0)
+# AXIION DMS — Setup (v5.12.0)
 
 ## 1. Supabase — database  ⚠️ read this first
 There are TWO SQL files. Use exactly one of them:
@@ -6,7 +6,7 @@ There are TWO SQL files. Use exactly one of them:
 | Situation | File to run | Effect |
 |---|---|---|
 | **Brand-new Supabase project** (empty) | `schema_fresh.sql` | Creates everything: tables, indexes, functions, triggers, policies, seed data, photo bucket. |
-| **Already running / has real data** | `migrations/001_v5_1_fixes.sql` | Adds only the v5.1 changes. Safe to run more than once. Never deletes data. |
+| **Already running / has real data** | `migrations/001_v5_1_fixes.sql` (if coming from before 5.1), then `migrations/002_v5_11.sql` (from 5.1–5.10). **From 5.11.x → 5.12.0: no SQL at all, just redeploy.** | Add only the new changes. Safe to run more than once. Never deletes data. |
 
 `schema_fresh.sql` begins with a safety stop: if the database already contains
 sales/transactions it refuses to run (the old `schema.sql` dropped tables and wiped data).
@@ -179,3 +179,10 @@ Full list: `CHANGELOG.md`. Highlights:
 
 **Not changed on purpose:** the PIN/login system (SEC-1…4 of the audit plan) is untouched as requested.
 Known note: damage loss is the `total_cost` stored on each damage claim (purchase-cost based).
+
+
+## 12. What's new in 5.12.0 (no SQL needed)
+- **বিক্রয় প্যানেল** turns **green** for a logged-in SO once that day's calculation (returns taken, day-end settlement) is closed; **red** otherwise and for every other role. See `CHANGELOG.md`.
+- **SO home** shows my sale and every other SO's sale of today with a closed/open chip.
+- **ডিউ ক্যালেন্ডার**: the due left after a partial payment is red.
+- Still exactly 12 files in `api/`.

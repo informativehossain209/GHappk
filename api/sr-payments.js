@@ -524,7 +524,7 @@ async function _handle(req, res, action) {
       const ids = isAll ? dsrIdsAll : [sid];
       if (!ids.length) return res.json({ ok: false, error: 'কোনো DSR পাওয়া যায়নি' });
 
-      const [txs, dueRows, dueCols, dmgCols, settled] = await Promise.all([
+      const [txs, dueRows, dueCols, dmgCols, settled, settledAll] = await Promise.all([
         fetchAll(() => supabase.from('transactions')
           .select('sr_id,tx_id,type,date,product_id,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
           .in('sr_id', ids).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
@@ -535,7 +535,9 @@ async function _handle(req, res, action) {
         fetchAll(() => supabase.from('damage_collections').select('*')
           .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
         fetchAll(() => supabase.from('dsr_settlements').select('cash_received')
-          .in('dsr_id', ids).gte('date', from).lte('date', to))
+          .in('dsr_id', ids).gte('date', from).lte('date', to)),
+        // v5.8 — everything ever received from this DSR (all dates) for the red top box
+        fetchAll(() => supabase.from('dsr_settlements').select('cash_received').in('dsr_id', ids))
       ]);
 
       // shop names for the commission / discount history
@@ -641,11 +643,13 @@ async function _handle(req, res, action) {
       const damageTotal = _m2(sumV(vanDamage) + damageMoney + damageExchange);
       const cashInHand = _m2(cashAtSale + dueCollected - damageMoney);
       const handedOver = _m2((settled || []).reduce((a, r) => a + num(r.cash_received), 0));
+      const receivedAll = _m2((settledAll || []).reduce((a, r) => a + num(r.cash_received), 0));
 
       const dsrName = isAll ? 'সব DSR একসাথে' : (nameById[sid] || '');
 
       return res.json({
         ok: true, dsrId: sid, dsrName, isAll, from, to,
+        received: { total: receivedAll, period: handedOver },
         txShops: Object.fromEntries(shopIds.map(id => [id, { name: shopName[id] || '', phone: shopPhone[id] || '' }])),
         given:  { total: sumV(given),    slips: given },
         ret:    { total: sumV(returned), slips: returned },
@@ -882,6 +886,41 @@ async function _handle(req, res, action) {
       return res.json({ ok: true, colId, refundTotal, exchTotal, lines: colRows.length });
     }
 
+    // v5.11 — MANAGER CASH: how much cash each manager has taken from the DSRs (all DSRs together).
+    // This is the amount the Owner will receive from that manager. Confirmed = settlements the
+    // Owner already approved; pending = settlements the manager submitted that still wait for approval.
+    //   GET /api/sr-payments?action=manager-cash[&from=YYYY-MM-DD&to=YYYY-MM-DD]   (no dates = all time)
+    if (req.method === 'GET' && action === 'manager-cash') {
+      const f = DATE_RE.test(req.query.from || '') ? req.query.from : '';
+      const t = DATE_RE.test(req.query.to || '') ? req.query.to : '';
+      const [stl, pend, mgrs] = await Promise.all([
+        fetchAll(() => { let q = supabase.from('dsr_settlements').select('dsr_id,dsr_name,date,cash_received,received_by_id,received_by_name,received_by_role,created_at').eq('received_by_role', 'manager').order('date', { ascending: false }); if (f) q = q.gte('date', f); if (t) q = q.lte('date', t); return q; }),
+        fetchAll(() => supabase.from('manager_pending_approvals').select('manager_id,manager_name,input_data,submitted_at').eq('input_type', 'settlement').eq('status', 'pending')),
+        fetchAll(() => supabase.from('user_passwords').select('user_key,user_name').eq('role', 'manager'))
+      ]);
+      const by = {};
+      const slot = (id, name) => (by[id] = by[id] || { managerId: id, managerName: name || '', confirmed: 0, pending: 0, dsrs: {}, lines: [] });
+      (mgrs || []).forEach(m => slot(String(m.user_key), m.user_name));
+      (stl || []).forEach(r => {
+        const x = slot(String(r.received_by_id || r.received_by_name || '—'), r.received_by_name);
+        const amt = _m2(r.cash_received);
+        x.confirmed += amt;
+        x.dsrs[r.dsr_name || r.dsr_id] = (x.dsrs[r.dsr_name || r.dsr_id] || 0) + amt;
+        x.lines.push({ date: String(r.date).slice(0, 10), dsrName: r.dsr_name || '', amount: amt, createdAt: r.created_at || '' });
+      });
+      (pend || []).forEach(r => {
+        const d = r.input_data || {}; const dt = DATE_RE.test(d.date || '') ? d.date : String(r.submitted_at || '').slice(0, 10);
+        if ((f && dt < f) || (t && dt > t)) return;
+        const x = slot(String(r.manager_id), r.manager_name); x.pending += _m2(d.cashReceived);
+      });
+      const list = Object.values(by).map(x => ({
+        managerId: x.managerId, managerName: x.managerName, confirmed: _m2(x.confirmed), pending: _m2(x.pending), total: _m2(x.confirmed + x.pending),
+        byDsr: Object.keys(x.dsrs).map(n => ({ dsrName: n, amount: _m2(x.dsrs[n]) })).sort((a, b) => b.amount - a.amount),
+        lines: x.lines.slice(0, 200)
+      })).sort((a, b) => b.total - a.total);
+      return res.json({ ok: true, from: f, to: t, managers: list, grandConfirmed: _m2(list.reduce((a, m) => a + m.confirmed, 0)), grandPending: _m2(list.reduce((a, m) => a + m.pending, 0)), grandTotal: _m2(list.reduce((a, m) => a + m.total, 0)) });
+    }
+
     // Owner / Manager view (and the DSR's own list): what DSRs collected.
     if (req.method === 'GET' && action === 'collections-list') {
       const { dsrId, from, to } = req.query;
@@ -927,6 +966,84 @@ async function _handle(req, res, action) {
     //  settle-preview GET  dsrId, date  → everything still to be settled
     //  settle-confirm POST              → applies it ONCE (see below)
     // ══════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════
+    //  v5.12 — DAY-CLOSE STATUS + per-SO sale of the day
+    //  GET /api/sr-payments?action=day-status[&date=YYYY-MM-DD][&soId=<id>]
+    //  A DSR's day is CLOSED when nothing is left to settle for that date: no stock
+    //  still on the van (not yet returned), no pending commission / discount / damage
+    //  and no cash still expected. Any new loading / sale / collection after the
+    //  manager's settlement re-opens the day. A SO's day is closed when ALL his
+    //  DSRs are closed. Returns every SO (or just ?soId=) with his net sale of the day.
+    // ══════════════════════════════════════════════════
+    if (req.method === 'GET' && action === 'day-status') {
+      const realToday = bdtToday();
+      const dq = String((req.query && req.query.date) || '');
+      const date = (DATE_RE.test(dq) && dq <= realToday) ? dq : realToday;
+      const onlySo = String((req.query && req.query.soId) || '');
+      const staff = await fetchAll(() => supabase.from('srs').select('id,name,role,so_id'));
+      let sos = staff.filter(x => x.role === 'so');
+      if (onlySo) sos = sos.filter(x => String(x.id) === onlySo);
+      const soIds = new Set(sos.map(x => String(x.id)));
+      const dsrs = staff.filter(x => x.role !== 'so' && soIds.has(String(x.so_id || '')));
+      const unassigned = onlySo ? [] : staff.filter(x => x.role === 'dsr' && !soIds.has(String(x.so_id || '')));
+      const allDsr = dsrs.concat(unassigned);
+
+      // net sale of the day per SO (DSR give − return, + the SO's own point sale) — revenue in ৳
+      const ids = sos.map(x => String(x.id)).concat(allDsr.map(x => String(x.id)));
+      const saleBySo = {};
+      sos.forEach(x => { saleBySo[String(x.id)] = 0; });
+      const dsrToSo = {}; dsrs.forEach(x => { dsrToSo[String(x.id)] = String(x.so_id); });
+      if (ids.length) {
+        const rows = await fetchAll(() => supabase.from('transactions').select('sr_id,type,total_revenue')
+          .eq('date', date).in('type', ['give', 'return', 'point_sale', 'point_damage_return']).in('sr_id', ids));
+        rows.forEach(r => {
+          const sid = String(r.sr_id);
+          const plus = (r.type === 'give' || r.type === 'point_sale');
+          let owner = null;
+          if ((r.type === 'give' || r.type === 'return') && dsrToSo[sid]) owner = dsrToSo[sid];
+          else if ((r.type === 'point_sale' || r.type === 'point_damage_return') && soIds.has(sid)) owner = sid;
+          if (owner === null) return;
+          saleBySo[owner] += (plus ? 1 : -1) * num(r.total_revenue);
+        });
+      }
+
+      // settlement status per DSR — small batches so a big team never floods the database
+      const status = {};
+      for (let i = 0; i < allDsr.length; i += 6) {
+        await Promise.all(allDsr.slice(i, i + 6).map(async (x) => {
+          try {
+            const c = await _computeSettlement(String(x.id), date, { light: true });
+            const why = [];
+            if (c.returnItems.length) why.push('ভ্যানে মাল আছে');
+            if (c.pending.cashExpected > 0.005) why.push('নগদ বাকি');
+            if (c.pending.commission > 0 || c.pending.discount > 0) why.push('কমিশন/ছাড় বাকি');
+            if (c.pending.damage > 0) why.push('ড্যামেজ বাকি');
+            if (!why.length && c.hasPending) why.push('হিসাব বাকি');
+            status[String(x.id)] = { id: String(x.id), name: x.name || '', closed: !c.hasPending, why };
+          } catch (e) {
+            status[String(x.id)] = { id: String(x.id), name: x.name || '', closed: false, why: ['যাচাই করা যায়নি'] };
+          }
+        }));
+      }
+
+      const out = sos.map(so => {
+        const mine = dsrs.filter(x => String(x.so_id) === String(so.id)).map(x => status[String(x.id)]);
+        return {
+          soId: String(so.id), soName: so.name || '',
+          sale: +num(saleBySo[String(so.id)]).toFixed(2),
+          dsrCount: mine.length, closedCount: mine.filter(m => m.closed).length,
+          closed: mine.every(m => m.closed),
+          open: mine.filter(m => !m.closed).map(m => ({ id: m.id, name: m.name, why: m.why }))
+        };
+      });
+      const openAll = out.flatMap(o => o.open).concat(unassigned.map(x => status[String(x.id)]).filter(m => m && !m.closed));
+      const totalDsr = allDsr.length;
+      return res.json({
+        ok: true, date, isToday: date === realToday, sos: out,
+        all: { dsrCount: totalDsr, closedCount: totalDsr - openAll.length, closed: openAll.length === 0, open: openAll, sale: +out.reduce((a, o) => a + o.sale, 0).toFixed(2) }
+      });
+    }
+
     if (req.method === 'GET' && action === 'settle-preview') {
       const { dsrId, date } = req.query;
       if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
@@ -937,7 +1054,9 @@ async function _handle(req, res, action) {
 
     if (req.method === 'POST' && action === 'settle-confirm') {
       { const a = await _verifyActor((req.body || {}).actorId, (req.body || {}).pin); if (!a.ok) return res.json(a); }
-      const r = await _performSettlement(req.body || {}, (req.body && req.body.byName) || '');
+      let _role = 'owner';
+      try { const { data: u } = await supabase.from('user_passwords').select('role').eq('user_key', String((req.body || {}).actorId)).maybeSingle(); if (u && u.role) _role = u.role; } catch (_) { }
+      const r = await _performSettlement(Object.assign({}, req.body || {}, { byRole: _role }), (req.body && req.body.byName) || '');
       return res.json(r);
     }
 
@@ -1096,7 +1215,8 @@ async function _doApprove(row) {
   if (row.input_type === 'settlement') {
     // Manager's end-of-day settlement — recalculated from the database at
     // the moment the Owner approves (never trusts stale numbers).
-    return await _performSettlement(d, 'owner-approval');
+    // v5.11 — remember WHICH manager actually took the cash from the DSR (the Owner only approves it)
+    return await _performSettlement(Object.assign({}, d, { _recvId: row.manager_id || '', _recvName: row.manager_name || '', _recvRole: 'manager' }), 'owner-approval');
   }
 
   if (row.input_type === 'expense') {
@@ -1189,7 +1309,8 @@ async function _loadAndDeduct(id, allowedLoadStatuses) {
 // ══════════════════════════════════════════════════════════════════════
 const _r2 = n => Math.round((num(n) + Number.EPSILON) * 100) / 100;
 
-async function _computeSettlement(dsrId, date) {
+async function _computeSettlement(dsrId, date, opts) {
+  const light = !!(opts && opts.light);   // v5.12 — status checks skip price lookups (only 'is anything left?' matters)
   const [dayTx, dueRows, dueColsToday, dmgCols, settled, vanDetail, dsrRow, dueTotals] = await Promise.all([
     fetchAll(() => supabase.from('transactions').select('type,product_id,total_units,total_revenue,commission_amt,discount_amt')
       .eq('sr_id', dsrId).eq('date', date).in('type', ['give', 'return', 'damage', 'dsr_sale'])),
@@ -1243,7 +1364,9 @@ async function _computeSettlement(dsrId, date) {
   // Unsold stock still on the van → goes back to the warehouse.
   const pids = Object.keys(van).filter(k => num(van[k]) > 0);
   const returnItems = [];
-  if (pids.length) {
+  if (pids.length && light) {
+    pids.forEach(pid => returnItems.push({ productId: String(pid), totalUnits: num(van[pid]), value: 0 }));
+  } else if (pids.length) {
     const prodMap = await loadProducts(pids);
     // price the DSR was actually charged (his latest loading of that product)
     const givePrice = await weightedGivePrices(dsrId, pids, date);
@@ -1321,12 +1444,19 @@ async function _performSettlement(d, byName) {
   const ts = now_();
 
   // 1) Claim — UNIQUE(token) makes a concurrent second press fail right here.
-  const { error: claimErr } = await supabase.from('dsr_settlements').insert({
+  const _stlRow = {
     token, dsr_id: dsrId, dsr_name: c.dsrName || d.dsrName || '', date,
     comm_amt: comm, disc_amt: disc, dmg_amt: dmg, return_amt: returnAmt,
     cash_expected: c.pending.cashExpectedRaw, cash_received: cashRecv,
-    note: String(d.note || '').slice(0, 200), created_by: byName || '', created_at: ts
-  });
+    note: String(d.note || '').slice(0, 200), created_by: byName || '', created_at: ts,
+    received_by_id: String(d._recvId || d.actorId || ''), received_by_name: String(d._recvName || d.byName || byName || ''), received_by_role: String(d._recvRole || d.byRole || 'owner')
+  };
+  let { error: claimErr } = await supabase.from('dsr_settlements').insert(_stlRow);
+  // database not upgraded yet (migrations/002_v5_11.sql not run) → save the settlement anyway, without the collector columns
+  if (claimErr && /received_by/i.test(String(claimErr.message || ''))) {
+    ['received_by_id', 'received_by_name', 'received_by_role'].forEach(k => delete _stlRow[k]);
+    ({ error: claimErr } = await supabase.from('dsr_settlements').insert(_stlRow));
+  }
   if (claimErr) {
     if (String(claimErr.code) === '23505' || /duplicate|unique/i.test(String(claimErr.message)))
       return { ok: false, duplicate: true, error: 'এই হিসাব আগেই সংরক্ষিত হয়েছে — দ্বিতীয়বার চাপলে হিসাব দ্বিগুণ হয় না।' };

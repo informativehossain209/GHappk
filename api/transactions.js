@@ -1,4 +1,4 @@
-const { supabase, cors, num, now_, mapTx, safeErr, fetchAll, pageParams, idemRun, blockNegativeStock, bdtToday, cpGroups } = require('./_lib/db');
+const { supabase, cors, num, now_, mapTx, safeErr, fetchAll, pageParams, idemRun, blockNegativeStock, bdtToday, cpGroups, withUnits } = require('./_lib/db');
 const { priceItems, txRow, stockShortage, r2, r4 } = require('./_lib/money');
 const { randomUUID } = require('crypto');
 
@@ -168,7 +168,7 @@ module.exports = async (req, res) => {
       const products = Object.values(pm).sort((a, b) => b.givenAmt - a.givenAmt);
       // v5.4 — case size per product so the client can show cases (+ loose pcs), never bare pieces
       const _csMap = {};
-      try { const { data: _pr } = await supabase.from('products').select('id,case_size,unit_type'); (_pr || []).forEach(p => { _csMap[String(p.id)] = num(p.case_size) || 1; }); products.forEach(p => { p.caseSize = _csMap[String(p.productId)] || 1; const x = (_pr || []).find(z => String(z.id) === String(p.productId)); p.unitType = x ? (x.unit_type || '') : ''; }); } catch (_) { }
+      try { const { data: _pr } = await supabase.from('products').select('id,case_size,unit_type'); (_pr || []).forEach(p => { _csMap[String(p.id)] = num(p.case_size) || 1; }); withUnits(_csMap, _pr); products.forEach(p => { p.caseSize = _csMap[String(p.productId)] || 1; const x = (_pr || []).find(z => String(z.id) === String(p.productId)); p.unitType = x ? (x.unit_type || '') : ''; }); } catch (_) { }
       const _cpR = cpGroups(txs, _csMap, { given: ['give'], returned: ['return'], shop: ['dsr_sale'], damage: ['damage'] });
 
       const totals = {
@@ -212,6 +212,7 @@ module.exports = async (req, res) => {
           if (from) q = q.gte('date', from);
           if (to)   q = q.lte('date', to);
           q = q.in('sr_id', allIds.map(String));
+          if (req.query.type) q = q.eq('type', String(req.query.type));
           const { data, error, count } = await q.range(pg.from, pg.to);
           if (error) throw error;
           return res.json({ ok: true, rows: (data || []).map(mapTx), page: pg.page, pageSize: pg.pageSize, total: count || 0, hasMore: pg.to + 1 < (count || 0) });
@@ -221,6 +222,7 @@ module.exports = async (req, res) => {
           if (from) q = q.gte('date', from);
           if (to)   q = q.lte('date', to);
           if (allIds.length) q = q.in('sr_id', allIds);
+          if (req.query.type) q = q.eq('type', String(req.query.type));
           return q;
         });
         return res.json((rows || []).map(mapTx));
@@ -246,6 +248,8 @@ module.exports = async (req, res) => {
         if (from) q = q.gte('date', from);
         if (to)   q = q.lte('date', to);
         if (srId) q = q.eq('sr_id', srId);
+        // v5.10 — optional ?type= filter (the ফেরত পণ্য page asks for type=return)
+        if (req.query.type) q = q.eq('type', String(req.query.type));
         return q;
       });
       return res.json((rows || []).map(mapTx));

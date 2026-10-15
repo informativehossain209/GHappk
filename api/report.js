@@ -1,7 +1,7 @@
 const {
   supabase, cors, num, ds, str, now_, safeErr,
   mapTx, mapPayment, mapProduct, mapSR, mapDue,
-  bdtYesterday, fetchAll, computeProfit, getDueTotals, cpSplit, cpGroups
+  bdtYesterday, fetchAll, computeProfit, getDueTotals, cpSplit, cpGroups, withUnits
 } = require('./_lib/db');
 
 const TX_COLS = 'id,tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at';
@@ -417,7 +417,7 @@ module.exports = async (req, res) => {
     const totalPay = pays.reduce((s, r) => s + num(r.amount), 0);
 
     // v5.4 — exact "cases + loose pieces" for every quantity total (per-product split)
-    const _cs = {}; prods.forEach(p => { _cs[String(p.id)] = num(p.caseSize) || 1; });
+    const _cs = {}; prods.forEach(p => { _cs[String(p.id)] = num(p.caseSize) || 1; }); withUnits(_cs, prods);
     const _cpT = cpGroups(txs, _cs, { given: ['give', 'point_sale'], returned: ['return', 'point_damage_return'], damage: ['damage'], buy: ['buy'] });
     const _soldBy = {}; txs.forEach(r => { const k = String(r.productId || ''), u = num(r.totalUnits); if (r.type === 'give' || r.type === 'point_sale') _soldBy[k] = (_soldBy[k] || 0) + u; else if (r.type === 'return' || r.type === 'point_damage_return' || r.type === 'damage') _soldBy[k] = (_soldBy[k] || 0) - u; });
     const totals = {

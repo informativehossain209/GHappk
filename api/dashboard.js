@@ -4,7 +4,7 @@ const {
   mapRoad, mapRoadPlan, mapRoadWeeklyPlan, bdtToday, bdtYesterday, weekdayOf, addDaysStr,
   safeErr, fetchAll, cyclePeriodForDate, cyclePeriodBounds, getDueTotals,
   computeProfit, computeBonusRangeSummary, getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement,
-  cpGroups, getCaseTotals, cpSplit
+  cpGroups, getCaseTotals, cpSplit, withUnits
 } = require('./_lib/db');
 
 // PERF-5 — only the columns the screens read
@@ -174,10 +174,16 @@ module.exports = async (req, res) => {
     //  GET /api/dashboard?action=sales-panel&scope=so&soId=<id>   one SO's sale (bonus pieces removed)
     //  GET /api/dashboard?action=sales-panel&scope=total          whole shop's sale (free/bonus pieces INCLUDED)
     //  Every product is listed in the same order as the product/inventory page (sort_order);
-    //  a product that was not sold shows 0. Columns: yesterday's stock · today's sale · stock now.
+    //  a product that was not sold shows 0. Columns: stock before the day · that day's sale · stock after.
+    //  v5.11 — &date=YYYY-MM-DD shows any PAST day (back dates) for every role; omitted = today.
+    //  Stock for a past day is rebuilt from today's stock minus every movement after that day.
     // ══════════════════════════════════════════════════════
     if (action === 'sales-panel') {
-      const today = bdtToday();
+      const realToday = bdtToday();
+      const _dq = String(req.query.date || '');
+      const today = (/^\d{4}-\d{2}-\d{2}$/.test(_dq) && _dq <= realToday) ? _dq : realToday;   // "today" below = the day being viewed
+      const isToday = today === realToday;
+      if (!isToday && (Date.parse(realToday) - Date.parse(today)) / 86400000 > 366) return res.json({ ok: false, error: 'সর্বোচ্চ ১ বছর আগের তারিখ দেখা যায়' });
       const scope = String(req.query.scope || 'so') === 'total' ? 'total' : 'so';
       const [pRes, sRes] = await Promise.all([
         supabase.from('products').select('*').order('sort_order').order('created_at'),
@@ -227,7 +233,19 @@ module.exports = async (req, res) => {
           (exRows || []).forEach(r => { const k = String(r.exch_product_id || ''); if (k) exchMap[k] = (exchMap[k] || 0) + num(r.exch_units); });
         }
       }
-      const dayMove = await getStockMovement(today);
+      let dayMove, afterMove = {};
+      if (isToday) dayMove = await getStockMovement(today);
+      else {
+        // movements of the viewed day and of every later day (warehouse view: buy/return in, give/point sale out)
+        const SIGN = { buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1, return_company: -1 };
+        const mv = await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units,date').gte('date', today).lte('date', realToday).in('type', Object.keys(SIGN)));
+        dayMove = {};
+        (mv || []).forEach(r => {
+          const k = String(r.product_id || ''); if (!k) return;
+          const v = SIGN[r.type] * num(r.total_units);
+          if (String(r.date).slice(0, 10) === today) dayMove[k] = (dayMove[k] || 0) + v; else afterMove[k] = (afterMove[k] || 0) + v;
+        });
+      }
 
       const list = products.map(p => {
         const pid = String(p.id);
@@ -239,14 +257,14 @@ module.exports = async (req, res) => {
           sold = Math.max(0, raw - bonusPieces);
         }
         const exch = Math.min(exchMap[pid] || 0, sold);
-        const cur = num(p.currentStock);
+        const cur = +(num(p.currentStock) - (afterMove[pid] || 0)).toFixed(4);   // stock at the END of the viewed day
         return {
           productId: p.id, productName: p.name || '', thumb: p.thumb || '', caseSize: num(p.caseSize) || 1, unitType: p.unitType || 'কেস',
           sold, bonusPieces, exchangeUnits: exch,
           prevStock: +(cur - (dayMove[pid] || 0)).toFixed(4), currentStock: cur
         };
       });
-      return res.json({ ok: true, scope, soId, sos: soList, date: today, list });
+      return res.json({ ok: true, scope, soId, sos: soList, date: today, isToday, list });
     }
 
     // ══════════════════════════════════════════════════════
@@ -324,7 +342,7 @@ module.exports = async (req, res) => {
       // ── Full sales visibility, split regular (DSR-given) vs SO's own
       //    point-sale, for any date range (AXIION §17) ──────────────
       const _csSo = {};
-      try { const { data: _pr } = await supabase.from('products').select('id,case_size'); (_pr || []).forEach(p => { _csSo[String(p.id)] = num(p.case_size) || 1; }); } catch (_) { }
+      try { const { data: _pr } = await supabase.from('products').select('id,case_size,unit_type'); (_pr || []).forEach(p => { _csSo[String(p.id)] = num(p.case_size) || 1; }); withUnits(_csSo, _pr); } catch (_) { }
       function buildSalesSplit(txList) {
         const regular = txList.filter(r => dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return'));
         const point   = txList.filter(r => r.srId === userId && (r.type === 'point_sale' || r.type === 'point_damage_return'));
@@ -563,7 +581,7 @@ module.exports = async (req, res) => {
       const mGivenU  = txMonth.filter(r => r.type === 'give').reduce((s, r) => s + num(r.totalUnits), 0);
       const mReturnU = txMonth.filter(r => r.type === 'return').reduce((s, r) => s + num(r.totalUnits), 0);
       const mPayAmt  = payMonth.reduce((s, r) => s + num(r.amount), 0);
-      const _csM = {}; (products || []).forEach(p => { _csM[String(p.id)] = num(p.caseSize) || 1; });
+      const _csM = {}; (products || []).forEach(p => { _csM[String(p.id)] = num(p.caseSize) || 1; }); withUnits(_csM, products);
       const mCP = cpGroups(txMonth, _csM, { given: ['give'], returned: ['return'] });   // v5.4: exact cases + pcs
 
       // ── V31 reconcile — today's given vs. sold-to-shops vs. still on

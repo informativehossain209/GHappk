@@ -1,5 +1,95 @@
 # Changelog
 
+## 5.12.0
+**Database: no change.** A new deploy runs `schema_fresh.sql` (full schema, unchanged since 5.11). Upgrading from 5.11.x: just redeploy, no SQL. API files: still **12** (new logic is one new action inside `sr-payments.js`).
+
+### বিক্রয় প্যানেল — green / red day-close tone
+- A day's sale is only reliable after the manager has taken the returns and closed that day's calculation (unsold stock can still come back and change the stock). The whole panel now shows that:
+  - 🟢 **Green** — a **SO is logged in** and every DSR of the people on screen is fully settled for that day (nothing left on the van, no pending cash / commission / discount / damage). Banner: "হিসাব সম্পন্ন — বিক্রয় চূড়ান্ত".
+  - 🔴 **Red** — the calculation is not finished (banner lists which DSR is still open and why: ভ্যানে মাল আছে / নগদ বাকি / কমিশন-ছাড় বাকি / ড্যামেজ বাকি), the status could not be checked, **or the viewer is any other role** (Owner / Manager / DSR). To let another role see green, edit the one-line `_SP_GREEN_ROLES` in `public/index.html`.
+- A new loading, sale or collection after the settlement re-opens the day (panel turns red again) until the manager settles it again.
+- Works for back dates too (the colour follows the date being viewed) and for each pick (one SO, or 🏪 whole shop).
+- API: `GET /api/sr-payments?action=day-status[&date=YYYY-MM-DD][&soId=]`.
+
+### SO dashboard — my sale and everyone's sale
+- New card **🏆 আজকের বিক্রয় — আমার ও সব SO-এর** on the SO home: every SO's net sale of today (his DSRs' give − return + his own point sale), my row on top, a total line, and a green ✅ / red ⏳ chip per SO showing whether that SO's day is closed. The card takes the tone of MY day.
+
+### ডিউ ক্যালেন্ডার — partial due in red
+- A due that remains after a **partial payment** is now **red** everywhere (it was orange): calendar day cell and dot, legend, entry list (red row with a red left edge), day pop-up, person pop-up, entry detail, shop due history, DSR collection lists.
+- The "আংশিক" tile is now **আংশিক বাকি** = money still due on partly-paid entries (before it showed the part already paid).
+- Fixed a stray `)` that made the amount colour invalid on partly-paid rows.
+
+## 5.11.0
+**Database:** one small change — new columns on `dsr_settlements`. A **new deploy** just runs `schema_fresh.sql` (already includes it). **Upgrading from 5.10.x:** run `migrations/002_v5_11.sql` once (safe to re-run; until you do, everything keeps working but the manager-cash total stays empty). API files: still **12** (no new file; new actions live inside `sr-payments.js` and `dashboard.js`).
+
+### Units everywhere (কেস / ডজন / কার্টুন / পলি)
+- Wherever a quantity or a total showed "কেস", it now uses the unit the owner chose in the product panel — slips/memos, DSR day boxes, shop ledger, order lists, forms, sales panel, reports.
+- Totals of mixed products are split per unit: `5 কেস · 3 ডজন · 2 পলি · 8 পিস` (server `cpSplit` now returns a `by` breakdown; old fields unchanged).
+
+### Product order
+- Every slip/memo, slip list and product-wise total follows the order the owner set in the product panel (sort order), not the order items were typed.
+
+### অনলাইন জমা slip — official format
+- Now an A4 spreadsheet-style statement (gridded table, oldest first, running total, bank / depot subtotals, words, signatures) instead of the 50 mm roll.
+- New **📊 Excel (.xlsx)** download (real formulas; falls back to CSV if the library cannot load).
+
+### Manager cash (Owner home)
+- New card **ম্যানেজারের কাছে নগদ**: cash each manager took from all DSRs, added together = what the owner will receive from the managers. Approved + pending shown separately; filter আজ / এই মাস / সব সময়. API: `GET /api/sr-payments?action=manager-cash`. Settlements made before this version are not attributed to a manager.
+
+### বিক্রয় প্যানেল — back dates
+- Date picker + ◀ ▶ + আজ for every role (up to 1 year back). Stock columns are rebuilt for that day. API: `sales-panel&date=YYYY-MM-DD`.
+
+## 5.10.0
+No database change — `schema_fresh.sql` is unchanged and is still the full schema for a new deploy (upgrading from 5.9.x needs no SQL). API files: still **12** (no new file; `transactions.js` only gained an optional `?type=` filter).
+
+### Home
+- The single scrolling info tile (notice · road duty · online deposit) stays on every role's home; the big online-deposit box is gone (full details only via ☰ → অনলাইন জমা).
+- **RADT (আজকের টার্গেট) is now one slim line** in the app's emerald theme instead of the tall purple box: `🎯 আজকের টার্গেট ........ N কেস · বাকি X কেস · Y দিন`.
+
+### ফেরত পণ্য (new, ☰ menu — Owner · Manager · SO, also a quick-action tile)
+- Pick a date or range (আজ / গতকাল / ৭ দিন / এই মাস or custom) → total returned value, slip count, product-wise totals, and every return slip grouped by date with DSR name, time, items and amount.
+- **🧾 স্লিপ** button on each return opens the return slip (memo) again. SO sees only his own + his DSRs' returns.
+- API: `GET /api/transactions?type=return&from=&to=[&soId=]`.
+
+### Return needs no approval
+- A Manager's **return** entry is saved straight away (no Owner-approval queue). Other manager entries (give, damage, payments, expense …) keep the approval flow.
+
+### দেওয়া / ফেরত / ড্যামেজ detail boxes
+- Each day is now one square box: **DSR name + date on top**, the slips (time, items) inside, and the **total as a filled, rounded block at the bottom** (green for দেওয়া).
+
+### Owner approvals page
+- **Pending approvals first** (newest on top, "সব অনুমোদন করুন" right there), then advance-salary requests, then the view-only orders list. Approved / rejected items sink to the very bottom — no more scrolling past them.
+
+## 5.9.0
+No database change — `schema_fresh.sql` is unchanged and is still the full schema for a new deploy (upgrading from 5.8.x needs no SQL). API files: still **12** (no API file touched).
+
+### Minimal home screen
+- **One scrolling info tile.** The important notice, today's online-deposit amount and the road duty no longer stack as three separate banners — they run one after another in a single slim ticker (SO: notice · road visit · deposit; DSR: notice · road duty; Manager: notice · deposit; Owner: deposit). If everything fits on one line it simply stays still.
+- **অনলাইন জমা moved into the ☰ menu** (Owner + Manager, under "প্রতিদিনের কাজ"). It opens the full panel — today/month totals, month history, and for the Owner **➕ নতুন জমা যোগ করুন** (still asks for the Owner PIN). The big deposit box is gone from the Owner home; only the amount scrolls in the ticker.
+- **কম স্টক সতর্কতা removed from the DSR page** (Owner, Manager and SO keep it).
+
+### Smaller header + tiles
+- Header logo/name bar and the date-time/section bar are both much shorter, so more fits on every role's page.
+- Home tiles (দেওয়া / ফেরত / বিক্রি / লাভ / পেমেন্ট / বাকি …), quick-action tiles, accordions, cards, the red DSR box and the report tiles have less height and padding.
+
+### Numbers never hide
+- Every amount in a tile (`.mv`, hero cards, today strip, DSR boxes) is measured against its box and shrunk until it fits; if a figure is still too wide at the smallest size it wraps to a second line instead of being cut off. Re-checked after every render, rotation and font load.
+
+## 5.8.0
+No database change — `schema_fresh.sql` is unchanged and is still the full schema for a new deploy. API files: still **12** (one extra read-only query inside `sr-payments.js`, no new route).
+
+### DSR লেনদেন boxes (DSR · SO · Owner · Manager)
+- "আগের বাকি" box renamed to **পূর্বের বাকি আদায়**.
+- New **red box on top**: the selected DSR's name + the total cash the system has received from him (all dates; the figure for the chosen period is shown under it). API `dsr-my-day` now returns `received: { total, period }`.
+- All boxes are shorter (one line, small caret) so the red box + the 8 boxes fit one phone screen. The "লেনদেনের বিস্তারিত" box is shrunk the same way.
+
+### Menu (☰) — all roles
+- Opens as a **half-width side panel** (about half the screen; the page stays visible and tapping outside closes it) instead of a full-screen cover.
+- Top: square **হোম** button with **লগ আউট** beside it; then the functions as one-per-row tiles.
+- Functions are **grouped, most-used first**: প্রতিদিনের কাজ (open) → টিম/হিসাব/দোকান → রিপোর্ট ও খরচ → সিস্টেম (password, notice, reset, dark mode). One group open at a time.
+- **DSR and SO home**: the box bar at the top of the home screen is gone. Those pages (DSR: শপ ডেলিভারি, বাকি আদায়, ড্যামেজ কালেকশন, বিক্রয় প্যানেল, বাকি/পেমেন্ট, পণ্য ক্যাটালগ, শপ নিবন্ধন · SO: বিক্রয়, আজকের মোট বিক্রয়, DSR লেনদেন, DSR বাকি, বিক্রয় হিসাব, স্টক, ক্যাটালগ) are now in the menu. The top bar shows which one is open; **হোম** returns to the DSR "লেনদেন" / SO "সারসংক্ষেপ".
+- Fixed a doubled emoji in the menu header role label.
+
 ## 5.7.0
 No database change — `schema_fresh.sql` is unchanged and is still the full schema for a new deploy. API files: still **12**.
 

@@ -1,5 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════
--- AXIION DMS v5.1 — FULL FRESH-INSTALL SCHEMA   (schema_fresh.sql)
+-- AXIION DMS v5.12 — FULL FRESH-INSTALL SCHEMA   (schema_fresh.sql)
+--   (v5.12 added no tables/columns — this is the same complete schema as v5.11)
 --
 --   ⚠  FOR A BRAND-NEW, EMPTY SUPABASE PROJECT ONLY.
 --   ⚠  This file DROPS and re-creates every table. It refuses to run if the
@@ -883,9 +884,14 @@ CREATE TABLE IF NOT EXISTS dsr_settlements (
   cash_received  NUMERIC(14,4) DEFAULT 0,
   note           TEXT          DEFAULT '',
   created_by     TEXT          DEFAULT '',
-  created_at     TIMESTAMPTZ   DEFAULT NOW()
+  created_at     TIMESTAMPTZ   DEFAULT NOW(),
+  -- v5.11 — who actually took the cash from the DSR ('manager' or 'owner'); powers the Owner's "cash with managers" total
+  received_by_id   TEXT        DEFAULT '',
+  received_by_name TEXT        DEFAULT '',
+  received_by_role TEXT        DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_settle_dsr_date ON dsr_settlements(dsr_id, date);
+CREATE INDEX IF NOT EXISTS idx_settle_recv ON dsr_settlements(received_by_role, received_by_id, date);
 ALTER TABLE dsr_settlements ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   CREATE POLICY "srv_dsr_settlements" ON dsr_settlements FOR ALL TO service_role USING (true) WITH CHECK (true);

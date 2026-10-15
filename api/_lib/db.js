@@ -703,12 +703,29 @@ async function getSrSalesTotals(from, to) {
 // case size, so the answer is exact (never a bare total-piece count).
 function cpSplit(unitsByProduct, csMap) {
   let cases = 0, pcs = 0;
+  // v5.11 — per-unit-type breakdown. A shop can sell কেস, ডজন, কার্টুন and পলি
+  // products together; "5 কেস" must not swallow the ডজন / পলি packs. The unit
+  // name of each product comes from csMap.__ut (see withUnits) — when it is not
+  // supplied the old cases + pcs result is returned unchanged.
+  const ut = (csMap && csMap.__ut) || null, by = {};
   Object.keys(unitsByProduct || {}).forEach(k => {
     const cs = Math.max(1, Math.round(num((csMap || {})[k])) || 1);
     const u  = Math.max(0, Math.round(num(unitsByProduct[k])));
-    cases += Math.floor(u / cs); pcs += u % cs;
+    const c = Math.floor(u / cs);
+    cases += c; pcs += u % cs;
+    if (ut && c > 0) { const n = ut[k] || 'কেস'; by[n] = (by[n] || 0) + c; }
   });
-  return { cases, pcs };
+  const out = { cases, pcs };
+  if (ut) out.by = Object.keys(by).map(n => ({ unit: n, cases: by[n] }));
+  return out;
+}
+// attach the product → unit-name map to a case-size map (non-enumerable, so
+// Object.keys / JSON of the map itself never changes)
+function withUnits(csMap, products) {
+  const ut = {};
+  (products || []).forEach(p => { ut[String(p.id)] = String(p.unit_type || p.unitType || 'কেস'); });
+  Object.defineProperty(csMap, '__ut', { value: ut, enumerable: false, configurable: true });
+  return csMap;
 }
 // rows: [{type, productId|product_id, totalUnits|total_units}]  groups: { name: [types…] }
 function cpGroups(rows, csMap, groups) {
@@ -725,9 +742,9 @@ async function getCaseTotals(from, to, groups, srId) {
   const types = Array.from(new Set([].concat.apply([], Object.keys(groups).map(g => groups[g]))));
   const [tx, pr] = await Promise.all([
     fetchAll(() => { let q = supabase.from('transactions').select('product_id,type,total_units').in('type', types).gte('date', from).lte('date', to); if (srId) q = q.eq('sr_id', srId); return q; }),
-    fetchAll(() => supabase.from('products').select('id,case_size'))
+    fetchAll(() => supabase.from('products').select('id,case_size,unit_type'))
   ]);
-  const cs = {}; pr.forEach(p => { cs[String(p.id)] = num(p.case_size) || 1; });
+  const cs = {}; pr.forEach(p => { cs[String(p.id)] = num(p.case_size) || 1; }); withUnits(cs, pr);
   return cpGroups(tx, cs, groups);
 }
 
@@ -1002,5 +1019,5 @@ module.exports = {
   getSalesSummary, getProfitExtras, getProfitRules, computeProfit, DEFAULT_PROFIT_RULES,
   getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement,
   auditLog, idemRun, blockNegativeStock,
-  cpSplit, cpGroups, getCaseTotals
+  cpSplit, cpGroups, getCaseTotals, withUnits
 };
