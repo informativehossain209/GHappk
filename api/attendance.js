@@ -577,6 +577,22 @@ module.exports = async (req, res) => {
       if (sumAmt > cAmt + 0.5)
         return res.json({ ok: false, error: 'SO-দের টাকার টার্গেটের যোগফল সর্বমোট টাকার টার্গেট ছাড়িয়ে গেছে' });
 
+      // v5.14 — SKU (product) targets, in cases. Saved together with the plan;
+      // their sum may never go above the company's total box target.
+      const prodRows = Array.isArray(d.products) ? d.products : null;
+      let sumProd = 0;
+      if (prodRows) {
+        if (prodRows.some(x => !x.productId || !(Number(x.qty) >= 0)))
+          return res.json({ ok: false, error: 'পণ্যের টার্গেটে ভুল সংখ্যা আছে' });
+        sumProd = prodRows.reduce((t, x) => t + (Number(x.qty) || 0), 0);
+        if (sumProd > cBox + 0.0001)
+          return res.json({ ok: false, error: 'পণ্যওয়ারি টার্গেটের যোগফল (' + sumProd + ') সর্বমোট বক্স টার্গেট (' + cBox + ') ছাড়িয়ে গেছে' });
+        const { data: plist, error: plErr } = await supabase.from('products').select('id');
+        if (plErr) throw plErr;
+        const okIds = new Set((plist || []).map(x => String(x.id)));
+        if (prodRows.some(x => !okIds.has(String(x.productId)))) return res.json({ ok: false, error: 'অজানা পণ্য' });
+      }
+
       // only real SOs may receive a share
       const { data: sos, error: sosErr } = await supabase.from('srs').select('id,name').eq('role', 'so');
       if (sosErr) throw sosErr;
@@ -591,47 +607,16 @@ module.exports = async (req, res) => {
         })));
       const { error } = await supabase.from('targets').upsert(rows, { onConflict: 'user_key,period' });
       if (error) return res.json({ ok: false, error: _boxMigrationHint(error) });
-      return res.json({ ok: true, saved: rows.length, allocatedBoxes: sumBox, allocatedAmount: sumAmt });
+      if (prodRows && prodRows.length) {
+        const pRows = prodRows.map(x => ({ period, product_id: String(x.productId), target_qty: Number(x.qty) || 0, set_by: by, set_at: at }));
+        const { error: pErr } = await supabase.from('product_targets').upsert(pRows, { onConflict: 'period,product_id' });
+        if (pErr) throw pErr;
+      }
+      return res.json({ ok: true, saved: rows.length, allocatedBoxes: sumBox, allocatedAmount: sumAmt, allocatedProducts: sumProd });
     }
 
-    // POST ?action=target-split-even — OWNER ONLY. Convenience: splits the
-    // company total (boxes AND money) equally across every SO in one tap.
-    // Real-number editing per SO (target-split-save) is the normal way.
-    if (req.method === 'POST' && action === 'target-split-even') {
-      const d = req.body || {};
-      if ((d.requesterRole || '') !== 'owner') {
-        return res.json({ ok: false, error: 'শুধুমাত্র মালিক এই কাজ করতে পারবেন' });
-      }
-      if (!(await _verifyOwnerPin(d.ownerPin))) {
-        return res.json({ ok: false, error: 'ভুল Owner PIN' });
-      }
-      const period = String(d.period || '');
-      if (!/^\d{4}-\d{2}$/.test(period)) return res.json({ ok: false, error: 'ভুল ইনপুট' });
-
-      const { data: sos, error: sosErr } = await supabase.from('srs').select('id,name').eq('role', 'so');
-      if (sosErr) throw sosErr;
-      const soList = sos || [];
-      if (!soList.length) return res.json({ ok: false, error: 'কোনো SO পাওয়া যায়নি' });
-
-      const { data: companyRow, error: cErr } = await supabase.from('targets').select('target_amount,target_boxes')
-        .eq('user_key', 'COMPANY_TOTAL').eq('period', period).maybeSingle();
-      if (cErr) return res.json({ ok: false, error: _boxMigrationHint(cErr) });
-      let totalAmt = Number(d.totalAmount), totalBox = Number(d.totalBoxes);
-      if (!isFinite(totalAmt) || totalAmt < 0 || d.totalAmount === undefined) totalAmt = companyRow ? Number(companyRow.target_amount) : 0;
-      if (!isFinite(totalBox) || totalBox < 0 || d.totalBoxes === undefined)  totalBox = companyRow ? Number(companyRow.target_boxes) : 0;
-      if (!(totalAmt > 0) && !(totalBox > 0)) return res.json({ ok: false, error: 'আগে সর্বমোট টার্গেট (বক্স/টাকা) সেট করুন' });
-
-      const n = soList.length;
-      const shareAmt = Math.floor((totalAmt / n) * 100) / 100;
-      const shareBox = Math.floor((totalBox / n) * 100) / 100;
-      const rows = soList.map(x => ({
-        user_key: x.id, period, user_name: x.name, role: 'so',
-        target_amount: shareAmt, target_boxes: shareBox, set_by: d.setBy || '', set_at: now_()
-      }));
-      const { error } = await supabase.from('targets').upsert(rows, { onConflict: 'user_key,period' });
-      if (error) return res.json({ ok: false, error: _boxMigrationHint(error) });
-      return res.json({ ok: true, share: shareAmt, shareBoxes: shareBox, count: n });
-    }
+    // (v5.14) target-split-even was removed: SO targets are never split
+    // equally by the system — the owner types each SO's own figure.
 
     // GET ?action=target-get&userKey=&period=YYYY-MM — one person's target + live progress
     if (req.method === 'GET' && action === 'target-get') {
@@ -814,9 +799,22 @@ module.exports = async (req, res) => {
       }
       const productId = String(d.productId || ''), period = String(d.period || '');
       if (!productId || !/^\d{4}-\d{2}$/.test(period)) return res.json({ ok: false, error: 'ভুল ইনপুট' });
+      const newQty = Number(d.targetQty) || 0;
+      if (newQty < 0) return res.json({ ok: false, error: 'টার্গেট ঋণাত্মক হতে পারে না' });
+      {
+        const { data: cRow0 } = await supabase.from('targets').select('target_boxes')
+          .eq('user_key', 'COMPANY_TOTAL').eq('period', period).maybeSingle();
+        const totalBox = cRow0 ? Number(cRow0.target_boxes) || 0 : 0;
+        const { data: others, error: oErr } = await supabase.from('product_targets').select('product_id,target_qty').eq('period', period);
+        if (oErr) throw oErr;
+        const sumOthers = (others || []).filter(r => String(r.product_id) !== productId).reduce((t, r) => t + (Number(r.target_qty) || 0), 0);
+        if (totalBox <= 0 && newQty > 0) return res.json({ ok: false, error: 'আগে সর্বমোট বক্স টার্গেট সেট করুন' });
+        if (sumOthers + newQty > totalBox + 0.0001)
+          return res.json({ ok: false, error: 'পণ্যওয়ারি টার্গেটের যোগফল (' + (sumOthers + newQty) + ') সর্বমোট বক্স টার্গেট (' + totalBox + ') ছাড়িয়ে যাবে' });
+      }
       const row = {
         period, product_id: productId,
-        target_qty: Number(d.targetQty) || 0,
+        target_qty: newQty,
         set_by: d.setBy || '', set_at: now_()
       };
       const { error } = await supabase.from('product_targets').upsert(row, { onConflict: 'period,product_id' });

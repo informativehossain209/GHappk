@@ -1,5 +1,67 @@
 # Changelog
 
+## 5.15.0
+**Database: no change** (schema_fresh.sql / schema.sql unchanged). API files: still **12**.
+
+### Home pages redesigned
+- **DSR home:** RADT → scrolling info panel → low-stock alert → target panel (my %, rank, my SO's %) → my team's DSR target names → the 10 transaction boxes → extras.
+- **SO home:** RADT → info panel → low-stock alert → my target → every SO's fill % → SO due (with আজ / এই মাস / রেঞ্জ) → full DSR transaction panel (10 boxes) → 9×2 today/this-month grid → DSR & SO performance, top 50 shops, SKU ranking, DSR/SO due list → "আমার আরও তথ্য".
+- **Owner / Manager home:** RADT first, then info panel, low stock, SO fill %, sale tile; new 9×2 grid (given · return · sale · damage · commission · discount · due · due taken · payment, today | this month); performance / top 50 / SKU ranking / due list kept.
+
+### Menus (exact order)
+- **DSR:** delivery · damage collection · due collection · van return product · due calendar · presents · products · sales target · shop registration · group chat · important numbers · my password · dark mode.
+- **SO:** order & van loading · today's sale · damage · production fold (placeholder) · product catalog & stock · online deposit slip · expenses slip · sell · sales target · sales calculation · group chat · important numbers · my password · dark mode.
+
+### API (inside existing files)
+- `sr-payments?action=dsr-my-day` accepts `soId` with `dsrId=all` (that SO's DSRs only).
+- `dashboard?action=sr-perf` now also returns each DSR's `soId`.
+
+## 5.14.0
+**Database: no change.** API files: still **12** (changes are inside `attendance.js`).
+
+### Home — RADT line + SO fill box
+- The slim target line now reads `🎯 আজকের টার্গেট ........ RADT = N কেস` (with the remaining cases and days after it).
+- New box right under it on the **Owner and Manager** home: every SO's target fill-up % in the same three colours as the target page (🔴 below 60 · 🟡 60–99 · 🟢 100+). Tap → the full সেলস টার্গেট page.
+
+### DSR — performance tab
+- New **📈 আমার পারফরম্যান্স** tile on the DSR home (and in the ☰ menu): his sale this cycle, his share of the SO target with a ring, his rank among DSRs, and his SO's box target progress.
+
+### Targets — set by hand, never split equally
+- The owner sets the **total** (boxes + money), then types **each SO's own target** and **each SKU's cases**. The "equal split" button and the `target-split-even` API are removed.
+- Hard limits (checked live on screen and again on the server): SO boxes ≤ total boxes · SO money ≤ total money · **sum of all SKU cases ≤ total boxes**. One 💾 save stores the total, the SOs and the SKUs together (Owner PIN).
+- `product-target-set` also refuses a SKU figure that would push the SKU sum above the total (set the total first).
+- The per-SKU cards below are now read-only; they are edited in the setup box above.
+
+### Login
+- After any login (new PIN, first-login PIN setup, or a normal login after logout) the app always opens on that role's **home dashboard** — never on the page or tab that was open before. Logout also resets it.
+
+## 5.13.0
+**Database: no change.** API files: still **12** (changes are inside `dashboard.js` and `sr-payments.js`).
+
+### বিক্রয় প্যানেল — one tile + pop-up, pieces only
+- Owner, Manager and SO home now show **one tile**: today's whole-shop sale in **pieces, free/bonus included**. Tap it → pop-up with a single picker (🏪 মোট দোকান · each SO · each DSR) and a date row (◀ date ▶). Everything in the pop-up (stock before, sale, current stock) is **pieces only**.
+- SO stock tab and SO low-stock list also show **pieces only** (no cases).
+- API: `sales-panel&scope=dsr&dsrId=` (one DSR's own sale); `sales-panel` now also returns the DSR list.
+
+### DSR লেনদেন panel
+- The DSR name and the date are now **one slim row**; আজ / রেঞ্জ chips sit in the title line.
+- Top red box now shows the DSR's **total unpaid due** (tap → every shop that owes). The **পূর্বের বাকি আদায়** box now shows what the DSR actually **collected** of old dues in that period.
+- All boxes are slightly taller, and every box's details use the same polished day-box as দেওয়া (DSR + date on top, rows, filled total at the bottom).
+- New box **🛒 পয়েন্ট সেল** (shows 0 when none): every slip, shop, product and the total money. The cash box notes that this money is collected from the manager/owner and handed to accounts separately (the DSR settlement math itself is unchanged).
+
+### Point sale — always booked on a DSR
+- Owner/Manager choose **🚚 DSR-এর নামে** or **🏪 দোকানের নামে**. For a shop, the sale goes to the DSR assigned to that shop (if none is assigned, a DSR must be picked). The shop ledger keeps working (shop id is saved on the sale).
+- The sale counts in that DSR's SO sale, the sales panel, day-status and targets.
+
+### Advance payment in the top ticker
+- Owner + Manager: pending advance requests scroll in **red**, approved ones (last 7 days) in **green**.
+
+### Adaptive numbers everywhere
+- Every tile figure (home tiles, nine boxes, hero cards, accordion totals, the new sale tile and any other big bold amount) now shrinks to fit its box instead of being cut off or spilling out; grid/flex tiles can no longer be stretched by a long number.
+
+### Van load (DSR)
+- The DSR no longer has an "অর্ডার ও গাড়ি লোড" menu entry. When he opens the **delivery (দোকান) panel**, a pending load pops up in a window: confirm "সম্পন্ন" or edit quantities; then the stock is added to his hand.
+
 ## 5.12.0
 **Database: no change.** A new deploy runs `schema_fresh.sql` (full schema, unchanged since 5.11). Upgrading from 5.11.x: just redeploy, no SQL. API files: still **12** (new logic is one new action inside `sr-payments.js`).
 

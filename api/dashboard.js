@@ -112,7 +112,7 @@ module.exports = async (req, res) => {
         target = Math.round(target * 100) / 100;
         return {
           srId: id, name: p.name || '', role: p.role, area: p.area || '', thumb: p.thumb || '',
-          displayNo: p.display_no, soName: p.so_name || '',
+          displayNo: p.display_no, soName: p.so_name || '', soId: String(p.so_id || ''),
           units: own[id] ? own[id].units : 0,
           achieved, target,
           pct: target > 0 ? Math.round((achieved / target) * 1000) / 10 : null,
@@ -184,7 +184,7 @@ module.exports = async (req, res) => {
       const today = (/^\d{4}-\d{2}-\d{2}$/.test(_dq) && _dq <= realToday) ? _dq : realToday;   // "today" below = the day being viewed
       const isToday = today === realToday;
       if (!isToday && (Date.parse(realToday) - Date.parse(today)) / 86400000 > 366) return res.json({ ok: false, error: 'সর্বোচ্চ ১ বছর আগের তারিখ দেখা যায়' });
-      const scope = String(req.query.scope || 'so') === 'total' ? 'total' : 'so';
+      const _sc = String(req.query.scope || 'so'), scope = (_sc === 'total' || _sc === 'dsr') ? _sc : 'so';   // v5.13: 'dsr' = one DSR's own sale
       const [pRes, sRes] = await Promise.all([
         supabase.from('products').select('*').order('sort_order').order('created_at'),
         supabase.from('srs').select('*').order('created_at')
@@ -193,13 +193,18 @@ module.exports = async (req, res) => {
       const products = (pRes.data || []).map(mapProduct);
       const staff = (sRes.data || []).map(mapSR);
       const soList = staff.filter(x => x.role === 'so').map(x => ({ id: x.id, name: x.name }));
+      const dsrList = staff.filter(x => (x.role || 'dsr') === 'dsr').map(x => ({ id: x.id, name: x.name, soId: String(x.soId || '') }));
 
       let soId = String(req.query.soId || '');
       if (scope === 'so' && !soId && role === 'so') soId = String(userId || '');
       if (scope === 'so' && !soId && soList.length) soId = soList[0].id;
 
       let ids = null, dsrIds = [];
-      if (scope === 'so') {
+      if (scope === 'dsr') {
+        const one = String(req.query.dsrId || '');
+        if (!one) return res.json({ ok: false, error: 'DSR বাছাই করুন' });
+        dsrIds = [one]; ids = [one]; soId = '';
+      } else if (scope === 'so') {
         dsrIds = staff.filter(x => String(x.soId || '') === soId && x.role !== 'so').map(x => x.id);
         ids = [soId, ...dsrIds];
       }
@@ -212,9 +217,9 @@ module.exports = async (req, res) => {
       const net = {};
       rows.forEach(r => {
         const pid = String(r.productId || ''); if (!pid) return;
-        if (scope === 'so') {
+        if (scope === 'so' || scope === 'dsr') {
           const isDsrLeg  = dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return');
-          const isSoPoint = r.srId === soId && (r.type === 'point_sale' || r.type === 'point_damage_return');
+          const isSoPoint = ((soId && r.srId === soId) || dsrIds.indexOf(r.srId) !== -1) && (r.type === 'point_sale' || r.type === 'point_damage_return');   // v5.13: point sale is booked on a DSR
           if (!isDsrLeg && !isSoPoint) return;
         }
         net[pid] = (net[pid] || 0) + ((r.type === 'give' || r.type === 'point_sale') ? num(r.totalUnits) : -num(r.totalUnits));
@@ -223,7 +228,7 @@ module.exports = async (req, res) => {
       // damage swapped for product (shown separately, same as the SO tab always did)
       const exchMap = {};
       {
-        const exIds = scope === 'so' ? dsrIds : null;
+        const exIds = scope !== 'total' ? dsrIds : null;
         if (!exIds || exIds.length) {
           const exRows = await fetchAll(() => {
             let q = supabase.from('damage_collections').select('exch_product_id,exch_units').eq('date', today).eq('resolution', 'exchange');
@@ -251,7 +256,7 @@ module.exports = async (req, res) => {
         const pid = String(p.id);
         const raw = Math.max(0, net[pid] || 0);
         let sold = raw, bonusPieces = 0;
-        if (scope === 'so') {
+        if (scope !== 'total') {
           const cs = num(p.caseSize) || 1, req_ = num(p.bonusCasesReq) || 1, free = num(p.bonusFreeUnits) || 0;
           bonusPieces = Math.floor(Math.floor(raw / cs) / req_) * free;
           sold = Math.max(0, raw - bonusPieces);
@@ -264,7 +269,7 @@ module.exports = async (req, res) => {
           prevStock: +(cur - (dayMove[pid] || 0)).toFixed(4), currentStock: cur
         };
       });
-      return res.json({ ok: true, scope, soId, sos: soList, date: today, isToday, list });
+      return res.json({ ok: true, scope, soId, dsrId: scope === 'dsr' ? dsrIds[0] : '', sos: soList, dsrs: dsrList, date: today, isToday, list });
     }
 
     // ══════════════════════════════════════════════════════
@@ -345,7 +350,7 @@ module.exports = async (req, res) => {
       try { const { data: _pr } = await supabase.from('products').select('id,case_size,unit_type'); (_pr || []).forEach(p => { _csSo[String(p.id)] = num(p.case_size) || 1; }); withUnits(_csSo, _pr); } catch (_) { }
       function buildSalesSplit(txList) {
         const regular = txList.filter(r => dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return'));
-        const point   = txList.filter(r => r.srId === userId && (r.type === 'point_sale' || r.type === 'point_damage_return'));
+        const point   = txList.filter(r => (r.srId === userId || dsrIds.indexOf(r.srId) !== -1) && (r.type === 'point_sale' || r.type === 'point_damage_return'));   // v5.13: point sale is booked on a DSR
         const regularRevenue = regular.filter(r => r.type === 'give').reduce((s, r) => s + num(r.totalRevenue), 0)
                               - regular.filter(r => r.type === 'return').reduce((s, r) => s + num(r.totalRevenue), 0);
         const pointRevenue   = point.filter(r => r.type === 'point_sale').reduce((s, r) => s + num(r.totalRevenue), 0)
@@ -452,7 +457,7 @@ module.exports = async (req, res) => {
       const todayProdMap = {};
       txToday.forEach(r => {
         const isDsrLeg  = dsrIds.indexOf(r.srId) !== -1 && (r.type === 'give' || r.type === 'return');
-        const isSoPoint = r.srId === userId && (r.type === 'point_sale' || r.type === 'point_damage_return');
+        const isSoPoint = (r.srId === userId || dsrIds.indexOf(r.srId) !== -1) && (r.type === 'point_sale' || r.type === 'point_damage_return');
         if (!isDsrLeg && !isSoPoint) return;
         const pid = r.productId; if (!pid) return;
         if (!todayProdMap[pid]) {

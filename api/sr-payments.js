@@ -516,9 +516,11 @@ async function _handle(req, res, action) {
       let dsrIdsAll = [];
       const nameById = {};
       {
-        const { data: srAll } = await supabase.from('srs').select('id,name,role');
+        const { data: srAll } = await supabase.from('srs').select('id,name,role,so_id');
         (srAll || []).forEach(r => { nameById[String(r.id)] = r.name || ''; });
-        if (isAll) dsrIdsAll = (srAll || []).filter(r => (r.role || 'dsr') === 'dsr').map(r => String(r.id));
+        // v5.15 — optional soId=<SO> narrows 'all' to that SO's own DSRs (SO home grid)
+        const _soScope = String(req.query.soId || '');
+        if (isAll) dsrIdsAll = (srAll || []).filter(r => (r.role || 'dsr') === 'dsr' && (!_soScope || String(r.so_id || '') === _soScope)).map(r => String(r.id));
       }
       const sid = isAll ? 'all' : String(dsrId);
       const ids = isAll ? dsrIdsAll : [sid];
@@ -530,7 +532,7 @@ async function _handle(req, res, action) {
           .in('sr_id', ids).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
         fetchAll(() => supabase.from('due_calendar').select('id,dsr_id,shop_id,shop_name,due_date,amount,paid_amount,created_at')
           .eq('client_type', 'shop').in('dsr_id', ids).gte('due_date', from).lte('due_date', to)),
-        fetchAll(() => supabase.from('due_collections').select('dsr_id,shop_id,shop_name,date,amount,created_at')
+        fetchAll(() => supabase.from('due_collections').select('due_id,dsr_id,shop_id,shop_name,date,amount,created_at')
           .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
         fetchAll(() => supabase.from('damage_collections').select('*')
           .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
@@ -541,7 +543,7 @@ async function _handle(req, res, action) {
       ]);
 
       // shop names for the commission / discount history
-      const shopIds = [...new Set((txs || []).filter(r => r.type === 'dsr_sale' && r.shop_id).map(r => String(r.shop_id)))];
+      const shopIds = [...new Set((txs || []).filter(r => (r.type === 'dsr_sale' || r.type === 'point_sale') && r.shop_id).map(r => String(r.shop_id)))];
       const shopName = {}, shopPhone = {};
       {
         const allIds = [...new Set([...shopIds, ...(dmgCols || []).filter(r => r.shop_id).map(r => String(r.shop_id)),
@@ -612,7 +614,24 @@ async function _handle(req, res, action) {
           if (initial > 0.004) { cashAtSale += initial; cashSales.push({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.due_date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(initial) }); }
         });
       }
-      const dueCollected = (dueCols || []).reduce((a, r) => a + num(r.amount), 0);
+      // v5.14.1 — 24-HOUR RULE. Money taken for a sale within 24 h of that sale is CASH
+      // (it joins "আজকের বিক্রয়"); money taken after 24 h is an OLD DUE collected.
+      // The total cash in hand is unchanged — only which line it is listed under.
+      const _H24 = 24 * 3600 * 1000;
+      const colDueIds = [...new Set((dueCols || []).map(r => String(r.due_id || '')).filter(Boolean))];
+      const dueCreated = {};
+      for (let i = 0; i < colDueIds.length; i += 80) {
+        const { data: dcRows } = await supabase.from('due_calendar').select('id,created_at').in('id', colDueIds.slice(i, i + 80));
+        (dcRows || []).forEach(r => { dueCreated[String(r.id)] = r.created_at || ''; });
+      }
+      const colWithin24 = (r) => { const c = Date.parse(dueCreated[String(r.due_id || '')] || ''), t = Date.parse(r.created_at || ''); return isFinite(c) && isFinite(t) && (t - c) <= _H24; };
+      const colsFast = (dueCols || []).filter(colWithin24), colsOld = (dueCols || []).filter(r => !colWithin24(r));
+      colsFast.forEach(r => {
+        cashAtSale += num(r.amount);
+        cashSales.push({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(r.amount) });
+      });
+      cashSales.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      const dueCollected = colsOld.reduce((a, r) => a + num(r.amount), 0);
       const damageMoney = (dmgCols || []).filter(r => r.resolution === 'money').reduce((a, r) => a + num(r.refund_amt), 0);
       const damageExchange = (dmgCols || []).filter(r => r.resolution === 'exchange').reduce((a, r) => a + Math.min(num(r.exch_value), num(r.damaged_value)), 0);
 
@@ -621,16 +640,16 @@ async function _handle(req, res, action) {
         const g = {};
         (txs || []).filter(r => r.type === type).forEach(r => {
           const k = String(r.tx_id || r.created_at);
-          const o = g[k] = g[k] || { date: String(r.date || '').slice(0, 10), total: 0, items: [], createdAt: '', dsrName: nameById[String(r.sr_id)] || '' };
+          const o = g[k] = g[k] || { date: String(r.date || '').slice(0, 10), total: 0, items: [], createdAt: '', dsrName: nameById[String(r.sr_id)] || '', shopName: r.shop_id ? (shopName[String(r.shop_id)] || '') : '', shopPhone: r.shop_id ? (shopPhone[String(r.shop_id)] || '') : '' };
           o.total += num(r.total_revenue);
           // the slip's time = when the whole slip was saved (latest row of that tx_id)
           if (r.created_at && String(r.created_at) > o.createdAt) o.createdAt = String(r.created_at);
           o.items.push({ productName: r.product_name || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units), value: _m2(r.total_revenue) });
         });
-        return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, dsrName: o.dsrName, total: _m2(o.total), items: o.items }))
+        return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, dsrName: o.dsrName, shopName: o.shopName, shopPhone: o.shopPhone, total: _m2(o.total), items: o.items }))
           .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
       };
-      const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage');
+      const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage'), pointSlips = groupTx('point_sale');
       const sumV = (arr) => _m2(arr.reduce((a, g) => a + g.total, 0));
 
       const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
@@ -653,6 +672,10 @@ async function _handle(req, res, action) {
         txShops: Object.fromEntries(shopIds.map(id => [id, { name: shopName[id] || '', phone: shopPhone[id] || '' }])),
         given:  { total: sumV(given),    slips: given },
         ret:    { total: sumV(returned), slips: returned },
+        // v5.13 — point sale booked on this DSR (sold by the manager / owner; the DSR collects the money from them)
+        pointSale: { total: sumV(pointSlips), slips: pointSlips },
+        // v5.13 — every unpaid due the DSR holds (this period + all earlier) — the red top box
+        dueAll: { total: _m2(sumL(todayDueLines) + sumL(prevDueLines)) },
         damage: {
           total: damageTotal,
           vanDamage: { total: sumV(vanDamage), slips: vanDamage },
@@ -673,7 +696,7 @@ async function _handle(req, res, action) {
           cashAtSale: _m2(cashAtSale), dueCollected: _m2(dueCollected), damageMoneyPaid: _m2(damageMoney),
           inHand: cashInHand, handedOver, stillToHandOver: _m2(cashInHand - handedOver),
           saleLines: cashSales,
-          dueLines: (dueCols || []).map(r => ({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(r.amount) })),
+          dueLines: colsOld.map(r => ({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(r.amount) })),
           damageLines: (dmgCols || []).filter(r => r.resolution === 'money' && num(r.refund_amt) > 0)
             .map(r => ({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', productName: r.product_name || '', amount: _m2(r.refund_amt) }))
         }
@@ -1002,6 +1025,7 @@ async function _handle(req, res, action) {
           let owner = null;
           if ((r.type === 'give' || r.type === 'return') && dsrToSo[sid]) owner = dsrToSo[sid];
           else if ((r.type === 'point_sale' || r.type === 'point_damage_return') && soIds.has(sid)) owner = sid;
+          else if ((r.type === 'point_sale' || r.type === 'point_damage_return') && dsrToSo[sid]) owner = dsrToSo[sid];   // v5.13: point sale is booked on a DSR
           if (owner === null) return;
           saleBySo[owner] += (plus ? 1 : -1) * num(r.total_revenue);
         });
