@@ -76,13 +76,16 @@ module.exports = async (req, res) => {
       const { start, end } = cyclePeriodBounds(period);
       const [srRes, tgRes, totals] = await Promise.all([
         supabase.from('srs').select('id,name,role,so_id,so_name,thumb,area,display_no').in('role', ['dsr', 'so']),
-        supabase.from('targets').select('user_key,target_amount').eq('period', period),
+        supabase.from('targets').select('user_key,target_amount,target_boxes').eq('period', period),
         getSrSalesTotals(start, end)       // PERF-3: summed in Postgres
       ]);
+      // v5.16 — same box maths as the SO target page, so a DSR's % and his SO's % are measured the same way
+      let _st = { bySo: {}, byId: {} };
+      try { _st = await require('./attendance')._targetStats(period); } catch (e) {}
       if (srRes.error) throw srRes.error;
       const people = srRes.data || [];
-      const tMap = {};
-      (tgRes.data || []).forEach(t => { tMap[String(t.user_key)] = num(t.target_amount); });
+      const tMap = {}, tBox = {};
+      (tgRes.data || []).forEach(t => { tMap[String(t.user_key)] = num(t.target_amount); tBox[String(t.user_key)] = num(t.target_boxes); });
 
       const own = {};   // sr_id → { rev, units }
       Object.keys(totals).forEach(id => {
@@ -110,12 +113,20 @@ module.exports = async (req, res) => {
         }
         achieved = Math.round(achieved * 100) / 100;
         target = Math.round(target * 100) / 100;
+        // boxes (the company's real measure) — SO: own + his DSRs · DSR: own, against his share of the SO box target
+        let boxA, boxT;
+        if (p.role === 'so') { boxA = (_st.bySo[id] || {}).boxes || 0; boxT = tBox[id] || 0; }
+        else { boxA = (_st.byId[id] || {}).boxes || 0; const sk = String(p.so_id || ''); const n2 = (dsrsBySo[sk] || []).length || 1; boxT = sk ? (tBox[sk] || 0) / n2 : 0; }
+        boxA = Math.round(boxA * 100) / 100; boxT = Math.round(boxT * 100) / 100;
+        const pctMoney = target > 0 ? Math.round((achieved / target) * 1000) / 10 : null;
+        const pctBoxes = boxT > 0 ? Math.round((boxA / boxT) * 1000) / 10 : null;
         return {
+          achievedBoxes: boxA, targetBoxes: boxT, pctBoxes, pctMoney, basis: boxT > 0 ? 'boxes' : 'money',
           srId: id, name: p.name || '', role: p.role, area: p.area || '', thumb: p.thumb || '',
           displayNo: p.display_no, soName: p.so_name || '', soId: String(p.so_id || ''),
           units: own[id] ? own[id].units : 0,
           achieved, target,
-          pct: target > 0 ? Math.round((achieved / target) * 1000) / 10 : null,
+          pct: boxT > 0 ? pctBoxes : pctMoney,   // same primary basis as the SO's own % on the target page
           remaining: Math.max(0, target - achieved)
         };
       });

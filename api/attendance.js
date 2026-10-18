@@ -1259,3 +1259,6 @@ function mapSalarySettings(r) {
     setBy: r.set_by || '', setAt: r.set_at
   };
 }
+
+// v5.16 — shared with dashboard.js (sr-perf) so DSR % and SO % use the very same box/money maths
+module.exports._targetStats = _targetStats;

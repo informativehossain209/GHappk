@@ -97,7 +97,7 @@ async function _buildShopLedger(shopId) {
   const [txRows, dueRows, colRows, dmgRows] = await Promise.all([
     fetchAll(() => supabase.from('transactions')
       .select('id,tx_id,type,date,created_at,sr_name,slip_no,total_units,total_revenue,commission_amt,discount_amt,note')
-      .eq('shop_id', sid).in('type', ['dsr_sale', 'point_sale', 'point_damage_return'])),
+      .eq('shop_id', sid).in('type', ['dsr_sale', 'dsr_sale_return', 'point_sale', 'point_damage_return'])),
     fetchAll(() => supabase.from('due_calendar').select(DUE_COLS_).eq('shop_id', sid).eq('client_type', 'shop')),
     fetchAll(() => supabase.from('due_collections').select('id,due_id,shop_id,dsr_name,date,amount,created_at').eq('shop_id', sid)),
     fetchAll(() => supabase.from('damage_collections').select('*').eq('shop_id', sid))
@@ -145,8 +145,8 @@ async function _buildShopLedger(shopId) {
   // 3) build events
   const ev = [];
   billList.forEach(b => {
-    if (b.type === 'point_damage_return') {
-      ev.push({ kind: 'ret', key: b.txId, txId: b.txId, at: b.at, date: b.date, dsrName: b.dsrName, value: _r2(b.rev), units: b.units, note: b.note });
+    if (b.type === 'point_damage_return' || b.type === 'dsr_sale_return') {
+      ev.push({ kind: 'ret', key: b.txId, txId: b.txId, at: b.at, date: b.date, dsrName: b.dsrName, value: _r2(b.rev), units: b.units, note: b.note, saleReturn: b.type === 'dsr_sale_return' });
       return;
     }
     let billed = b.payable, paid = b.payable;         // counter sales are settled on the spot
@@ -313,7 +313,19 @@ module.exports = async (req, res) => {
     if (req.method === 'POST' && action === 'edit') {
       const d = req.body || {};
       if (!d.shopId) return res.json({ ok: false, error: 'shopId প্রয়োজন' });
-      if (!(await _verifyOwnerPin(d.ownerPin))) return res.json({ ok: false, error: 'ভুল Owner PIN' });
+      // v5.16 — Owner OR Manager may edit, confirming with their OWN password (verified here).
+      {
+        const pin = String(d.pin || d.ownerPin || '').trim();
+        const aid = String(d.actorId || '').trim();
+        let okAct = false;
+        if (aid && pin) {
+          const { data: pw } = await supabase.from('user_passwords').select('role').eq('user_key', aid).eq('password', pin).limit(1);
+          okAct = !!(pw && pw.length && (pw[0].role === 'owner' || pw[0].role === 'manager'));
+        } else if (pin) {
+          okAct = await _verifyOwnerPin(pin);      // older clients: owner PIN only
+        }
+        if (!okAct) return res.json({ ok: false, error: 'ভুল পাসওয়ার্ড (শুধু Owner / Manager সম্পাদনা করতে পারেন)' });
+      }
 
       const name = String(d.name || '').trim();
       if (!name) return res.json({ ok: false, error: 'দোকানের নাম আবশ্যক' });
@@ -322,6 +334,9 @@ module.exports = async (req, res) => {
       }
 
       const update = { name: str(name, 200), phone: str(d.phone, 30) };
+      // other non-sensitive details (GPS lat/lng is NEVER touched here)
+      if (d.keeperName !== undefined) update.keeper_name = str(d.keeperName, 200);
+      if (d.address !== undefined)    update.address     = str(d.address, 300);
 
       // ── Road / DSR reassignment — Owner can move a shop to a different
       //    road (and its paired DSR come along automatically) after
@@ -549,6 +564,148 @@ module.exports = async (req, res) => {
       return res.json({ ok: true, txId: String(txId), type: rows[0].type, date: _d10(rows[0].date), at: rows[0].created_at,
         slipNo: rows[0].slip_no || '', dsrName: rows[0].sr_name || '', items, gross, commission, discount,
         payable: _r2(gross - commission - discount) });
+    }
+
+    // ══════════════════════════════════════════════════
+    //  v5.17 — বিক্রয় ফেরত (SALE RETURN)
+    //  A shop that was given goods but cannot pay hands them back to the DSR.
+    //    sale-return-info  GET  shopId, dsrId → what this shop bought from this DSR (minus what it
+    //                                            already returned) + the shop's open due
+    //    sale-return       POST shopId, dsrId, items[] → rows of type 'dsr_sale_return' (the goods
+    //                                            go back on the DSR's van) and the shop's due goes
+    //                                            down by the value (oldest due first)
+    //    sale-return-list  GET  dsrId|all, from, to → every return, newest first
+    //  Warehouse stock is NOT touched (the goods never left the DSR); the DSR's own due is NOT touched
+    //  (he still holds the goods, now as van stock instead of as a shop's debt).
+    // ══════════════════════════════════════════════════
+    const _soldReturned = async (shopId, dsrId) => {
+      const rows = await fetchAll(() => supabase.from('transactions')
+        .select('product_id,product_name,type,total_units,selling_price')
+        .eq('shop_id', String(shopId)).eq('sr_id', String(dsrId)).in('type', ['dsr_sale', 'dsr_sale_return']));
+      const m = {};
+      rows.forEach(r => {
+        const k = String(r.product_id || ''); if (!k) return;
+        const o = m[k] || (m[k] = { productId: k, productName: r.product_name || '', sold: 0, returned: 0, price: 0 });
+        if (r.type === 'dsr_sale') { o.sold += num(r.total_units); if (num(r.selling_price) > 0) o.price = num(r.selling_price); }
+        else o.returned += num(r.total_units);
+      });
+      return m;
+    };
+    const _shopOpenDues = async (shopId) => {
+      const rows = await fetchAll(() => supabase.from('due_calendar').select(DUE_COLS_)
+        .eq('client_type', 'shop').eq('shop_id', String(shopId)).neq('status', 'cleared'));
+      return (rows || []).filter(r => num(r.amount) - num(r.paid_amount) > 0.004)
+        .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')) || String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    };
+
+    if (req.method === 'GET' && action === 'sale-return-info') {
+      const { shopId, dsrId } = req.query;
+      if (!shopId || !dsrId) return res.json({ ok: false, error: 'shopId ও dsrId প্রয়োজন' });
+      const [m, dues, shopRes] = await Promise.all([
+        _soldReturned(shopId, dsrId), _shopOpenDues(shopId),
+        supabase.from('shops').select('id,name,phone').eq('id', String(shopId)).maybeSingle()
+      ]);
+      const products = Object.values(m).map(o => ({ ...o, sold: num(o.sold), returned: num(o.returned), returnable: Math.max(0, +(o.sold - o.returned).toFixed(4)) }))
+        .filter(o => o.returnable > 0);
+      const due = _money2(dues.reduce((a, r) => a + (num(r.amount) - num(r.paid_amount)), 0));
+      return res.json({ ok: true, shop: shopRes && shopRes.data ? { id: String(shopRes.data.id), name: shopRes.data.name || '', phone: shopRes.data.phone || '' } : null, due, products });
+    }
+
+    if (req.method === 'POST' && action === 'sale-return') return idemRun(req, res, 'sale-return', async () => {
+      const d = req.body || {};
+      if (!d.shopId || !d.dsrId) return res.json({ ok: false, error: 'দোকান ও DSR প্রয়োজন' });
+      const items = Array.isArray(d.items) ? d.items : [];
+      if (!items.length) return res.json({ ok: false, error: 'অন্তত একটি পণ্য প্রয়োজন' });
+      const date = (d.date && DATE_RE_.test(d.date)) ? d.date : bdtToday();
+
+      const priced = await priceItems(items, { type: 'dsr_sale_return' });
+      if (!priced.ok) return res.json({ ok: false, error: priced.error });
+      const lines = priced.lines;
+
+      // 1) never return more than this shop bought from this DSR (minus earlier returns)
+      const sr = await _soldReturned(d.shopId, d.dsrId);
+      const want = {};
+      lines.forEach(l => { want[l.productId] = (want[l.productId] || 0) + l.units; });
+      for (const pid of Object.keys(want)) {
+        const o = sr[pid]; const left = o ? num(o.sold) - num(o.returned) : 0;
+        const nm = (lines.find(l => l.productId === pid) || {}).productName || 'পণ্য';
+        if (want[pid] > left + 0.0001) return res.json({ ok: false, error: nm + ' — এই দোকান এই DSR থেকে ফেরতযোগ্য মাত্র ' + left + ' পিস নিয়েছে, কিন্তু ' + want[pid] + ' পিস ফেরত দিচ্ছেন' });
+      }
+
+      // 2) the value comes off the shop's due, so it can never be more than the due
+      const value = _money2(lines.reduce((a, l) => a + num(l.revenue), 0));
+      const dues = await _shopOpenDues(d.shopId);
+      const dueTotal = _money2(dues.reduce((a, r) => a + (num(r.amount) - num(r.paid_amount)), 0));
+      if (value > dueTotal + 0.009) return res.json({ ok: false, error: 'ফেরতের মূল্য ৳' + value + ' — কিন্তু দোকানের বাকি মাত্র ৳' + dueTotal + '। বাকির চেয়ে বেশি মূল্যের পণ্য ফেরত নেওয়া যাবে না।' });
+
+      const txId = randomUUID(), ts = now_();
+      const rows = lines.map(l => txRow(l, {
+        tx_id: txId, type: 'dsr_sale_return', sr_id: String(d.dsrId), sr_name: d.dsrName || '',
+        date, slip_no: d.slipNo || '', shop_id: String(d.shopId), note: d.note || 'দোকান থেকে বিক্রয় ফেরত', created_at: ts
+      }));
+      const { error: insErr } = await supabase.from('transactions').insert(rows);
+      if (insErr) {
+        if (/transactions_type_check|violates check constraint/i.test(String(insErr.message || ''))) return res.json({ ok: false, error: 'ডাটাবেস আপডেট বাকি — migrations/003_v5_17.sql একবার Supabase-এ চালান, তারপর আবার চেষ্টা করুন' });
+        throw insErr;
+      }
+
+      // 3) lower the shop's due, oldest first; roll the return back if a due row changed under us
+      let left = value; const done = [];
+      try {
+        for (const r of dues) {
+          if (left <= 0.004) break;
+          const rem = _money2(num(r.amount) - num(r.paid_amount));
+          const take = _money2(Math.min(rem, left));
+          const newAmt = _money2(num(r.amount) - take);
+          const cleared = _money2(newAmt - num(r.paid_amount)) < 0.01;
+          const { data: upd, error: uErr } = await supabase.from('due_calendar').update({
+            amount: cleared ? _money2(num(r.paid_amount)) : newAmt,
+            status: cleared ? 'cleared' : r.status,
+            cleared_date: cleared ? date : null
+          }).eq('id', r.id).eq('amount', r.amount).select('id');
+          if (uErr) throw uErr;
+          if (!upd || !upd.length) throw new Error('due changed');
+          done.push({ id: r.id, amount: r.amount, status: r.status, cleared_date: r.cleared_date || null });
+          left = _money2(left - take);
+        }
+        if (left > 0.01) throw new Error('due short');
+      } catch (e) {
+        for (const x of done) { try { await supabase.from('due_calendar').update({ amount: x.amount, status: x.status, cleared_date: x.cleared_date }).eq('id', x.id); } catch (_) {} }
+        await supabase.from('transactions').delete().eq('tx_id', txId);
+        return res.json({ ok: false, error: 'বাকির হিসাব এইমাত্র বদলে গেছে — পেজ রিফ্রেশ করে আবার চেষ্টা করুন' });
+      }
+      return res.json({ ok: true, txId, value, dueBefore: dueTotal, dueAfter: _money2(dueTotal - value) });
+    });
+
+    if (req.method === 'GET' && action === 'sale-return-list') {
+      const today = bdtToday();
+      let from = DATE_RE_.test(req.query.from || '') ? req.query.from : today;
+      let to = DATE_RE_.test(req.query.to || '') ? req.query.to : from;
+      if (to < from) { const t = from; from = to; to = t; }
+      const dsrId = String(req.query.dsrId || '');
+      const rows = await fetchAll(() => {
+        let q = supabase.from('transactions')
+          .select('tx_id,sr_id,sr_name,date,shop_id,product_name,cases,pcs,total_units,total_revenue,created_at,note')
+          .eq('type', 'dsr_sale_return').gte('date', from).lte('date', to).order('created_at', { ascending: false });
+        if (dsrId && dsrId !== 'all') q = q.eq('sr_id', dsrId);
+        return q;
+      });
+      const sids = [...new Set(rows.map(r => String(r.shop_id || '')).filter(Boolean))];
+      const names = {};
+      for (let i = 0; i < sids.length; i += 80) {
+        const { data } = await supabase.from('shops').select('id,name,phone').in('id', sids.slice(i, i + 80));
+        (data || []).forEach(r => { names[String(r.id)] = { name: r.name || '', phone: r.phone || '' }; });
+      }
+      const g = {};
+      rows.forEach(r => {
+        const k = String(r.tx_id);
+        const o = g[k] || (g[k] = { txId: k, date: _d10(r.date), createdAt: r.created_at || '', dsrName: r.sr_name || '', shopId: String(r.shop_id || ''),
+          shopName: (names[String(r.shop_id || '')] || {}).name || '', shopPhone: (names[String(r.shop_id || '')] || {}).phone || '', total: 0, units: 0, items: [] });
+        o.total += num(r.total_revenue); o.units += num(r.total_units);
+        o.items.push({ productName: r.product_name || '', cases: num(r.cases), pcs: num(r.pcs), units: num(r.total_units), value: _money2(r.total_revenue) });
+      });
+      const slips = Object.values(g).map(o => ({ ...o, total: _money2(o.total) })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      return res.json({ ok: true, from, to, total: _money2(slips.reduce((a, o) => a + o.total, 0)), slips });
     }
 
     // ══════════════════════════════════════════════════

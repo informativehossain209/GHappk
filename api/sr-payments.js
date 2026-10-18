@@ -529,7 +529,7 @@ async function _handle(req, res, action) {
       const [txs, dueRows, dueCols, dmgCols, settled, settledAll] = await Promise.all([
         fetchAll(() => supabase.from('transactions')
           .select('sr_id,tx_id,type,date,product_id,product_name,cases,pcs,total_units,total_revenue,commission_amt,discount_amt,shop_id,created_at')
-          .in('sr_id', ids).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale']).order('created_at')),
+          .in('sr_id', ids).gte('date', from).lte('date', to).in('type', ['give', 'return', 'damage', 'dsr_sale', 'point_sale', 'point_damage_return', 'dsr_sale_return']).order('created_at')),
         fetchAll(() => supabase.from('due_calendar').select('id,dsr_id,shop_id,shop_name,due_date,amount,paid_amount,created_at')
           .eq('client_type', 'shop').in('dsr_id', ids).gte('due_date', from).lte('due_date', to)),
         fetchAll(() => supabase.from('due_collections').select('due_id,dsr_id,shop_id,shop_name,date,amount,created_at')
@@ -649,10 +649,12 @@ async function _handle(req, res, action) {
         return Object.values(g).map(o => ({ date: o.date, createdAt: o.createdAt, dsrName: o.dsrName, shopName: o.shopName, shopPhone: o.shopPhone, total: _m2(o.total), items: o.items }))
           .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
       };
-      const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage'), pointSlips = groupTx('point_sale');
+      const given = groupTx('give'), returned = groupTx('return'), vanDamage = groupTx('damage'), pointSlips = groupTx('point_sale'), pointRetSlips = groupTx('point_damage_return'), saleRetSlips = groupTx('dsr_sale_return');
       const sumV = (arr) => _m2(arr.reduce((a, g) => a + g.total, 0));
 
-      const perSale = (field) => (txs || []).filter(r => r.type === 'dsr_sale' && num(r[field]) > 0.004).map(r => ({
+      // v5.17 — point-sale commission / discount are listed here too, tagged isPoint (shown as "পয়েন্ট সেল")
+      const perSale = (field) => (txs || []).filter(r => (r.type === 'dsr_sale' || r.type === 'point_sale') && num(r[field]) > 0.004).map(r => ({
+        isPoint: r.type === 'point_sale',
         date: String(r.date || '').slice(0, 10), createdAt: r.created_at, dsrName: nameById[String(r.sr_id)] || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '',
         shopName: shopName[String(r.shop_id || '')] || '', productName: r.product_name || '',
         units: num(r.total_units), ...split(r.total_units, r.product_id, r.product_name), saleValue: _m2(r.total_revenue), amount: _m2(r[field])
@@ -674,6 +676,12 @@ async function _handle(req, res, action) {
         ret:    { total: sumV(returned), slips: returned },
         // v5.13 — point sale booked on this DSR (sold by the manager / owner; the DSR collects the money from them)
         pointSale: { total: sumV(pointSlips), slips: pointSlips },
+        pointReturn: { total: sumV(pointRetSlips), slips: pointRetSlips },
+        // v5.17 — goods shops handed back to the DSR (বিক্রয় ফেরত): back on the van, shop due lowered
+        saleReturn: { total: sumV(saleRetSlips), slips: saleRetSlips },
+        // v5.17 — ONE sale figure everywhere: (give + point sale) − (return + point return). Same rule the SO / owner
+        // totals use, so a DSR's panel and his SO's panel can never disagree.
+        netSale: _m2(sumV(given) + sumV(pointSlips) - sumV(returned) - sumV(pointRetSlips)),
         // v5.13 — every unpaid due the DSR holds (this period + all earlier) — the red top box
         dueAll: { total: _m2(sumL(todayDueLines) + sumL(prevDueLines)) },
         damage: {
@@ -799,7 +807,7 @@ async function _handle(req, res, action) {
         const pin = String(d.pin == null ? '' : d.pin).trim();
         if (!pin) return res.json({ ok: false, error: 'আপনার পাসওয়ার্ড দিন', needPin: true });
         const { data: pw, error: pwErr } = await supabase.from('user_passwords').select('user_key')
-          .eq('user_key', String(d.dsrId)).eq('password', pin).limit(1);
+          .eq('user_key', String(d.actorId || d.dsrId)).eq('password', pin).limit(1);   // v5.16: an SO collecting on a DSR's van confirms with his OWN password
         if (pwErr) throw pwErr;
         if (!pw || !pw.length) return res.json({ ok: false, error: 'পাসওয়ার্ড ভুল — আদায় হয়নি', badPin: true });
       }

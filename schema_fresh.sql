@@ -107,7 +107,7 @@ GRANT EXECUTE ON FUNCTION next_sr_display_no(TEXT) TO service_role;
 CREATE TABLE transactions (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   tx_id          UUID        NOT NULL,
-  type           TEXT        NOT NULL CHECK (type IN ('give','return','damage','buy','point_sale','point_damage_return','dsr_sale','return_company')),
+  type           TEXT        NOT NULL CHECK (type IN ('give','return','damage','buy','point_sale','point_damage_return','dsr_sale','dsr_sale_return','return_company')),
   sr_id          TEXT        DEFAULT '',
   sr_name        TEXT        DEFAULT '',
   date           DATE        NOT NULL,
@@ -1278,11 +1278,11 @@ RETURNS TABLE (product_id TEXT, qty NUMERIC, give_units NUMERIC, give_rev NUMERI
 LANGUAGE sql STABLE AS $$
   WITH t AS (
     SELECT tx.product_id,
-           SUM(CASE WHEN tx.type = 'give' THEN tx.total_units ELSE -tx.total_units END) AS q,
+           SUM(CASE WHEN tx.type IN ('give','dsr_sale_return') THEN tx.total_units ELSE -tx.total_units END) AS q,
            SUM(CASE WHEN tx.type = 'give' THEN tx.total_units   ELSE 0 END) AS gu,
            SUM(CASE WHEN tx.type = 'give' THEN tx.total_revenue ELSE 0 END) AS gr
       FROM transactions tx
-     WHERE tx.sr_id = p_dsr_id AND tx.date <= p_upto AND tx.type IN ('give','return','dsr_sale')
+     WHERE tx.sr_id = p_dsr_id AND tx.date <= p_upto AND tx.type IN ('give','return','dsr_sale','dsr_sale_return')
      GROUP BY tx.product_id
   ), d AS (
     SELECT c.product_id, SUM(c.total_units) AS q

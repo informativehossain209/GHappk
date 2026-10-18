@@ -141,6 +141,18 @@ module.exports = async (req, res) => {
       if (!d.id) return res.json({ ok: false, error: 'id প্রয়োজন' });
       const actor = { id: d.actorId || d.collectorId || '', role: d.actorRole || '' };
 
+      // v5.16 — taking money on a due (full OR part) needs the acting person's OWN password.
+      // Verified here on the server so it cannot be skipped from the browser.
+      const _needPin = (typeof d.payAmount !== 'undefined') || d.status === 'cleared';
+      if (_needPin) {
+        const pin = String(d.pin == null ? '' : d.pin).trim();
+        const aid = String(d.actorId || d.collectorId || '').trim();
+        if (!aid || !pin) return res.json({ ok: false, error: 'আপনার নিজের পাসওয়ার্ড দিন', needPin: true });
+        const { data: pw, error: pwErr } = await supabase.from('user_passwords').select('user_key').eq('user_key', aid).eq('password', pin).limit(1);
+        if (pwErr) throw pwErr;
+        if (!pw || !pw.length) return res.json({ ok: false, error: 'পাসওয়ার্ড ভুল — কিছুই সংরক্ষিত হয়নি', badPin: true });
+      }
+
       if (typeof d.payAmount !== 'undefined') {
         const pay = num(d.payAmount);
         if (pay <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });

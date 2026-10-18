@@ -822,7 +822,7 @@ async function computeVanDetail(dsrId, date, opts) {
     // function not installed yet → same numbers, slower
     const [tx, dmg, exch] = await Promise.all([
       fetchAll(() => supabase.from('transactions').select('type,product_id,total_units,total_revenue')
-        .eq('sr_id', String(dsrId)).lte('date', upto).in('type', ['give', 'return', 'dsr_sale'])),
+        .eq('sr_id', String(dsrId)).lte('date', upto).in('type', ['give', 'return', 'dsr_sale', 'dsr_sale_return'])),
       fetchAll(() => {
         let q = supabase.from('dmg_claims').select('product_id,total_units,status,tx_id')
           .eq('sr_id', String(dsrId)).lte('date', upto);
@@ -835,7 +835,7 @@ async function computeVanDetail(dsrId, date, opts) {
     const st = {}, give = {};
     const add = (pid, delta) => { pid = String(pid || ''); if (!pid) return; st[pid] = (st[pid] || 0) + delta; };
     tx.forEach(r => {
-      add(r.product_id, r.type === 'give' ? num(r.total_units) : -num(r.total_units));
+      add(r.product_id, (r.type === 'give' || r.type === 'dsr_sale_return') ? num(r.total_units) : -num(r.total_units));
       if (r.type === 'give') { const k = String(r.product_id); const g = give[k] || (give[k] = { u: 0, v: 0 }); g.u += num(r.total_units); g.v += num(r.total_revenue); }
     });
     dmg.forEach(r => { if (String(r.tx_id || '').startsWith('dc:')) return; add(r.product_id, -num(r.total_units)); });

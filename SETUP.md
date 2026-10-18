@@ -1,4 +1,4 @@
-# AXIION DMS — Setup (v5.13.0)
+# AXIION DMS — Setup (v5.17.0)
 
 ## 1. Supabase — database  ⚠️ read this first
 There are TWO SQL files. Use exactly one of them:
@@ -6,7 +6,7 @@ There are TWO SQL files. Use exactly one of them:
 | Situation | File to run | Effect |
 |---|---|---|
 | **Brand-new Supabase project** (empty) | `schema_fresh.sql` | Creates everything: tables, indexes, functions, triggers, policies, seed data, photo bucket. |
-| **Already running / has real data** | `migrations/001_v5_1_fixes.sql` (if coming from before 5.1), then `migrations/002_v5_11.sql` (from 5.1–5.10). **From 5.11.x → 5.12.0: no SQL at all, just redeploy.** | Add only the new changes. Safe to run more than once. Never deletes data. |
+| **Already running / has real data** | `migrations/001_v5_1_fixes.sql` (if coming from before 5.1), then `migrations/002_v5_11.sql` (from 5.1–5.10). **From 5.16.x → 5.17.0: run `migrations/003_v5_17.sql` once (adds the sale-return type), then redeploy.** | Add only the new changes. Safe to run more than once. Never deletes data. |
 
 `schema_fresh.sql` begins with a safety stop: if the database already contains
 sales/transactions it refuses to run (the old `schema.sql` dropped tables and wiped data).

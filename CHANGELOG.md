@@ -1,5 +1,31 @@
 # Changelog
 
+## 5.17.0
+**Database: ONE small SQL to run** — `migrations/003_v5_17.sql` (Supabase → SQL editor, safe to run twice). Fresh installs: `schema_fresh.sql` already has it. API files: still **12**.
+
+- **New DSR menu item "বিক্রয় ফেরত"** (Sale Return): pick a shop that owes → type what it hands back → own password → the goods go back into the DSR's **van stock** and the shop's **due goes down** (oldest due first). Guards: a shop can only return what it bought from that DSR (minus earlier returns), and the value can't exceed its due. A detail list (date range) shows every return, with the shop, items and ৳. New 🔁 box in the DSR transaction panel + a column in the product table; the shop's memo book (খাতা) shows the return too. Needs the SQL above (without it the app says so and saves nothing).
+- **SO ↔ DSR mismatch fixed:** the SO/owner totals counted point-sale, the DSR panel did not. The sale figure is now ONE rule everywhere: (দেওয়া + পয়েন্ট সেল) − (ফেরত + পয়েন্ট ফেরত). DSR panel, SO home grid and the owner figures now agree.
+- **Point sale now shows on the DSR panel (bug fixed):** the panel's API never read point-sale rows, so nothing appeared. Point sale (by DSR name or by shop → that shop's assigned DSR) now appears in the DSR's transactions, in the bottom "দোকানে বিক্রয়" bar (count + ৳) and in the product table.
+- **Point sale: commission + discount** fields added (optional, validated ≤ sale total). They are listed in the DSR's কমিশন / ছাড় boxes tagged "🛒 পয়েন্ট সেল".
+- **Cash box:** the 🛒 পয়েন্ট সেল amount is now its own box directly **below** "জমা দিতে হবে", so cash in hand and point-sale amount are clearly separate.
+- **Due list (first red box):** tapping a shop opens its **memo book / due book** (what it took, paid, due) instead of calling it. Same for every shop name in the panel.
+- **Layout:** pages use the full screen width (no empty side bands); the sales/stock pop-up is wider with smaller text and tighter rows so more products show at once.
+
+## 5.16.0
+**Database: no change.** API files: still **12**.
+
+- **Fonts:** Bengali/Latin digits now use Inter → Noto Sans → Noto Sans Bengali (cleaner ১ / 1).
+- **Menu:** flat list for every role (same order, no sub-sections).
+- **Due Calendar:** "নতুন বাকি" can search an existing shop (name / no / phone) and adds to it; custom-client name suggestions. Colours: today = red, earlier = orange, coming = blue, paid = green.
+- **DSR লেনদেন:** DSR + date boxes equal, tinted; আজ/রেঞ্জ inside date box; dropdown shows ~7 rows with SO names; new **আজকের বিক্রয় (দেওয়া − ফেরত)** box; coloured top border on all boxes.
+- **Due list:** every write clears cached figures; opening the list re-reads live data; detail pop-up syncs the row.
+- **Passwords:** every due payment (shop detail, today's dues, calendar) needs the actor's OWN password (server-checked).
+- **SO:** new "বাকি আদায় (DSR-এর নামে)" menu item next to the existing DSR-style sale.
+- **Van return:** Owner/Manager ফেরত পণ্য → 🚐 ভ্যান ফেরত (pick DSR → van stock auto-loads → own password → slip). DSR sees what is in his van.
+- **Shops:** Owner + Manager can edit name, owner, phone, address, road (own password); GPS stays locked; delete = Owner only.
+- **Targets:** DSR % now uses the same box basis as the SO % (was money vs boxes); new slim company total-target strip on Owner/Manager home.
+- Low-stock bar (DSR/SO) same height as owner's; Owner low-stock closed by default.
+
 ## 5.15.0
 **Database: no change** (schema_fresh.sql / schema.sql unchanged). API files: still **12**.
 

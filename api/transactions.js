@@ -5,7 +5,7 @@ const { randomUUID } = require('crypto');
 // Movements that take stock OUT of the warehouse (CALC-9).
 const OUTGOING = new Set(['give', 'point_sale', 'return_company']);
 
-const VALID_TYPES = new Set(['buy','give','return','damage','point_sale','point_damage_return','dsr_sale','return_company']);
+const VALID_TYPES = new Set(['buy','give','return','damage','point_sale','point_damage_return','dsr_sale','dsr_sale_return','return_company']);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // PERF-5 — only the columns the screens use (mapTx reads exactly these)
 const TX_COLS = 'tx_id,type,sr_id,sr_name,date,slip_no,product_id,product_name,sku,cases,pcs,total_units,purchase_price,selling_price,total_cost,total_revenue,commission_amt,discount_amt,shop_id,customer_id,note,created_at,id';
@@ -56,6 +56,26 @@ async function _addTransaction(req, res) {
     shop_id: d.shopId || '', customer_id: d.customerId || '',
     note: d.note || '', created_at: ts
   }));
+
+  // v5.17 — a POINT SALE can carry a commission and a discount (per line and/or one flat amount for
+  // the whole slip), stored on the rows exactly like a DSR shop sale so the DSR panel can list them.
+  if (d.type === 'point_sale') {
+    const m2 = (n) => Math.round((num(n) + Number.EPSILON) * 100) / 100;
+    lines.forEach((l, i) => {
+      rows[i].commission_amt = m2(Math.max(0, num(l.commission)));
+      rows[i].discount_amt   = m2(Math.max(0, num(l.discount)));
+    });
+    if (rows.length) {
+      const gross = rows.reduce((a, r) => a + num(r.total_revenue), 0);
+      const cSum = rows.reduce((a, r) => a + num(r.commission_amt), 0);
+      const dSum = rows.reduce((a, r) => a + num(r.discount_amt), 0);
+      const wantC = Math.max(0, num(d.commissionAmt)), wantD = Math.max(0, num(d.discountAmt));
+      if (wantC > cSum + 0.004) rows[0].commission_amt = m2(num(rows[0].commission_amt) + (wantC - cSum));
+      if (wantD > dSum + 0.004) rows[0].discount_amt   = m2(num(rows[0].discount_amt) + (wantD - dSum));
+      const totC = rows.reduce((a, r) => a + num(r.commission_amt), 0), totD = rows.reduce((a, r) => a + num(r.discount_amt), 0);
+      if (totC + totD > gross + 0.004) return res.json({ ok: false, error: 'কমিশন ও ছাড়ের যোগফল (৳' + m2(totC + totD) + ') বিক্রয়ের মোট (৳' + m2(gross) + ') এর বেশি হতে পারে না' });
+    }
+  }
 
   const { error: txErr } = await supabase.from('transactions').insert(rows);
   if (txErr) throw txErr;

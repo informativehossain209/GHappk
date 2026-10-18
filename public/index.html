@@ -7,7 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0A0A0B">
 <title>AXIION DMS — Dealer Management System</title>
-<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700&family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
 <!-- Update #50 — 'Noto Sans' listed before 'Hind Siliguri' in every font-family
      stack in this file so the browser renders digits 0-9 from Noto Sans'
      clean lining numerals (Hind Siliguri's '1' glyph looks visually off /
@@ -43,9 +47,9 @@
   --inp-bg:#FFFFFF;--nav-bg:#FFFFFF;--seg-bg:#EAF3EF;
   --hdr1:#03130D;--hdr2:#0B2B1E;
   --ease:cubic-bezier(.22,.9,.3,1);
-  --font-ui:'Noto Sans','Hind Siliguri',sans-serif;
-  --font-disp:'Poppins','Noto Sans','Hind Siliguri',sans-serif;
-  --font-num:'Noto Sans','Hind Siliguri',sans-serif;
+  --font-ui:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;
+  --font-disp:'Poppins','Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;
+  --font-num:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;
 }
 body.dark{
   --bg:#06120D;--card:#0E1E17;--bdr:#173226;--bd:#173226;
@@ -65,7 +69,7 @@ body.dark{
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 *::selection{background:var(--bl2);color:#03130D}
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--font-ui);background:var(--bg);color:var(--txt);font-size:14px;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{font-variant-numeric:lining-nums;font-family:var(--font-ui);background:var(--bg);color:var(--txt);font-size:14px;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}
 :focus-visible{outline:2px solid var(--bl2);outline-offset:2px}
@@ -123,7 +127,7 @@ body{font-family:var(--font-ui);background:var(--bg);color:var(--txt);font-size:
 .smi-danger .smi-ic{background:rgba(179,38,30,.12)!important}
 .smi-danger:active{background:rgba(179,38,30,.16)!important}
 .pages{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.page{padding:14px 14px 76px;max-width:640px;margin:0 auto;display:none}
+.page{padding:14px 12px 76px;max-width:none;margin:0 auto;display:none}
 .page.active{display:block;animation:pgfade .25s var(--ease)}
 @keyframes pgfade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .nav{flex-shrink:0;background:var(--nav-bg);border-top:1px solid var(--bdr);display:flex;height:58px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;box-shadow:0 -6px 18px -10px rgba(15,29,23,.15)}
@@ -138,7 +142,7 @@ body{font-family:var(--font-ui);background:var(--bg);color:var(--txt);font-size:
 .met{background:var(--card);border-radius:var(--r-md);padding:12px 13px;text-align:center;border:1px solid var(--bdr);box-shadow:var(--shad-sm);position:relative;overflow:hidden}
 .mv{font-size:19px;font-weight:800;margin:3px 0 1px;line-height:1;font-family:var(--font-num);font-feature-settings:'tnum';letter-spacing:-.2px}
 .ml{font-size:10px;color:var(--mt2);font-weight:600}
-.met-b{border-top:3px solid transparent;border-image:var(--gold-grad) 1}.met-g{border-top:3px solid var(--gr)}
+.met-b{border-top:3px solid #10B981}.met-g{border-top:3px solid var(--gr)}.met-a{border-top:3px solid var(--te)}.met-r{border-top:3px solid var(--re)}
 .met-r{border-top:3px solid var(--re)}.met-a{border-top:3px solid var(--am)}
 
 .fl{display:block;font-size:11px;color:var(--mt);margin-bottom:4px;font-weight:600;letter-spacing:.1px}
@@ -401,6 +405,13 @@ body.dark .ovl{background:rgba(10,10,9,.88)}
 .cal-cell.has-due.partial{background:var(--rel);border:2.5px solid var(--re);box-shadow:inset 0 0 0 1px var(--re)}
 .cal-cell.has-due.mixed{background:var(--aml);border-color:var(--am)}
 .cal-cell.due-heavy{border-width:2.5px}
+/* v5.16 — calendar colours: today's due = RED · earlier unpaid (previous) = ORANGE · coming days = BLUE · paid = green */
+.cal-cell.has-due.d-today{background:#FEE2E2;border:2.5px solid #DC2626;box-shadow:0 0 0 2px rgba(220,38,38,.18)}
+.cal-cell.has-due.d-prev{background:#FFEDD5;border-color:#EA580C}
+.cal-cell.has-due.d-next{background:#E0F2FE;border-color:#0284C7}
+.cal-cell.has-due.d-prev.partial,.cal-cell.has-due.d-next.partial{border-width:2.5px}
+.cal-dot-ora{background:#EA580C}.cal-dot-blu{background:#0284C7}
+body.dark .cal-cell.has-due.d-today{background:#3A1414}body.dark .cal-cell.has-due.d-prev{background:#35200E}body.dark .cal-cell.has-due.d-next{background:#0C2A3D}
 .cal-day-num{font-size:13px;font-weight:700;line-height:1;font-family:var(--font-num);font-feature-settings:'tnum' 1}
 .cal-dot{width:6px;height:6px;border-radius:50%;margin-top:2px}
 .cal-dot-re{background:var(--re)}
@@ -829,7 +840,7 @@ body.dark .smi.active{background:rgba(255,255,255,.2)!important}
       <div class="sc-modal-name" id="pinc-title">নিশ্চিত করতে Owner PIN দিন</div>
       <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="5" id="pinc-input"
              placeholder="৫-সংখ্যার PIN"
-             style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--bdr);font-size:20px;text-align:center;letter-spacing:8px;margin:10px 0;box-sizing:border-box;font-family:'Noto Sans','Hind Siliguri',sans-serif">
+             style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--bdr);font-size:20px;text-align:center;letter-spacing:8px;margin:10px 0;box-sizing:border-box;font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif">
       <div id="pinc-err" style="color:var(--re);font-size:11px;min-height:14px;margin-bottom:8px;text-align:center"></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-gh btn-w" ontouchstart="_pincCancel();event.preventDefault()" onclick="_pincCancel()">বাতিল</button>
@@ -943,9 +954,18 @@ async function apiFetch(url, opts) {
   return p;
 }
 function apiGet(url) { return apiFetch(url); }
-function apiPost(url, data) { return apiFetch(url, { method:'POST', body: JSON.stringify(data) }); }
-function apiPut(url, data) { return apiFetch(url, { method:'PUT', body: JSON.stringify(data) }); }
-function apiDel(url, data) { return apiFetch(url, { method:'DELETE', body: JSON.stringify(data) }); }
+// v5.16 — every successful write drops the cached dashboard figures, so a due / payment / sale made a
+// moment ago can never be hidden behind a stale 60-second cache (this is what made the DSR/SO due list
+// disagree with the detail pop-up, which always loads fresh).
+function _afterWrite(p) {
+  return p.then(function(r) {
+    if (r && r.ok !== false) { try { _dashCache = null; if (window._homeCacheClear) window._homeCacheClear(); } catch (e) {} }
+    return r;
+  });
+}
+function apiPost(url, data) { return _afterWrite(apiFetch(url, { method:'POST', body: JSON.stringify(data) })); }
+function apiPut(url, data) { return _afterWrite(apiFetch(url, { method:'PUT', body: JSON.stringify(data) })); }
+function apiDel(url, data) { return _afterWrite(apiFetch(url, { method:'DELETE', body: JSON.stringify(data) })); }
 
 // v5.7 — ask the logged-in user for their OWN password before any money is taken.
 // Resolves with the password text, or null when cancelled / wrong. The server checks it again.
@@ -1119,6 +1139,7 @@ var MENU_ITEMS = [
   { id:'tx',            ic:'🧾', lb:'লেনদেন' },
   { id:'dsrtx',         ic:'📝', lb:'DSR লেনদেন' },
   { id:'retrep',        ic:'↩️', lb:'ফেরত পণ্য' },
+  { id:'srtn',          ic:'🔁', lb:'বিক্রয় ফেরত' },
   { id:'pwmgr',         ic:'🔐', lb:'পাসওয়ার্ড ম্যানেজার' },
   { id:'ownerapproval', ic:'✅', lb:'মালিক অনুমোদন' },
   { id:'rep',           ic:'📈', lb:'রিপোর্ট' },
@@ -1143,7 +1164,7 @@ var MENU_PERMS = {
   owner:   ['dash','settle','deposit','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'],
   manager: ['dash','settle','deposit','prod','sr','tx','dsrtx','retrep','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','target','orders'],
   so:      ['dash','prod','pwmgr','chat','numbers','target','orders','exp'],   // v5.14.3: no presence / returns chart / orders / shops-map for SO
-  dsr:     ['dash','pwmgr','cal','attendance','chat','numbers','target','retrep'],   // v5.13: the van-load check now pops up in the delivery panel
+  dsr:     ['dash','pwmgr','cal','attendance','chat','numbers','target','retrep','srtn'],   // v5.13: the van-load check now pops up in the delivery panel
   driver:  ['pwmgr','attendance','chat']
 };
 var TABS = ['dash','settle','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'];
@@ -1986,7 +2007,7 @@ function renderOwnerApprovals() {
 }
 
 function oaTypeLabel(inputType, d) {
-  var txMap = {give:'স্টক সরবরাহ',return:'ফেরত',damage:'ড্যামেজ',buy:'কেনা',return_company:'কোম্পানিতে ফেরত',point_sale:'পয়েন্ট সেল',point_damage_return:'পয়েন্ট ফেরত',dsr_sale:'দোকানে বিক্রয় (DSR)'};
+  var txMap = {give:'স্টক সরবরাহ',return:'ফেরত',damage:'ড্যামেজ',buy:'কেনা',return_company:'কোম্পানিতে ফেরত',point_sale:'পয়েন্ট সেল',point_damage_return:'পয়েন্ট ফেরত',dsr_sale:'দোকানে বিক্রয় (DSR)',dsr_sale_return:'বিক্রয় ফেরত'};
   if (inputType==='transaction') return txMap[d.type]||d.type||'লেনদেন';
   if (inputType==='payment') return 'পেমেন্ট';
   if (inputType==='settlement') return 'দিনশেষ হিসাব';
@@ -3672,6 +3693,17 @@ function toggleAcc(key) {
   if (el) el.classList.toggle('open', S.accOpen[key]);
   if (S.accOpen[key]) setTimeout(function () { _animateBarsIn(el); }, 60);
   if (key === 'topshops' && S.accOpen[key]) _loadTopShops();
+  if (key === 'dues' && S.accOpen[key]) _refreshDuesList();
+}
+// v5.16 — opening the DSR/SO due list always re-reads the live figures (other people may have paid since the page loaded)
+async function _refreshDuesList() {
+  try {
+    var r = await apiGet('/api/dashboard');
+    if (!r || !r.ok || !r.dues) return;
+    [_dashCache, (window._homeDashData ? window._homeDashData() : null)].forEach(function(dc) { if (dc) dc.dues = r.dues; });
+    var host = document.getElementById('acc-dues');
+    if (host) { var tmp = document.createElement('div'); tmp.innerHTML = _duesAccHtml(r.dues); if (tmp.firstChild) host.parentNode.replaceChild(tmp.firstChild, host); }
+  } catch (e) {}
 }
 function _acc(key, icon, title, summaryHtml, bodyHtml, defaultOpen) {
   if (!S.accOpen) S.accOpen = {};
@@ -3956,6 +3988,22 @@ function _quickActionsHtml() {
   return '<div class="ct">⚡ দ্রুত একশন প্যানেল</div><div class="qa-grid">'+qa.map(function(q){return '<button class="qa-tile" onclick="gTab(\''+q[0]+'\')"><div class="qa-ic">'+q[1]+'</div><div class="qa-lb">'+q[2]+'</div></button>';}).join('')+'</div>';
 }
 
+function _duesAccHtml(dues) {
+  dues = dues || {list:[],total:0};
+  var ad=dues.list.filter(function(s){return s.due!==0||s.givenUnits>0;});
+  var dueBody='<div class="card" style="padding:0;overflow:hidden;margin-top:8px">';
+  if (!ad.length) dueBody+='<div style="padding:20px;text-align:center;color:var(--mt2)">কোনো বাকি নেই</div>';
+  ad.forEach(function(sr){
+    var dc=sr.due>0?'var(--re)':'var(--gr)';
+    var ti=thumbImg(sr,'50%'), letter=esc(String(sr.name||'').charAt(0)||'?');
+    dueBody+='<div class="dr" style="cursor:pointer" onclick="openSrDueHistory(\''+sr.srId+'\',decodeURIComponent(\''+encodeURIComponent(sr.name||'—')+'\'))"><div style="display:flex;align-items:center;gap:9px">';
+    dueBody+='<div class="sr-av" style="width:40px;height:40px;font-size:16px">'+(ti||letter)+'</div>';
+    dueBody+='<div><div style="font-weight:700">'+esc(sr.name)+'</div><div style="font-size:10px;color:var(--mt2)">'+(sr.area||sr.phone||'—')+'</div></div></div>';
+    dueBody+='<div style="text-align:right"><div style="font-size:15px;font-weight:700;color:'+dc+'">৳'+fm(sr.due)+'</div><div style="font-size:9px;color:var(--mt2)">'+(sr.due>0?'বাকি · বিস্তারিত ▶':'পরিশোধিত · বিস্তারিত ▶')+'</div></div></div>';
+  });
+  dueBody+='</div>';
+  return _acc('dues','💰','DSR/SO বাকির তালিকা','<span style="color:var(--re)">৳'+fm(dues.total)+'</span>',dueBody,false);
+}
 function _perfSectionsHtml(d) {
   var h='', srp=d.srPerformance||[], dues=d.dues||{list:[],total:0};
   h+=_acc('srperf','🏆','DSR/SO পারফরম্যান্স (এই মাস)',srp.length?'#1 '+esc(srp[0].name):'',_srPerfShell(),false);
@@ -3994,19 +4042,7 @@ function _perfSectionsHtml(d) {
 
   // ── DSR/SO বাকির তালিকা — total always visible in the header, full
   // list (and the tap-through to a person's due history) one tap away.
-  var ad=dues.list.filter(function(s){return s.due!==0||s.givenUnits>0;});
-  var dueBody='<div class="card" style="padding:0;overflow:hidden;margin-top:8px">';
-  if (!ad.length) dueBody+='<div style="padding:20px;text-align:center;color:var(--mt2)">কোনো বাকি নেই</div>';
-  ad.forEach(function(sr){
-    var dc=sr.due>0?'var(--re)':'var(--gr)';
-    var ti=thumbImg(sr,'50%'), letter=esc(sr.name.charAt(0)||'?');
-    dueBody+='<div class="dr" style="cursor:pointer" onclick="openSrDueHistory(\''+sr.srId+'\',decodeURIComponent(\''+encodeURIComponent(sr.name||'—')+'\'))"><div style="display:flex;align-items:center;gap:9px">';
-    dueBody+='<div class="sr-av" style="width:40px;height:40px;font-size:16px">'+(ti||letter)+'</div>';
-    dueBody+='<div><div style="font-weight:700">'+esc(sr.name)+'</div><div style="font-size:10px;color:var(--mt2)">'+(sr.area||sr.phone||'—')+'</div></div></div>';
-    dueBody+='<div style="text-align:right"><div style="font-size:15px;font-weight:700;color:'+dc+'">৳'+fm(sr.due)+'</div><div style="font-size:9px;color:var(--mt2)">'+(sr.due>0?'বাকি · বিস্তারিত ▶':'পরিশোধিত · বিস্তারিত ▶')+'</div></div></div>';
-  });
-  dueBody+='</div>';
-  h+=_acc('dues','💰','DSR/SO বাকির তালিকা','<span style="color:var(--re)">৳'+fm(dues.total)+'</span>',dueBody,false);
+  h+=_duesAccHtml(dues);
 
   return h;
 }
@@ -4027,7 +4063,7 @@ function _lowStockTopHtml(d) {
       lowBody+='<div style="text-align:right"><div class="stk-lo">'+stStr+'</div></div></div>';
     });
     lowBody+='</div>';
-    h+=_acc('lowstock','🔴','কম স্টক সতর্কতা','<span style="color:var(--am)">'+ls.length+' পণ্য</span>',lowBody,true);
+    h+=_acc('lowstock','🔴','কম স্টক সতর্কতা','<span style="color:var(--am)">'+ls.length+' পণ্য</span>',lowBody,false);
   }
 
   return h;
@@ -4207,6 +4243,10 @@ function renderSoDash() {
     // v5.14.3 — SO "বিক্রয়" = the exact DSR delivery system (shop search → delivery → slip), run on a chosen DSR's van
     h += _soSaleDsrPicker() + '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">লোড হচ্ছে...</div>';
     setTimeout(function(){ if (S.role==='so' && S.soTab==='sale') _loadDsrShopView(); }, 0);
+  }
+  else if (S.soTab==='duecol') {
+    h += _soSaleDsrPicker() + '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">লোড হচ্ছে...</div>';
+    setTimeout(function(){ if (S.role==='so' && S.soTab==='duecol') _loadDsrDueColView(); }, 0);
   }
   else if (S.soTab==='stock')     h+=_soStock();
   else if (S.soTab==='damage')    h+=_soDamagePage();
@@ -4426,7 +4466,7 @@ async function spTileLoad() {
 function spOpen() {
   if (!_SP.pick) _SP.pick = (S.role === 'so') ? ('so:' + S.userId) : 'total';
   spClose();
-  document.body.insertAdjacentHTML('beforeend', '<div class="sc-modal-bg" id="sp-modal-bg" onclick="spClose(event)"><div class="sc-modal" style="max-width:560px;width:96%;max-height:92vh;display:flex;flex-direction:column;padding:0" onclick="event.stopPropagation()"><div class="sc-modal-body" style="overflow-y:auto;padding:10px"><div id="sp-wrap" class="sp-tone ' + _spToneCls() + '">' + _spHtml() + '</div></div></div></div>');
+  document.body.insertAdjacentHTML('beforeend', '<div class="sc-modal-bg" id="sp-modal-bg" onclick="spClose(event)"><div class="sc-modal" style="max-width:100%;width:99%;max-height:96vh;display:flex;flex-direction:column;padding:0" onclick="event.stopPropagation()"><div class="sc-modal-body" style="overflow-y:auto;padding:6px"><div id="sp-wrap" class="sp-tone ' + _spToneCls() + '">' + _spHtml() + '</div></div></div></div>');
   spLoad();
 }
 function spClose(ev) {
@@ -4519,7 +4559,7 @@ function _spHtml() {
   h += '<div class="card" style="padding:6px 8px;margin-bottom:8px"><div style="display:flex;gap:6px;align-items:center">'
      + '<select onchange="spChoose(this.value)" style="flex:1.25;min-width:0;margin:0;padding:7px 8px;font-size:13px;font-weight:700">' + sel + '</select>'
      + '<button class="btn btn-gh btn-sm" onclick="spShiftDate(-1)">◀</button>'
-     + '<input type="date" value="' + esc(_SP.date || iso(new Date())) + '" max="' + iso(new Date()) + '" onchange="spSetDate(this.value)" style="flex:1;min-width:0;margin:0;padding:7px 6px;font-size:12.5px">'
+     + '<input type="date" value="' + esc(_SP.date || iso(new Date())) + '" max="' + iso(new Date()) + '" onchange="spSetDate(this.value)" style="flex:1;min-width:0;margin:0;padding:3px 5px;font-size:12.5px">'
      + '<button class="btn btn-gh btn-sm" onclick="spShiftDate(1)"' + (isT ? ' disabled style="opacity:.35"' : '') + '>▶</button></div></div>';
   h += _spBanner(isT);
   if (pick === 'total') h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:8px">পুরো দোকানের ' + (isT ? 'আজকের' : 'এই তারিখের') + ' বিক্রয় — ফ্রি/বোনাস পিস সহ গোনা হয়েছে।</div>';
@@ -4529,19 +4569,19 @@ function _spHtml() {
   var list = d.list || [];
   if (!list.length) return h + '<div class="card" style="padding:20px;color:var(--mt2);text-align:center">কোনো পণ্য পাওয়া যায়নি</div>';
   var tS = 0, tE = 0, tP = 0, tC = 0;
-  h += '<div class="card sp-tbl" style="padding:0;overflow-x:auto;' + (_SP.loading ? 'opacity:.55' : '') + '"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:320px">';
-  h += '<thead><tr style="background:var(--sp-bg,var(--bll));text-align:right"><th style="text-align:left;padding:8px 10px">পণ্য</th><th style="padding:8px 6px">' + (isT ? 'গতকালের স্টক' : 'আগের স্টক') + '</th><th style="padding:8px 6px">' + (isT ? 'আজকের বিক্রয়' : 'দিনের বিক্রয়') + '</th><th style="padding:8px 10px 8px 6px">' + (isT ? 'বর্তমান স্টক' : 'দিনশেষ স্টক') + '</th></tr></thead><tbody>';
+  h += '<div class="card sp-tbl" style="padding:0;overflow-x:auto;' + (_SP.loading ? 'opacity:.55' : '') + '"><table style="width:100%;border-collapse:collapse;font-size:10.5px;min-width:300px">';
+  h += '<thead><tr style="background:var(--sp-bg,var(--bll));text-align:right"><th style="text-align:left;padding:4px 8px">পণ্য</th><th style="padding:4px 5px">' + (isT ? 'গতকালের স্টক' : 'আগের স্টক') + '</th><th style="padding:4px 5px">' + (isT ? 'আজকের বিক্রয়' : 'দিনের বিক্রয়') + '</th><th style="padding:4px 8px 4px 5px">' + (isT ? 'বর্তমান স্টক' : 'দিনশেষ স্টক') + '</th></tr></thead><tbody>';
   list.forEach(function(p) {
     var sold = Math.round(num(p.sold)), ex = Math.round(num(p.exchangeUnits));
     tS += sold; tE += ex; tP += Math.round(num(p.prevStock)); tC += Math.round(num(p.currentStock));
     var ti = thumbImg(p, '6px');
     h += '<tr style="border-top:1px solid #E6ECE8' + (sold > 0 ? '' : ';opacity:.65') + '">';
-    h += '<td style="padding:7px 10px"><div style="display:flex;align-items:center;gap:8px"><div class="sku-i" style="width:30px;height:30px;flex:none">' + (ti || '📦') + '</div><div style="font-weight:700;min-width:0">' + esc(p.productName) + '</div></div></td>';
-    h += '<td class="sp-stk" style="padding:7px 6px;text-align:right;font-weight:700">' + _spQ(p.prevStock) + '</td>';
-    h += '<td style="padding:7px 6px;text-align:right;font-weight:800;color:' + (sold > 0 ? 'var(--gr)' : 'var(--mt2)') + '">' + _spQ(sold) + (ex > 0 ? '<div style="font-size:10px;font-weight:600;color:var(--or,#c27c00)">বদল ' + _spQ(ex) + '</div>' : '') + '</td>';
-    h += '<td class="sp-stk" style="padding:7px 10px 7px 6px;text-align:right;font-weight:800">' + _spQ(p.currentStock) + '</td></tr>';
+    h += '<td style="padding:3px 8px"><div style="display:flex;align-items:center;gap:6px"><div class="sku-i" style="width:22px;height:22px;flex:none">' + (ti || '📦') + '</div><div style="font-weight:700;min-width:0">' + esc(p.productName) + '</div></div></td>';
+    h += '<td class="sp-stk" style="padding:3px 5px;text-align:right;font-weight:700">' + _spQ(p.prevStock) + '</td>';
+    h += '<td style="padding:3px 5px;text-align:right;font-weight:800;color:' + (sold > 0 ? 'var(--gr)' : 'var(--mt2)') + '">' + _spQ(sold) + (ex > 0 ? '<div style="font-size:10px;font-weight:600;color:var(--or,#c27c00)">বদল ' + _spQ(ex) + '</div>' : '') + '</td>';
+    h += '<td class="sp-stk" style="padding:3px 8px 3px 5px;text-align:right;font-weight:800">' + _spQ(p.currentStock) + '</td></tr>';
   });
-  h += '</tbody><tfoot><tr style="border-top:2px solid var(--sp-bd,var(--bl));font-weight:800;background:var(--sp-bg,var(--bll))"><td style="padding:8px 10px">মোট (পিস)</td><td class="sp-stk" style="padding:8px 6px;text-align:right">' + fn(tP) + '</td><td style="padding:8px 6px;text-align:right">' + fn(tS) + (tE > 0 ? '<div style="font-size:10px;font-weight:600">আসল ' + fn(tS - tE) + '</div>' : '') + '</td><td class="sp-stk" style="padding:8px 10px 8px 6px;text-align:right">' + fn(tC) + '</td></tr></tfoot></table></div>';
+  h += '</tbody><tfoot><tr style="border-top:2px solid var(--sp-bd,var(--bl));font-weight:800;background:var(--sp-bg,var(--bll))"><td style="padding:4px 8px">মোট (পিস)</td><td class="sp-stk" style="padding:4px 5px;text-align:right">' + fn(tP) + '</td><td style="padding:4px 5px;text-align:right">' + fn(tS) + (tE > 0 ? '<div style="font-size:10px;font-weight:600">আসল ' + fn(tS - tE) + '</div>' : '') + '</td><td class="sp-stk" style="padding:4px 8px 4px 5px;text-align:right">' + fn(tC) + '</td></tr></tfoot></table></div>';
   return h;
 }
 
@@ -4611,7 +4651,7 @@ function _mgrCashHtml() {
 var _LS = { list: null, at: 0, busy: false };
 function _lsHtml() {
   var l = _LS.list; if (!l || !l.length) return '';
-  var h = '<details class="card" style="border:2px solid var(--am);padding:0;margin:0 0 10px;overflow:hidden"><summary style="cursor:pointer;padding:10px 12px;font-weight:800;font-size:13px;background:var(--aml);color:#92400E;list-style:none">🔴 কম স্টক সতর্কতা — ' + l.length + ' পণ্য <span style="float:right;font-weight:600;font-size:11px">দেখুন ▾</span></summary>';
+  var h = '<details class="card" style="border:2px solid var(--am);padding:0;margin:0 0 10px;overflow:hidden"><summary class="ls-sum" style="cursor:pointer;padding:7px 12px;min-height:34px;box-sizing:border-box;display:flex;align-items:center;font-weight:800;font-size:13px;background:var(--aml);color:#92400E;list-style:none">🔴 কম স্টক সতর্কতা — ' + l.length + ' পণ্য <span style="float:right;font-weight:600;font-size:11px">দেখুন ▾</span></summary>';
   l.forEach(function(p) {
     var cs = num(p.caseSize) || 1, u = num(p.units), cases = Math.floor(u / cs), rem = u % cs;
     var st = (S.role === 'so') ? (u > 0 ? fn(Math.round(u)) + ' পিস' : '') : ((cases ? cases + ' ' + (p.unitType || 'কেস') + ' ' : '') + (rem ? rem + ' পিস' : '')); if (!st) st = 'স্টক নেই';
@@ -4867,9 +4907,10 @@ async function _loadDsrPerfView() {
   } else {
     var pct = me.pct, col = _tgtCol(pct);
     h += '<div class="card" style="padding:14px;margin-bottom:10px"><div style="display:flex;align-items:center;gap:14px">'
-      + _tgtDonut(pct, 112, 11, 'আমার টার্গেটে', '', false)
+      + _tgtDonut(pct, 112, 11, (me.basis==='boxes'?'বক্স':'টাকা')+' টার্গেটে', '', false)
       + '<div style="flex:1;min-width:0">'
       + '<div style="font-size:11px;color:var(--mt2)">এ পর্যন্ত বিক্রি</div><div style="font-size:18px;font-weight:800">৳'+fm(me.achieved)+'</div>'
+      + (me.targetBoxes>0 ? '<div style="font-size:11px;color:var(--mt2);margin-top:4px">📦 '+_fbox(me.achievedBoxes)+' / '+_fbox(me.targetBoxes)+' বক্স (SO-এর ভাগ)</div>' : '')
       + '<div style="font-size:11px;color:var(--mt2);margin-top:4px">'+(me.target>0 ? 'টার্গেট (SO-এর ভাগ) ৳'+fm(me.target)+' · '+(me.remaining>0?'বাকি ৳'+fm(me.remaining):'✅ পূর্ণ') : 'টার্গেট সেট নেই')+'</div>'
       + '</div></div>'
       + '<div style="display:flex;justify-content:space-between;margin-top:10px;font-size:11px;background:var(--bll);border-radius:10px;padding:7px 10px">'
@@ -4968,8 +5009,10 @@ function _dmdSlips(slips, color, dsrName, totLabel) {
   return h;
 }
 // Shop name that can be tapped to call the owner (if a number is saved) and verify the entry
-function _dmdShopCall(name, phone, what) {
+function _dmdShopCall(name, phone, what, shopId) {
   var nm = esc(name || '—');
+  // v5.17 — tapping a shop opens its memo book (খাতা: what it took, paid, due) instead of calling it
+  if (shopId) return '<b style="cursor:pointer;color:var(--bl);text-decoration:underline" onclick="event.stopPropagation();openShopLedger(\''+esc(String(shopId)).replace(/\'/g,'')+'\')">🏪 '+nm+' 📒</b>';
   if (!phone) return '<b>🏪 '+nm+'</b>';
   return '<b style="cursor:pointer;color:var(--bl);text-decoration:underline" onclick="event.stopPropagation();dmdCallShop(\''+esc(String(phone)).replace(/\'/g,'')+'\',\''+esc(String(name||'')).replace(/\'/g,'')+'\',\''+esc(what||'')+'\')">🏪 '+nm+' 📞</b>';
 }
@@ -5012,7 +5055,7 @@ function _dmdLineBox(lines, color, totLabel, amtOf, rowFn) {
 function _dmdSaleLines(lines, color, what, totLabel) {
   return _dmdLineBox(lines, color, totLabel, function(l) { return l.amount; }, function(l) {
     var tm = _dmdTime(l.createdAt);
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, what)+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+(l.isPoint ? '<b style="color:#0891B2">🛒 পয়েন্ট সেল'+(l.shopName ? ' · '+esc(l.shopName) : '')+'</b>' : _dmdShopCall(l.shopName, l.shopPhone, what, l.shopId))+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
       + '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm)+' · ' : '')+esc(l.productName)+' × '+_dmdCP(l.cases, l.pcs, l.units, _utOf(l))+' · বিক্রয় ৳'+fm(l.saleValue)+'</div>';
   });
 }
@@ -5021,7 +5064,7 @@ function _dmdDueLines(lines, color, totLabel) {
   if (!lines || !lines.length) return '<div style="text-align:center;color:var(--gr);font-weight:700;padding:12px;font-size:12px">✅ কোনো বাকি নেই</div>';
   return '<div style="font-size:10.5px;color:var(--mt2);background:var(--bll);border-radius:8px;padding:6px 9px;margin-bottom:4px">ℹ️ বিক্রির ২৪ ঘণ্টার মধ্যে টাকা না পেলে সেটাই <b>বাকি</b> হিসেবে দেখানো হয়।</div>' + _dmdLineBox(lines, color, totLabel, function(l) { return l.amount; }, function(l) {
     var tm = _dmdTime(l.createdAt);
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, 'বাকি')+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, 'বাকি', l.shopId)+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
       + '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm)+' · ' : '')+'মোট বিল ৳'+fm(l.original)+(l.paid>0 ? ' · জমা ৳'+fm(l.paid) : '')+'</div>';
   });
 }
@@ -5031,7 +5074,7 @@ function _dmdCashSection(title, color, total, lines, what) {
   if (!lines || !lines.length) return h + '<div style="font-size:11px;color:var(--mt2);padding:3px 0">নেই</div>';
   return h + _dmdLineBox(lines, color, 'মোট', function(l) { return l.amount; }, function(l) {
     var tm = _dmdTime(l.createdAt);
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, what)+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, what, l.shopId)+'<b style="color:'+color+'">৳'+fm(l.amount)+'</b></div>'
       + ((tm || l.productName) ? '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm) : '')+(tm && l.productName ? ' · ' : '')+esc(l.productName || '')+'</div>' : '');
   });
 }
@@ -5043,13 +5086,22 @@ function _dmdDetail(key, d) {
   _dmdNm = _nm;
   if (key === 'given')      return _dmdSlips(d.given.slips, 'var(--bl)', _nm, 'মোট দেওয়া');
   if (key === 'ret')        return _dmdSlips(d.ret.slips, 'var(--te)', _nm, 'মোট ফেরত');
+  if (key === 'saleReturn') return _dmdSlips((d.saleReturn || {}).slips, '#0D9488', _nm, 'মোট বিক্রয় ফেরত');
+  if (key === 'sale') {
+    var _g = num(d.given.total), _r = num(d.ret.total), _pt = num((d.pointSale || {}).total), _pr = num((d.pointReturn || {}).total);
+    return '<div style="font-size:12px;line-height:1.9"><div style="display:flex;justify-content:space-between"><span>📤 মোট দেওয়া</span><b style="color:var(--bl)">৳'+fm(_g)+'</b></div>'
+      + (_pt ? '<div style="display:flex;justify-content:space-between"><span>🛒 পয়েন্ট সেল</span><b style="color:#0891B2">+ ৳'+fm(_pt)+'</b></div>' : '')
+      + (_pr ? '<div style="display:flex;justify-content:space-between"><span>↩️ পয়েন্ট সেল ফেরত</span><b style="color:var(--te)">− ৳'+fm(_pr)+'</b></div>' : '')
+      + '<div style="display:flex;justify-content:space-between"><span>↩️ মোট ফেরত</span><b style="color:var(--te)">− ৳'+fm(_r)+'</b></div>'
+      + '<div style="display:flex;justify-content:space-between;border-top:2px solid #10B981;margin-top:4px;padding-top:4px;font-size:13px"><span><b>🧮 বিক্রয়</b></span><b style="color:#10B981">৳'+fm(_g+_pt-_r-_pr)+'</b></div></div>';
+  }
   if (key === 'commission') return _dmdSaleLines(d.commission.lines, 'var(--pu)', 'কমিশন', 'মোট কমিশন');
   if (key === 'discount')   return _dmdSaleLines(d.discount.lines, 'var(--am)', 'ছাড়', 'মোট ছাড়');
   if (key === 'todayDue')   return _dmdDueLines((d.todayDue || {}).lines, 'var(--re)', 'মোট বাকি');
   if (key === 'dueAll')     return _dmdDueLines([].concat((d.prevDue || {}).lines || [], (d.todayDue || {}).lines || []), 'var(--re)', 'মোট বাকি');
   if (key === 'prevDue')    return _dmdLineBox((d.cash || {}).dueLines, 'var(--or,#c27c00)', 'মোট আদায়', function(l) { return l.amount; }, function(l) {
     var tm = _dmdTime(l.createdAt);
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, 'আদায়')+'<b style="color:var(--or,#c27c00)">৳'+fm(l.amount)+'</b></div>'
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(l.shopName, l.shopPhone, 'আদায়', l.shopId)+'<b style="color:var(--or,#c27c00)">৳'+fm(l.amount)+'</b></div>'
       + (tm ? '<div style="font-size:11px;color:var(--mt2)">🕒 '+esc(tm)+'</div>' : '');
   });
   if (key === 'pointSale')  return _dmdSlips((d.pointSale || {}).slips, '#0891B2', _nm, 'মোট পয়েন্ট সেল');
@@ -5061,7 +5113,7 @@ function _dmdDetail(key, d) {
       h += '<div style="font-size:11px;font-weight:800;color:var(--re);margin:10px 0 0">🏪 দোকান থেকে নেওয়া ড্যামেজ</div>';
       h += _dmdLineBox(dm.shopDamage, 'var(--re)', 'মোট ড্যামেজ', function(x) { return x.damagedValue; }, function(x) {
         var ex = x.exch || {}, tm = _dmdTime(x.createdAt);
-        return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(x.shopName, x.shopPhone, 'ড্যামেজ')+'<b style="color:var(--re)">৳'+fm(x.damagedValue)+'</b></div>'
+        return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">'+_dmdShopCall(x.shopName, x.shopPhone, 'ড্যামেজ', x.shopId)+'<b style="color:var(--re)">৳'+fm(x.damagedValue)+'</b></div>'
           + '<div style="font-size:11px;color:var(--mt2)">'+(tm ? '🕒 '+esc(tm)+' · ' : '')+esc(x.productName)+' × '+_dmdCP(x.cases, x.pcs, x.units, _utOf(x))+' · '+(x.resolution==='money' ? '💵 টাকা ফেরত ৳'+fm(x.refundAmt) : '🔁 বদল: '+esc(x.exchProductName)+' × '+_dmdCP(ex.cases, ex.pcs, x.exchUnits, _utOf({productName:x.exchProductName}))+' (৳'+fm(x.exchValue)+')')+'</div>';
       });
     }
@@ -5111,25 +5163,25 @@ function _dsrTxDetailHtml(txs, myDay) {
   var pm = {}, pOrder = [];
   txs.forEach(function(t) {
     var k = String(t.productId || t.productName);
-    if (!pm[k]) { pm[k] = { pid: t.productId, name: t.productName, give: 0, ret: 0, dmg: 0, sold: 0, rev: 0, dmgVal: 0 }; pOrder.push(k); }
+    if (!pm[k]) { pm[k] = { pid: t.productId, name: t.productName, give: 0, ret: 0, dmg: 0, sold: 0, pt: 0, sret: 0, rev: 0, dmgVal: 0 }; pOrder.push(k); }
     var u = num(t.totalUnits);
     pm[k].rev += num(t.totalRevenue);
     if (t.type === 'damage') pm[k].dmgVal += num(t.totalRevenue);
     if (t.type === 'give') pm[k].give += u; else if (t.type === 'return') pm[k].ret += u;
-    else if (t.type === 'damage') pm[k].dmg += u; else if (t.type === 'dsr_sale') pm[k].sold += u;
+    else if (t.type === 'damage') pm[k].dmg += u; else if (t.type === 'dsr_sale') pm[k].sold += u; else if (t.type === 'point_sale') pm[k].pt += u; else if (t.type === 'dsr_sale_return') pm[k].sret += u;
   });
   var cell = function(pid, u, clr) { return u > 0 ? '<span style="color:'+clr+'">'+_dmdCP(_dsrCaseSplit(pid, u).cases, _dsrCaseSplit(pid, u).pcs, u, _utOf({productId:pid}))+'</span>' : '<span style="color:var(--mt2)">—</span>'; };
   h += '<div style="font-size:12px;font-weight:800;margin:2px 0 4px">📦 পণ্য অনুযায়ী মোট</div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)"><th style="padding:5px 6px;text-align:left">পণ্য</th><th style="padding:5px 4px">দেওয়া</th><th style="padding:5px 4px">ফেরত</th><th style="padding:5px 4px">দোকানে</th><th style="padding:5px 4px">ড্যামেজ</th><th style="padding:5px 4px">ক্রয় দর</th><th style="padding:5px 4px">মোট মূল্য</th></tr></thead><tbody>';
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)"><th style="padding:5px 6px;text-align:left">পণ্য</th><th style="padding:5px 4px">দেওয়া</th><th style="padding:5px 4px">ফেরত</th><th style="padding:5px 4px">দোকানে</th><th style="padding:5px 4px">পয়েন্ট</th><th style="padding:5px 4px">দোকান-ফেরত</th><th style="padding:5px 4px">ড্যামেজ</th><th style="padding:5px 4px">ক্রয় দর</th><th style="padding:5px 4px">মোট মূল্য</th></tr></thead><tbody>';
   pOrder.sort(function(a, b) { return _ordOf(pm[a]) - _ordOf(pm[b]); });
   var grandRev = 0;
   pOrder.forEach(function(k) {
     var p = pm[k];
-    h += '<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:5px 6px;font-weight:700">'+esc(p.name)+'</td><td style="text-align:center">'+cell(p.pid, p.give, 'var(--bl)')+'</td><td style="text-align:center">'+cell(p.pid, p.ret, 'var(--te)')+'</td><td style="text-align:center">'+cell(p.pid, p.sold, 'var(--am)')+'</td><td style="text-align:center">'+cell(p.pid, p.dmg, 'var(--re)')+(p.dmgVal > 0 ? '<div style="font-size:10px;color:var(--re)">৳'+fm(p.dmgVal)+'</div>' : '')+'</td>'
+    h += '<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:5px 6px;font-weight:700">'+esc(p.name)+'</td><td style="text-align:center">'+cell(p.pid, p.give, 'var(--bl)')+'</td><td style="text-align:center">'+cell(p.pid, p.ret, 'var(--te)')+'</td><td style="text-align:center">'+cell(p.pid, p.sold, 'var(--am)')+'</td><td style="text-align:center">'+cell(p.pid, p.pt, '#0891B2')+'</td><td style="text-align:center">'+cell(p.pid, p.sret, '#0D9488')+'</td><td style="text-align:center">'+cell(p.pid, p.dmg, 'var(--re)')+(p.dmgVal > 0 ? '<div style="font-size:10px;color:var(--re)">৳'+fm(p.dmgVal)+'</div>' : '')+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'+_dsrBuyRate(p.pid)+'</td><td style="text-align:center;font-weight:800;white-space:nowrap">৳'+fm(p.rev)+'</td></tr>';
     grandRev += p.rev;
   });
-  h += '<tr style="background:var(--bll)"><td colspan="6" style="padding:6px;font-weight:800;text-align:right">সর্বমোট</td><td style="text-align:center;font-weight:800;color:var(--bl);white-space:nowrap">৳'+fm(grandRev)+'</td></tr>';
+  h += '<tr style="background:var(--bll)"><td colspan="8" style="padding:6px;font-weight:800;text-align:right">সর্বমোট</td><td style="text-align:center;font-weight:800;color:var(--bl);white-space:nowrap">৳'+fm(grandRev)+'</td></tr>';
   h += '</tbody></table></div>';
   // date → slips
   var g = _dmdByDate(slips);
@@ -5139,7 +5191,7 @@ function _dsrTxDetailHtml(txs, myDay) {
     rows.forEach(function(s) {
       var tm = _dmdTime(s.createdAt), sh = s.shopId ? (shops[s.shopId] || {}) : null;
       h += '<div style="padding:8px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:3px"><span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0">'+((s.type === 'dsr_sale' && s.shopId) ? '' : txBdg(s.type))
-        + (s.shopId ? _dmdShopCall((sh && sh.name) || 'দোকান', sh && sh.phone, 'বিক্রয়') : '')+'</span><span style="font-size:11px;color:var(--mt2);white-space:nowrap">'+(tm ? '🕒 '+esc(tm) : '')+'</span></div>';
+        + (s.shopId ? _dmdShopCall((sh && sh.name) || 'দোকান', sh && sh.phone, 'বিক্রয়', s.shopId) : '')+'</span><span style="font-size:11px;color:var(--mt2);white-space:nowrap">'+(tm ? '🕒 '+esc(tm) : '')+'</span></div>';
       _sortItems(s.items).forEach(function(it) {
         h += '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:1px 0"><span>'+esc(it.productName)+' × '+_dmdCP(it.cases, it.pcs, it.totalUnits, _utOf(it))+'</span><span style="color:var(--mt);white-space:nowrap">৳'+fm(it.totalRevenue)+'</span></div>';
       });
@@ -5156,12 +5208,13 @@ function _dsrTxDetailBox(txs, ctx) {
   var open = (ctx.open != null) ? !!ctx.open : !!S.dsrTxOpen, c = 'var(--bl)';
   // the bar shows how many shops were sold to (and the sale amount); the list below has every slip
   var _shs = {}, _shAmt = 0;
-  txs.forEach(function(t) { if (t.type === 'dsr_sale') { if (t.shopId) _shs[String(t.shopId)] = 1; _shAmt += num(t.totalRevenue); } });
+  var _ptAmt = 0;
+  txs.forEach(function(t) { if (t.type === 'dsr_sale' || t.type === 'point_sale') { if (t.shopId) _shs[String(t.shopId)] = 1; _shAmt += num(t.totalRevenue); if (t.type === 'point_sale') _ptAmt += num(t.totalRevenue); } });
   var nShop = Object.keys(_shs).length;
   var _f = myDay ? myDay.from : (S.dsrDate || iso(new Date())), _t = myDay ? myDay.to : _f;
   var _when = (_f === _t) ? (_f === iso(new Date()) ? 'আজ' : fmtBn(_f)) : 'এই সময়ে';
-  var h = '<div class="dmd-box dsr-cell" onclick="'+tgl+'()" style="margin:4px 0 '+(open?'0':'5px')+';border-color:'+c+(open?';box-shadow:0 0 0 2px '+c+';border-bottom-left-radius:0;border-bottom-right-radius:0':'')+'">'
-    + '<div style="min-width:0"><div class="dmd-l" style="color:'+c+'">🏪 '+esc(_when)+' '+fn(nShop)+'টি দোকানে বিক্রয়</div><div class="dmd-s">📋 লেনদেনের বিস্তারিত</div></div>'
+  var h = '<div class="dmd-box dsr-cell" onclick="'+tgl+'()" style="margin:4px 0 '+(open?'0':'5px')+';border-color:'+c+';border-top-width:3px'+(open?';box-shadow:0 0 0 2px '+c+';border-bottom-left-radius:0;border-bottom-right-radius:0':'')+'">'
+    + '<div style="min-width:0"><div class="dmd-l" style="color:'+c+'">🏪 '+esc(_when)+' '+fn(nShop)+'টি দোকানে বিক্রয়</div><div class="dmd-s">📋 লেনদেনের বিস্তারিত'+(_ptAmt > 0 ? ' · 🛒 পয়েন্ট সেল ৳'+fm(_ptAmt)+' সহ' : '')+'</div></div>'
     + '<div class="dmd-v" style="color:'+c+'">৳'+fm(_shAmt)+' <span class="dmd-car">'+(open?'▴':'▾')+'</span></div></div>';
   if (open) h += '<div class="card" id="dmd-txd" style="margin:0 0 9px;border-top-left-radius:0;border-top-right-radius:0;border-color:'+c+'"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:13px;font-weight:800">📋 লেনদেনের বিস্তারিত</div><button class="btn btn-gh btn-sm" onclick="'+tgl+'()">✕ বন্ধ</button></div>'+_dsrTxDetailHtml(txs, myDay)+'</div>';
   return h;
@@ -5174,7 +5227,7 @@ function dsrToggleTxd() {
   if (S.dsrTxOpen) { var el = document.getElementById('dmd-txd'); if (el) { try { el.scrollIntoView({ behavior:'smooth', block:'nearest' }); } catch(e){} } }
 }
 
-var _DMD_TITLES = { given:'📤 দেওয়া', ret:'↩️ ফেরত', damage:'⚠️ ড্যামেজ', commission:'🤝 কমিশন', discount:'🏷️ ছাড়', todayDue:'🧾 আজকের বাকি', prevDue:'📒 পূর্বের বাকি আদায়', pointSale:'🛒 পয়েন্ট সেল', dueAll:'📕 মোট বাকি', cash:'💰 জমা দিতে হবে' };
+var _DMD_TITLES = { given:'📤 দেওয়া', ret:'↩️ ফেরত', saleReturn:'🔁 বিক্রয় ফেরত', sale:'🧮 আজকের বিক্রয়', damage:'⚠️ ড্যামেজ', commission:'🤝 কমিশন', discount:'🏷️ ছাড়', todayDue:'🧾 আজকের বাকি', prevDue:'📒 পূর্বের বাকি আদায়', pointSale:'🛒 পয়েন্ট সেল', dueAll:'📕 মোট বাকি', cash:'💰 জমা দিতে হবে' };
 
 // d = /api/sr-payments?action=dsr-my-day এর উত্তর; open = খোলা বক্সের কী; toggleFn = টগল ফাংশনের নাম
 function _dmdBoardHtml(d, open, toggleFn) {
@@ -5182,16 +5235,20 @@ function _dmdBoardHtml(d, open, toggleFn) {
   var single = d.from === d.to;
   var c = d.cash;
   var ps = d.pointSale || { total: 0, slips: [] };
+  var netSale = (d.netSale != null) ? d.netSale : (num(d.given.total) + num(ps.total) - num(d.ret.total) - num((d.pointReturn || {}).total));
+  var sr = d.saleReturn || { total: 0, slips: [] };
   var boxes = [
     {k:'given',      ic:'📤', lb:'দেওয়া',   v:d.given.total,      c:'var(--bl)'},
     {k:'ret',        ic:'↩️', lb:'ফেরত',    v:d.ret.total,        c:'var(--te)'},
+    {k:'saleReturn', ic:'🔁', lb:'বিক্রয় ফেরত', v:sr.total,       c:'#0D9488', sub: sr.slips.length ? sr.slips.length+'টি স্লিপ — দোকান থেকে ফেরত এসে গাড়ির স্টকে ফিরেছে' : 'দোকান থেকে ফেরত আসা পণ্য'},
+    {k:'sale',       ic:'🧮', lb: single ? 'আজকের বিক্রয়' : 'এই সময়ের বিক্রয়', v:netSale, c:'#10B981', sub:'দেওয়া'+(num(ps.total)>0 ? ' + পয়েন্ট সেল' : '')+' − ফেরত = বিক্রয়'},
     {k:'damage',     ic:'⚠️', lb:'ড্যামেজ',  v:d.damage.total,     c:'var(--re)'},
-    {k:'pointSale',  ic:'🛒', lb:'পয়েন্ট সেল', v:ps.total,         c:'#0891B2', sub: ps.slips.length ? ps.slips.length+'টি স্লিপ — ম্যানেজার/মালিকের বিক্রয়, টাকা তাঁর কাছ থেকে নিতে হবে' : ''},
     {k:'commission', ic:'🤝', lb:'কমিশন',   v:d.commission.total, c:'var(--pu)'},
     {k:'discount',   ic:'🏷️', lb:'ছাড়',     v:d.discount.total,   c:'var(--am)'},
     {k:'todayDue',   ic:'🧾', lb: single ? 'আজকের বাকি' : 'এই সময়ের বাকি', v:(d.todayDue||{}).total||0, c:'var(--re)'},
     {k:'prevDue',    ic:'📒', lb:'পূর্বের বাকি আদায়', v:c.dueCollected||0,  c:'var(--or,#c27c00)', sub:'আগের বাকি থেকে এই সময়ে যা আদায় হয়েছে'},
-    {k:'cash',       ic:'💰', lb:'ম্যানেজার/মালিককে জমা দিতে হবে', v:c.inHand, c:'var(--gr)', big:true}
+    {k:'cash',       ic:'💰', lb:'ম্যানেজার/মালিককে জমা দিতে হবে', v:c.inHand, c:'var(--gr)', big:true},
+    {k:'pointSale',  ic:'🛒', lb:'পয়েন্ট সেল', v:ps.total,         c:'#0891B2', sub: ps.slips.length ? ps.slips.length+'টি স্লিপ — ম্যানেজার/মালিকের বিক্রয়, টাকা তাঁর কাছ থেকে নিতে হবে' : 'এই সময়ে কোনো পয়েন্ট সেল নেই'}
   ];
   var rcv = d.received || {}, rcvTotal = (rcv.total != null) ? rcv.total : c.handedOver;
   var dueAllTotal = (d.dueAll && d.dueAll.total != null) ? d.dueAll.total : (num((d.todayDue||{}).total) + num((d.prevDue||{}).total));
@@ -5207,9 +5264,10 @@ function _dmdBoardHtml(d, open, toggleFn) {
   if (topOpen) h += detailCard('dueAll', '#991B1B');
   boxes.forEach(function(b) {
     var isOpen = open === b.k;
-    h += '<div class="dmd-box dsr-cell" onclick="'+toggleFn+'(\''+b.k+'\')" style="margin-bottom:'+(isOpen?'0':'5px')+';border-color:'+b.c+(b.big?';background:var(--grl)':'')+(isOpen?';box-shadow:0 0 0 2px '+b.c+';border-bottom-left-radius:0;border-bottom-right-radius:0':'')+'">'
+    h += '<div class="dmd-box dsr-cell" onclick="'+toggleFn+'(\''+b.k+'\')" style="margin-bottom:'+(isOpen?'0':'5px')+';border-color:'+b.c+';border-top-width:3px'+(b.big?';background:var(--grl)':'')+(isOpen?';box-shadow:0 0 0 2px '+b.c+';border-bottom-left-radius:0;border-bottom-right-radius:0':'')+'">'
       + '<div style="min-width:0"><div class="dmd-l" style="color:'+b.c+'">'+b.ic+' '+b.lb+'</div>'
-      + (b.k==='cash' ? '<div class="dmd-s">বিক্রয়ে নগদ ৳'+fm(c.cashAtSale)+' + বাকি আদায় ৳'+fm(c.dueCollected)+' − ড্যামেজে দেওয়া ৳'+fm(c.damageMoneyPaid)+(c.handedOver>0 ? ' · জমা হয়েছে ৳'+fm(c.handedOver)+' · এখনো বাকি <b>৳'+fm(Math.max(0,c.stillToHandOver))+'</b>' : '')+(ps.total>0 ? '<br>🛒 পয়েন্ট সেলের ৳'+fm(ps.total)+' ম্যানেজার/মালিক থেকে নিয়ে আলাদা জমা দিতে হবে' : '')+'<br>সিস্টেমে মোট জমা পেয়েছি ৳'+fm(rcvTotal)+'</div>' : (b.sub ? '<div class="dmd-s">'+b.sub+'</div>' : ''))
+      + (b.k==='sale' ? '<div class="dmd-s">দেওয়া ৳'+fm(d.given.total)+(num(ps.total)>0 ? ' + পয়েন্ট ৳'+fm(ps.total) : '')+' − ফেরত ৳'+fm(num(d.ret.total)+num((d.pointReturn||{}).total))+'</div>' : '')
+      + (b.k==='cash' ? '<div class="dmd-s">বিক্রয়ে নগদ ৳'+fm(c.cashAtSale)+' + বাকি আদায় ৳'+fm(c.dueCollected)+' − ড্যামেজে দেওয়া ৳'+fm(c.damageMoneyPaid)+(c.handedOver>0 ? ' · জমা হয়েছে ৳'+fm(c.handedOver)+' · এখনো বাকি <b>৳'+fm(Math.max(0,c.stillToHandOver))+'</b>' : '')+'<br>সিস্টেমে মোট জমা পেয়েছি ৳'+fm(rcvTotal)+'</div>' : (b.sub ? '<div class="dmd-s">'+b.sub+'</div>' : ''))
       + '</div>'
       + '<div class="dmd-v" style="color:'+b.c+'">৳'+fm(b.v)+' <span class="dmd-car">'+(isOpen?'▴':'▾')+'</span></div></div>';
     if (isOpen) h += detailCard(b.k, b.c);
@@ -5242,20 +5300,35 @@ function _dsrvHtml() {
   var h = '<div class="ct">📝 DSR লেনদেন</div>';
   if (!list.length) return h + '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">'+(S.role==='so' ? 'কোনো নিযুক্ত DSR নেই' : 'কোনো DSR পাওয়া যায়নি')+'</div>';
   if (!g.dsrId || (g.dsrId !== 'all' && !list.some(function(x){ return String(x.id) === String(g.dsrId); }))) g.dsrId = String(list[0].id);
-  // v5.13 — one slim row: DSR name + date together (mode chips sit in the title line)
+  // v5.16 — two EQUAL, tinted boxes: [DSR picker (name · SO)] [date box with আজ / রেঞ্জ chips inside]
   var td0 = iso(new Date());
-  h = h.replace('<div class="ct">📝 DSR লেনদেন</div>', '<div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>📝 DSR লেনদেন</span><span style="display:flex;gap:4px;font-weight:600">'
-    + '<button class="btn btn-sm '+(g.mode==='today'?'btn-bl':'btn-gh')+'" style="padding:2px 9px;font-size:10.5px" onclick="dsrvMode(\'today\')">আজ</button>'
-    + '<button class="btn btn-sm '+(g.mode==='range'?'btn-bl':'btn-gh')+'" style="padding:2px 9px;font-size:10.5px" onclick="dsrvMode(\'range\')">রেঞ্জ</button></span></div>');
-  h += '<div class="card" style="padding:6px 8px;margin-bottom:8px"><div style="display:flex;gap:6px;align-items:center">'
-    + '<select id="dsrv-sel" onchange="dsrvPick(this.value)" style="flex:1.3;min-width:0;margin:0;padding:7px 8px;font-size:13px">'
-    + list.map(function(x){ return '<option value="'+esc(x.id)+'"'+(String(x.id)===String(g.dsrId)?' selected':'')+'>🚚 '+esc(x.name)+(x.area?' ('+esc(x.area)+')':'')+'</option>'; }).join('')
-    + (S.role !== 'so' ? '<option value="all"'+(g.dsrId==='all'?' selected':'')+'>👥 সব DSR একসাথে</option>' : '')
-    + '</select>';
-  if (g.mode !== 'range') h += '<input type="date" id="dsrv-dt" max="'+td0+'" value="'+esc(g.mode==='today' ? td0 : g.date)+'" onchange="S.dsrv.mode=\'custom\';S.dsrv.date=this.value;dsrvLoad()" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px">';
+  var curNm = g.dsrId === 'all' ? '👥 সব DSR একসাথে' : (function(){ var x = list.filter(function(y){ return String(y.id) === String(g.dsrId); })[0]; return x ? '🚚 ' + x.name : 'বাছুন'; })();
+  var curSo = g.dsrId === 'all' ? 'সব SO-র সব DSR' : (function(){ var x = list.filter(function(y){ return String(y.id) === String(g.dsrId); })[0]; return x ? _dsrvSoName(x) : ''; })();
+  var BOXS = 'height:76px;box-sizing:border-box;border-radius:14px;padding:7px 10px;display:flex;flex-direction:column;justify-content:center;gap:3px;min-width:0;';
+  h += '<div style="position:relative;margin-bottom:8px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch">'
+    + '<div onclick="dsrvDdToggle()" style="' + BOXS + 'cursor:pointer;background:linear-gradient(135deg,#ECFDF5,#D1FAE5);border:1.5px solid #10B981">'
+    +   '<div style="font-size:9.5px;font-weight:800;color:#047857;letter-spacing:.3px">🚚 DSR নির্বাচন</div>'
+    +   '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px"><div style="min-width:0"><div style="font-size:13px;font-weight:800;color:#064E3B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(curNm) + '</div>'
+    +   '<div style="font-size:10px;color:#047857;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(curSo) + '</div></div><span style="font-size:11px;color:#047857">' + (g.ddOpen ? '▴' : '▾') + '</span></div></div>'
+    + '<div style="' + BOXS + 'background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #3B82F6">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px"><span style="font-size:9.5px;font-weight:800;color:#1D4ED8;letter-spacing:.3px">📅 তারিখ</span><span style="display:flex;gap:3px">'
+    +   '<button class="btn btn-sm ' + (g.mode==='today'?'btn-bl':'btn-gh') + '" style="padding:1px 8px;font-size:10px;line-height:1.5" onclick="dsrvMode(\'today\')">আজ</button>'
+    +   '<button class="btn btn-sm ' + (g.mode==='range'?'btn-bl':'btn-gh') + '" style="padding:1px 8px;font-size:10px;line-height:1.5" onclick="dsrvMode(\'range\')">রেঞ্জ</button></span></div>';
+  if (g.mode !== 'range') h += '<input type="date" id="dsrv-dt" max="'+td0+'" value="'+esc(g.mode==='today' ? td0 : g.date)+'" onchange="S.dsrv.mode=\'custom\';S.dsrv.date=this.value;dsrvLoad()" style="margin:0;padding:3px 6px;font-size:12.5px;font-weight:700;background:rgba(255,255,255,.7);border:1px solid #93C5FD;height:30px">';
+  else h += '<div style="font-size:11px;font-weight:700;color:#1D4ED8;height:30px;display:flex;align-items:center">নিচে শুরু ও শেষ তারিখ দিন ▾</div>';
+  h += '</div></div>';
+  // dropdown — shows ~7 rows before it scrolls; each row = DSR name + that DSR's SO
+  if (g.ddOpen) {
+    h += '<div style="position:absolute;left:0;right:0;top:82px;z-index:30;background:var(--card);border:1.5px solid #10B981;border-radius:14px;box-shadow:0 14px 30px -8px rgba(0,0,0,.3);max-height:' + (7 * 50) + 'px;overflow-y:auto;overscroll-behavior:contain">';
+    if (S.role !== 'so') h += '<div onclick="dsrvPick(\'all\')" style="padding:9px 12px;border-bottom:1px solid var(--bdr);cursor:pointer;min-height:32px;' + (g.dsrId==='all'?'background:var(--grl);':'') + '"><div style="font-size:13px;font-weight:800">👥 সব DSR একসাথে</div><div style="font-size:10.5px;color:var(--mt2)">সব SO-র সব DSR-এর মোট</div></div>';
+    list.forEach(function(x){
+      var on = String(x.id) === String(g.dsrId);
+      h += '<div onclick="dsrvPick(\'' + esc(x.id) + '\')" style="padding:8px 12px;border-bottom:1px solid var(--bdr);cursor:pointer;min-height:34px;' + (on?'background:var(--grl);':'') + '"><div style="font-size:13px;font-weight:' + (on?800:700) + '">🚚 ' + esc(x.name) + (x.area ? ' <span style="font-weight:500;color:var(--mt2);font-size:11px">(' + esc(x.area) + ')</span>' : '') + '</div><div style="font-size:10.5px;color:#047857;font-weight:600">' + esc(_dsrvSoName(x)) + '</div></div>';
+    });
+    h += '</div>';
+  }
   h += '</div>';
-  if (g.mode === 'range') h += '<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="date" id="dsrv-fr" value="'+esc(g.from)+'" onchange="S.dsrv.from=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><span style="color:var(--mt2)">—</span><input type="date" id="dsrv-to" value="'+esc(g.to)+'" onchange="S.dsrv.to=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><button class="btn btn-bl btn-sm" onclick="dsrvLoad()">📊</button></div>';
-  h += '</div>';
+  if (g.mode === 'range') h += '<div class="card" style="padding:6px 8px;margin-bottom:8px"><div style="display:flex;gap:6px;align-items:center"><input type="date" id="dsrv-fr" value="'+esc(g.from)+'" onchange="S.dsrv.from=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><span style="color:var(--mt2)">—</span><input type="date" id="dsrv-to" value="'+esc(g.to)+'" onchange="S.dsrv.to=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><button class="btn btn-bl btn-sm" onclick="dsrvLoad()">📊</button></div></div>';
   var d = g.data;
   h += g.loaded ? _dmdBoardHtml(d, g.open, 'dsrvToggle') : '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">লোড হচ্ছে...</div>';
   // same last bar as the DSR's own panel: how many shops were sold to + the full slip list
@@ -5296,7 +5369,9 @@ async function _dsrvLoadInner(g) {
   if (!r || !r.ok) { g.data = null; _dsrvPaint(); return toast((r && r.error) || 'লোড ব্যর্থ'); }
   g.data = r; _dsrvPaint();
 }
-function dsrvPick(id) { var g = _dsrvState(); g.dsrId = String(id); g.loaded = false; _dsrvPaint(); dsrvLoad(); }
+function _dsrvSoName(x) { var n = x && (x.soName || ''); if (!n && S.role === 'so') n = S.userName || ''; return n ? 'SO: ' + n : 'SO নির্ধারিত নেই'; }
+function dsrvDdToggle() { var g = _dsrvState(); g.ddOpen = !g.ddOpen; _dsrvPaint(); }
+function dsrvPick(id) { var g = _dsrvState(); g.dsrId = String(id); g.ddOpen = false; g.loaded = false; _dsrvPaint(); dsrvLoad(); }
 function dsrvMode(m) {
   var g = _dsrvState(); g.mode = m;
   if (m === 'today') { g.date = iso(new Date()); g.loaded = false; _dsrvPaint(); dsrvLoad(); }
@@ -5544,6 +5619,7 @@ function _paintShopsList(shops) {
     h += '<div style="font-size:11px;color:var(--mt2)">🚚 '+esc(s.assignedDsrName||'—')+(s.address?' · '+esc(s.address):'')+'</div></div>';
     if (num(s.totalDue) > 0) h += '<div style="font-size:12px;font-weight:700;color:var(--re)">৳'+fm(s.totalDue)+'</div>';
     else h += '<div style="font-size:11px;color:var(--gr)">✓ বাকি নেই</div>';
+    if (S.role === 'owner' || S.role === 'manager') h += '<button class="btn btn-gh btn-sm" style="padding:4px 8px;margin-left:6px;flex-shrink:0" title="সম্পাদনা" onclick="event.stopPropagation();_openShopEdit(\''+s.id+'\')">✏️</button>';
     h += '</div>';
   });
   if (shops.length > _lim) h += '<button class="btn btn-bl btn-w btn-sm" style="margin-top:8px" onclick="S.shopsLimit=(S.shopsLimit||200)+300;_paintShopsList(S.shopsList||[])">আরও দেখান ('+(shops.length-_lim)+'টি বাকি)</button>';
@@ -5559,6 +5635,7 @@ async function _openShopDetail(id) {
   _paintShopsMapTab();
 }
 
+async function _openShopEdit(id) { await _openShopDetail(id); S.shopEditMode = true; _paintShopsMapTab(); }
 // ── Update #37 — Owner-only shop edit (name + phone; GPS locked).
 //    Extended: road (and therefore DSR) can now also be reassigned here,
 //    so a mis-registered or reorganised shop doesn't need to be deleted
@@ -5566,12 +5643,16 @@ async function _openShopDetail(id) {
 async function _shopEditSave(shopId) {
   var name = (document.getElementById('shed-name')||{}).value || '';
   var phone = (document.getElementById('shed-phone')||{}).value || '';
+  var keeper = (document.getElementById('shed-keeper')||{}).value || '';
+  var addr = (document.getElementById('shed-addr')||{}).value || '';
   var roadId = (document.getElementById('shed-road')||{}).value;
   if (!name.trim()) return toast('দোকানের নাম লিখুন');
-  var ok = await confirmOwnerPin('শপ তথ্য সম্পাদনা নিশ্চিত করতে Owner PIN দিন');
+  // v5.16 — Owner AND Manager can edit; the editor confirms with his OWN password (checked again on the server)
+  var ok = await confirmSelfPin('শপ তথ্য সম্পাদনা নিশ্চিত করতে আপনার নিজের PIN দিন');
   if (!ok) return;
   showOvl('সংরক্ষণ হচ্ছে...');
-  var body = { action: 'edit', shopId: shopId, name: name.trim(), phone: phone.trim(), ownerPin: window._lastOwnerPin };
+  var body = { action: 'edit', shopId: shopId, name: name.trim(), phone: phone.trim(), keeperName: keeper.trim(), address: addr.trim(),
+    actorId: S.userId, pin: window._lastOwnerPin, ownerPin: window._lastOwnerPin };
   if (roadId !== undefined) body.roadId = roadId; // '' clears the road, an id reassigns it
   var r = await apiPost('/api/shops', body);
   hideOvl();
@@ -5600,15 +5681,18 @@ function _renderShopsMapDetail() {
   var el = document.getElementById('pg-shopsmap'); if (!el) return;
   var d = S.shopsDetailData || {}, shop = d.shop || {};
   var isOwner = S.role === 'owner';
+  var canEditShop = (S.role === 'owner' || S.role === 'manager');
   var h = '';
   h += '<div class="ct">🏪 '+esc(shop.name)+' <span style="font-size:11px;color:var(--mt2)">('+esc(shop.shopNo)+')</span></div>';
 
   // ── Update #37 — Owner-only edit form (name + phone only; GPS stays
   //    locked — delete + re-register is the only way to move a shop). ──
-  if (isOwner && S.shopEditMode) {
+  if (canEditShop && S.shopEditMode) {
     h += '<div class="card" style="margin-bottom:10px">';
     h += '<div class="fg"><label class="fl">দোকানের নাম *</label><input id="shed-name" maxlength="200" value="'+esc(shop.name)+'"></div>';
+    h += '<div class="fg"><label class="fl">🧑 দোকান মালিকের নাম</label><input id="shed-keeper" maxlength="200" value="'+esc(shop.keeperName||'')+'"></div>';
     h += '<div class="fg"><label class="fl">ফোন নম্বর</label><input id="shed-phone" type="tel" maxlength="30" value="'+esc(shop.phone||'')+'"></div>';
+    h += '<div class="fg"><label class="fl">📍 ঠিকানা / এলাকা</label><input id="shed-addr" maxlength="300" value="'+esc(shop.address||'')+'"></div>';
     h += '<div class="fg"><label class="fl">🛣️ রোড (Road)</label><select id="shed-road">';
     h += '<option value=""'+(!shop.roadId?' selected':'')+'>— কোনো রোড নেই —</option>';
     (S.roads||[]).filter(function(rd){ return rd.dsrId; }).forEach(function(rd){
@@ -5616,7 +5700,7 @@ function _renderShopsMapDetail() {
     });
     h += '</select>';
     h += '<div style="font-size:10px;color:var(--mt2);margin-top:4px">রোড বদলালে এই শপের দায়িত্বপ্রাপ্ত DSR-ও স্বয়ংক্রিয়ভাবে নতুন রোডের DSR-এ পরিবর্তিত হবে।</div></div>';
-    h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:8px">📍 GPS লোকেশন এখানে বদলানো যাবে না — সরাতে হলে শপটি মুছে নতুন করে নিবন্ধন করুন।</div>';
+    h += '<div style="font-size:11px;color:var(--re);background:var(--rel);border-radius:8px;padding:7px 9px;margin-bottom:8px">🔒 GPS লোকেশন কখনোই বদলানো যায় না। দোকান অন্য জায়গায় সরাতে হলে শপটি মুছে (শুধু Owner পারবেন) নতুন করে নিবন্ধন করুন। বাকি তথ্য নিজের পাসওয়ার্ড দিয়ে বদলানো যাবে।</div>';
     h += '<div style="display:flex;gap:7px"><button class="btn btn-gh" style="flex:1" onclick="S.shopEditMode=false;_paintShopsMapTab()">বাতিল</button><button class="btn btn-bl" style="flex:1" onclick="_shopEditSave(\''+shop.id+'\')">✅ সংরক্ষণ করুন</button></div>';
     h += '</div>';
     el.innerHTML = h;
@@ -5634,10 +5718,10 @@ function _renderShopsMapDetail() {
   }
   h += '<div style="font-size:14px;font-weight:700;margin-top:10px;color:'+(num(d.totalDue)>0?'var(--re)':'var(--gr)')+'">মোট বাকি: ৳'+fm(d.totalDue||0)+'</div>';
   h += '<button class="btn btn-bl btn-w" style="margin-top:10px" onclick="openShopLedger(\''+shop.id+'\')">📒 লেনদেন খাতা (মেমো ও ইতিহাস)</button>';
-  if (isOwner) {
+  if (canEditShop) {
     h += '<div style="display:flex;gap:7px;margin-top:10px">'
       + '<button class="btn btn-gh btn-sm" style="flex:1" onclick="S.shopEditMode=true;_paintShopsMapTab()">✏️ সম্পাদনা</button>'
-      + '<button class="btn btn-re btn-sm" style="flex:1" onclick="_shopDelete(\''+shop.id+'\')">🗑️ মুছুন</button>'
+      + (isOwner ? '<button class="btn btn-re btn-sm" style="flex:1" onclick="_shopDelete(\''+shop.id+'\')">🗑️ মুছুন</button>' : '')
       + '</div>';
   }
   h += '</div>';
@@ -5690,10 +5774,10 @@ function closeShopLedger() {
 async function openShopLedger(shopId) {
   _LDG = { shopId: String(shopId), data: null, items: {}, openMemos: {}, openEv: {}, histOpen: false, histLimit: 15, byNo: {} };
   var el = _ldgEl(); el.scrollTop = 0;
-  el.innerHTML = '<div style="max-width:680px;margin:0 auto"><div class="card" style="text-align:center;padding:30px;margin-top:12px;color:var(--mt2)">📒 খাতা লোড হচ্ছে...</div></div>';
+  el.innerHTML = '<div style="max-width:100%;margin:0 auto"><div class="card" style="text-align:center;padding:30px;margin-top:12px;color:var(--mt2)">📒 খাতা লোড হচ্ছে...</div></div>';
   var r = await apiGet('/api/shops?action=ledger&shopId=' + encodeURIComponent(shopId));
   if (!r || !r.ok) {
-    el.innerHTML = '<div style="max-width:680px;margin:0 auto"><div class="card" style="text-align:center;padding:24px;margin-top:12px;color:var(--re)">' + esc((r && r.error) || 'লোড ব্যর্থ') + '</div></div>';
+    el.innerHTML = '<div style="max-width:100%;margin:0 auto"><div class="card" style="text-align:center;padding:24px;margin-top:12px;color:var(--re)">' + esc((r && r.error) || 'লোড ব্যর্থ') + '</div></div>';
     return;
   }
   _LDG.data = r;
@@ -5705,7 +5789,7 @@ function _ldgRender() {
   var st = el.scrollTop, r = _LDG.data, shop = r.shop || {}, sm = r.summary || {}, cycles = r.cycles || [];
   var openC = cycles.filter(function(c) { return c.status === 'open'; })[0];
   var closed = cycles.filter(function(c) { return c.status === 'closed'; });
-  var h = '<div style="max-width:680px;margin:0 auto">';
+  var h = '<div style="max-width:100%;margin:0 auto">';
   h += '<div class="ct" style="margin-bottom:4px">📒 লেনদেন খাতা — ' + esc(shop.name) + ' <span style="font-size:11px;color:var(--mt2)">(' + esc(shop.shopNo) + ')</span></div>';
   h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:10px">🚚 ' + esc(shop.assignedDsrName || '—') + (shop.roadName ? ' · 🛣️ ' + esc(shop.roadName) : '')
     + (shop.phone ? ' · <a href="tel:' + esc(shop.phone) + '" style="color:var(--bl);font-weight:700;text-decoration:none">📞 ' + esc(shop.phone) + '</a>' : '') + '</div>';
@@ -5789,7 +5873,7 @@ function _ldgEventRow(c, e, i) {
     } else h += '<div style="font-size:10px;color:var(--mt2);margin-top:3px">▼ বিস্তারিত</div>';
     h += '</div>';
   } else if (e.kind === 'ret') {
-    h += '<div style="' + row + '"><div style="display:flex;justify-content:space-between"><div><div style="font-size:12px;font-weight:700;color:#B45309">↩️ পয়েন্ট সেল ড্যামেজ/ফেরত</div><div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + ' · বাকির হিসাবে প্রভাব নেই</div></div><div style="font-size:12px;font-weight:700">৳' + fm(e.value) + '</div></div></div>';
+    h += '<div style="' + row + '"><div style="display:flex;justify-content:space-between"><div><div style="font-size:12px;font-weight:700;color:' + (e.saleReturn ? '#0D9488' : '#B45309') + '">' + (e.saleReturn ? '🔁 বিক্রয় ফেরত (পণ্য গাড়িতে ফিরেছে)' : '↩️ পয়েন্ট সেল ড্যামেজ/ফেরত') + '</div><div style="font-size:10px;color:var(--mt2)">' + _ldgDT(e.date, e.at) + (e.dsrName ? ' · ' + esc(e.dsrName) : '') + (e.saleReturn ? ' · এই মূল্য বাকি থেকে বাদ গেছে' : ' · বাকির হিসাবে প্রভাব নেই') + '</div></div><div style="font-size:12px;font-weight:700">৳' + fm(e.value) + '</div></div></div>';
   }
   return h;
 }
@@ -5940,6 +6024,7 @@ function _soSaleDsrPicker() {
 function soSaleDsrPick(id) {
   var x = _soSaleDsrList().filter(function(d){ return d.id === String(id); })[0]; if (!x) return;
   S.soSaleDsr = x; S.dsrShopMode = 'list'; S.dsrShopSel = null; S.dsrVanStock = null; S.dsrShopList = null;
+  if (S.soTab === 'duecol') { _loadDsrDueColView(); return; }
   _loadDsrShopView();
 }
 async function _loadDsrShopView() {
@@ -6146,9 +6231,12 @@ async function dsrCollectShopDue(dueId, rem) {
   var val = num(v('shopdue-amt-' + dueId));
   if (val <= 0) return toast('সঠিক পরিমাণ দিন');
   if (val > rem) val = rem;
+  var pin = await askDsrPin('বাকি আদায়', '<div>আদায়: <b style="color:var(--gr)">৳' + fm(val) + '</b> · এই এন্ট্রির বাকি: <b>৳' + fm(rem) + '</b></div>');
+  if (!pin) return;
   showOvl('আদায় হচ্ছে...');
-  var r = await apiPut('/api/due-calendar', { id: dueId, payAmount: val, collectorId: S.userId, collectorName: S.userName });
+  var r = await apiPut('/api/due-calendar', { id: dueId, payAmount: val, collectorId: S.userId, collectorName: S.userName, actorId: S.userId, actorRole: S.role, pin: pin });
   hideOvl();
+  if (r && r.badPin) return toast('❌ পাসওয়ার্ড ভুল — কিছু আদায় হয়নি');
   if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
   toast(r.status === 'cleared' ? '✅ সম্পূর্ণ পরিশোধিত হয়েছে' : '✅ আংশিক আদায় রেকর্ড হয়েছে');
   var shopId = (S.dsrShopSel || {}).shop ? S.dsrShopSel.shop.id : '';
@@ -6561,9 +6649,12 @@ async function dsrPlatePay(id, rem) {
   var val = num(v('plate-amt-' + id));
   if (val <= 0) return toast('সঠিক পরিমাণ দিন');
   if (val > rem) val = rem;
+  var pin = await askDsrPin('বাকি জমা', '<div>জমা: <b style="color:var(--gr)">৳' + fm(val) + '</b> · বাকি: <b>৳' + fm(rem) + '</b></div>');
+  if (!pin) return;
   showOvl('জমা হচ্ছে...');
-  var r = await apiPut('/api/due-calendar', { id: id, payAmount: val, collectorId: S.userId, collectorName: S.userName });
+  var r = await apiPut('/api/due-calendar', { id: id, payAmount: val, collectorId: S.userId, collectorName: S.userName, actorId: S.userId, actorRole: S.role, pin: pin });
   hideOvl();
+  if (r && r.badPin) return toast('❌ পাসওয়ার্ড ভুল — কিছু জমা হয়নি');
   if (!r || !r.ok) return toast(r && r.error || 'ব্যর্থ');
   toast(r.status === 'cleared' ? '✅ সম্পূর্ণ পরিশোধিত — তালিকা থেকে সরানো হলো' : '✅ আংশিক জমা রেকর্ড হয়েছে');
   _loadDsrShopView();
@@ -6581,8 +6672,8 @@ async function _loadDsrDueColView() {
   showOvl('লোড হচ্ছে...');
   var today = iso(new Date());
   var res = await Promise.all([
-    apiGet('/api/sr-payments?action=due-shops&dsrId=' + _enc(S.userId)),
-    apiGet('/api/sr-payments?action=collections-list&dsrId=' + _enc(S.userId) + '&from=' + today + '&to=' + today)
+    apiGet('/api/sr-payments?action=due-shops&dsrId=' + _enc(_dlvId())),
+    apiGet('/api/sr-payments?action=collections-list&dsrId=' + _enc(_dlvId()) + '&from=' + today + '&to=' + today)
   ]);
   hideOvl();
   S.dcData = (res[0] && res[0].ok) ? res[0] : { shops: [], totalDue: 0 };
@@ -6659,7 +6750,7 @@ function askDsrPin(title, detailHtml) {
     m.onclick = function(e) { if (e.target === m) done(null); };
     m.innerHTML = '<div class="due-modal"><div class="due-modal-title">🔐 ' + esc(title) + '</div>'
       + '<div style="background:#F8FAF9;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;line-height:1.7">' + detailHtml + '</div>'
-      + '<div class="fg"><label class="fl">🔐 আপনার (DSR) পাসওয়ার্ড *</label><input type="password" id="dsr-pin-in" inputmode="numeric" maxlength="10" placeholder="পাসওয়ার্ড / PIN দিন" autocomplete="off"></div>'
+      + '<div class="fg"><label class="fl">🔐 আপনার নিজের পাসওয়ার্ড *</label><input type="password" id="dsr-pin-in" inputmode="numeric" maxlength="10" placeholder="পাসওয়ার্ড / PIN দিন" autocomplete="off"></div>'
       + '<div style="display:flex;gap:8px;margin-top:6px"><button class="btn btn-gr" style="flex:1" id="dsr-pin-ok">✅ নিশ্চিত করুন</button><button class="btn btn-gh" id="dsr-pin-no">বাতিল</button></div></div>';
     document.body.appendChild(m);
     var inp = document.getElementById('dsr-pin-in');
@@ -6683,7 +6774,7 @@ async function dsrDueCollect(shopId) {
     + (full ? '<div style="color:var(--gr);font-weight:700">✅ সম্পূর্ণ পরিশোধ</div>' : '<div style="color:var(--re);font-weight:700">🔴 আংশিক — বাকি থাকবে ৳' + fm(s.totalDue - amt) + '</div>'));
   if (!pin) return;
   _dcBusy = true; showOvl('জমা হচ্ছে...');
-  var r = await apiPost('/api/sr-payments?action=due-collect', { dsrId: S.userId, dsrName: S.userName, shopId: shopId, amount: amt, pin: pin });
+  var r = await apiPost('/api/sr-payments?action=due-collect', { dsrId: _dlvId(), dsrName: _dlvName(), actorId: S.userId, shopId: shopId, amount: amt, pin: pin });
   hideOvl(); _dcBusy = false;
   if (!r || !r.ok) return toast((r && r.badPin) ? '❌ পাসওয়ার্ড ভুল — কিছু আদায় হয়নি' : ((r && r.error) || 'ব্যর্থ'));
   toast(r.remaining <= 0.005 ? '✅ ৳' + fm(r.collected) + ' আদায় — এই দোকানের সব বাকি পরিশোধিত' : '✅ ৳' + fm(r.collected) + ' আদায় — এখনো বাকি ৳' + fm(r.remaining));
@@ -7176,6 +7267,16 @@ async function _fillSoFillBox() {
       + '</div>';
   });
   row.innerHTML = h + '</div>';
+  // v5.16 — slim company-wide TOTAL target strip right under the SO boxes
+  var box = document.getElementById('so-fill-box');
+  if (box && r.company && !document.getElementById('co-tgt-strip')) {
+    var c = r.company, cp = _tgtPrimary(c), cc = _tgtCol(cp.pct), cw = cp.pct == null ? 0 : Math.min(100, Math.max(0, cp.pct));
+    box.insertAdjacentHTML('afterend', '<div id="co-tgt-strip" onclick="gTab(\'target\')" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:6px 10px;margin:0 0 8px;border:1.5px solid '+cc+';border-radius:12px;background:var(--card);min-height:0">'
+      + '<b style="font-size:11.5px;white-space:nowrap">🎯 মোট টার্গেট</b>'
+      + '<div style="flex:1;min-width:0"><div style="height:6px;border-radius:4px;background:rgba(148,163,184,.25);overflow:hidden"><div style="height:100%;width:'+cw+'%;background:'+cc+'"></div></div>'
+      + '<div style="font-size:10px;color:var(--mt2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(c.targetBoxes>0 ? '📦 '+_fbox(c.achievedBoxes)+' / '+_fbox(c.targetBoxes)+' বক্স' : '')+(c.targetAmount>0 ? (c.targetBoxes>0?' · ':'')+'৳'+fm(c.achieved)+' / ৳'+fm(c.targetAmount) : '')+((!(c.targetBoxes>0)&&!(c.targetAmount>0))?'মোট টার্গেট সেট নেই':'')+'</div></div>'
+      + '<b style="font-size:14px;color:'+cc+'">'+(cp.pct==null?'—':(Math.round(cp.pct*10)/10)+'%')+'</b></div>');
+  }
 }
 async function renderTargetTab() {
   var el = document.getElementById('pg-target'); if (!el) return;
@@ -9289,6 +9390,11 @@ function buildPointSaleWiz() {
   });
   return h+psStepBar(3)+'<div class="ib" style="border-color:var(--pu);background:#F5F3FF;color:var(--pu)">DSR: <strong>'+esc(S.psDsrName)+'</strong>'+(S.psShopName?' · দোকান: <strong>'+esc(S.psShopName)+'</strong>':'')+' · '+fmtBn(S.psDate)+'</div>'
     +rows3
+    +'<div class="card" style="border:1.5px solid #E1BEE7;padding:9px 10px;margin-bottom:8px"><div style="font-size:11px;font-weight:800;color:var(--pu);margin-bottom:6px">🤝 কমিশন ও 🏷️ ছাড় (ঐচ্ছিক)</div>'
+    +'<div style="display:flex;gap:8px"><div style="flex:1"><label class="fl">🤝 কমিশন (৳)</label><input type="number" inputmode="decimal" min="0" id="ps-comm" placeholder="০" value="'+esc(S.psComm||'')+'" oninput="S.psComm=this.value;updPsNet()" style="margin:0"></div>'
+    +'<div style="flex:1"><label class="fl">🏷️ ছাড় (৳)</label><input type="number" inputmode="decimal" min="0" id="ps-disc" placeholder="০" value="'+esc(S.psDisc||'')+'" oninput="S.psDisc=this.value;updPsNet()" style="margin:0"></div></div>'
+    +'<div id="ps-net" style="font-size:11.5px;font-weight:700;color:var(--pu);margin-top:6px"></div>'
+    +'<div style="font-size:10px;color:var(--mt2);margin-top:2px">কমিশন/ছাড় DSR-এর লেনদেনে "পয়েন্ট সেল" নামে কমিশন ও ছাড় বক্সে দেখাবে।</div></div>'
     +'<div id="ps-grand" style="background:#F5F3FF;border-radius:7px;padding:9px 12px;margin-bottom:10px;font-size:13px;font-weight:700;color:var(--pu);display:flex;justify-content:space-between"><span>মোট: ০</span><span>৳০</span></div>'
     +'<div style="display:flex;gap:7px"><button class="btn btn-gh" onclick="S.psStep=2;renderTx()">← পণ্য বদলান</button><button class="btn btn-w" style="flex:1;background:var(--pu);color:#fff" onclick="savePointSale()">🏪 স্লিপ তৈরি ও সংরক্ষণ</button></div>';
 }
@@ -9343,25 +9449,35 @@ function updPsSub(i){
   var el=document.getElementById('ps-sub-'+i);if(el)el.textContent=u>0?fmtCasePcs(u,cs,p.unitType)+' · ৳'+fm(amt):'—';
   var gU=0,gA=0;S.psItems.forEach(function(it){var pr=S.products.find(function(r){return r.id===it.productId;});if(!pr)return;var c2=num(pr.caseSize)||1,ca2=num(it.cases)||0,pc2=num(it.pcs)||0,u2=ca2*c2+pc2;gU+=u2;gA+=u2*num(pr.sellingPrice);});
   var gEl=document.getElementById('ps-grand');if(gEl)gEl.innerHTML='<span>মোট: '+_cpGrand(S.psItems)+'</span><span>৳'+fm(gA)+'</span>';
+  S._psGross=gA; updPsNet();
+}
+function updPsNet(){
+  var el=document.getElementById('ps-net'); if(!el) return;
+  var g=num(S._psGross), c=Math.max(0,num(S.psComm)), d=Math.max(0,num(S.psDisc));
+  if(!c&&!d){ el.textContent=''; return; }
+  el.style.color=(c+d>g+0.004)?'var(--re)':'var(--pu)';
+  el.textContent=(c+d>g+0.004)?'⚠️ কমিশন + ছাড় বিক্রয়ের মোটের বেশি হতে পারে না':'মোট ৳'+fm(g)+' − কমিশন ৳'+fm(c)+' − ছাড় ৳'+fm(d)+' = নেট ৳'+fm(g-c-d);
 }
 async function savePointSale(){
   var valid=S.psItems.filter(function(i){return i.productId&&(num(i.cases)+num(i.pcs))>0;});
   if(!valid.length)return toast('কমপক্ষে একটি পরিমাণ দিন');
   var slipNo=genUID('ME-PS');
   var items=valid.map(function(i){var p=S.products.find(function(pr){return pr.id===i.productId;});var cs=num(p.caseSize)||1,ca=num(i.cases)||0,pc=num(i.pcs)||0,u=ca*cs+pc;return{productId:p.id,productName:p.name,sku:p.sku,cases:ca,pcs:pc,totalUnits:u,purchasePrice:num(p.purchasePrice),sellingPrice:num(p.sellingPrice),unitType:p.unitType||'কেস',thumb:p.thumb||''};});
+  var _psGross=items.reduce(function(a,i){return a+i.totalUnits*i.sellingPrice;},0), _psC=Math.max(0,num(S.psComm)), _psD=Math.max(0,num(S.psDisc));
+  if(_psC+_psD>_psGross+0.004) return toast('কমিশন + ছাড় বিক্রয়ের মোটের বেশি হতে পারে না');
   showOvl('সংরক্ষণ হচ্ছে...');
   // v5.13 — the sale is booked on the DSR (srId); a shop sale also carries the shop id so the shop ledger keeps working.
-  var txPayload={type:'point_sale',srId:S.psDsrId,srName:S.psDsrName+(S.psShopName?' → '+S.psShopName:''),date:S.psDate,slipNo:slipNo,items:items,shopId:S.psSelShopId||'',customerId:''};
+  var txPayload={type:'point_sale',srId:S.psDsrId,srName:S.psDsrName+(S.psShopName?' → '+S.psShopName:''),date:S.psDate,slipNo:slipNo,items:items,shopId:S.psSelShopId||'',customerId:'',commissionAmt:_psC,discountAmt:_psD};
   var r=await mgrPost('transaction','/api/transactions',txPayload);
   hideOvl();
   if(!r.ok)return toast(r.error||'ব্যর্থ');
-  if(r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');var slip={slipNo:slipNo,date:S.psDate,srName:S.psShopName||S.psDsrName,srArea:S.psShopName?('DSR: '+S.psDsrName):'',items:items,slipTitle:'— পয়েন্ট সেল স্লিপ —',isPointSale:true,pendingApproval:true};S.lastPsSlip=slip;openPointSaleSlip(slip);S.psStep=1;S.psMode='';S.psDsrId='';S.psDsrName='';S.psShopName='';S.psShopRes=[];S.psSoId='';S.psSoName='';S.psCustName='';S.psKeeperName='';S.psPhone='';S.psAddress='';S.psSelShopId='';S.psSelCustomerId='';S.psSelProd={};S.psItems=[];renderTx();return;}
+  if(r._mgr){toast('⏳ অনুমোদনের জন্য জমা হয়েছে!');var slip={slipNo:slipNo,date:S.psDate,srName:S.psShopName||S.psDsrName,srArea:S.psShopName?('DSR: '+S.psDsrName):'',items:items,slipTitle:'— পয়েন্ট সেল স্লিপ —',isPointSale:true,pendingApproval:true};S.lastPsSlip=slip;openPointSaleSlip(slip);S.psStep=1;S.psMode='';S.psDsrId='';S.psDsrName='';S.psShopName='';S.psShopRes=[];S.psSoId='';S.psSoName='';S.psCustName='';S.psKeeperName='';S.psPhone='';S.psAddress='';S.psSelShopId='';S.psSelCustomerId='';S.psSelProd={};S.psItems=[];S.psComm='';S.psDisc='';renderTx();return;}
   var slip={slipNo:slipNo,date:S.psDate,srName:S.psShopName||S.psDsrName,srArea:S.psShopName?('DSR: '+S.psDsrName):'',items:items,slipTitle:'— পয়েন্ট সেল স্লিপ —',isPointSale:true};
   S.lastPsSlip=slip;_dashCache=null;
   toast('✅ পয়েন্ট সেল রেকর্ড হয়েছে!');
   openPointSaleSlip(slip);
   items.forEach(function(i){S.stockMap[i.productId]=(S.stockMap[i.productId]||0)-i.totalUnits;});
-  S.psStep=1;S.psMode='';S.psDsrId='';S.psDsrName='';S.psShopName='';S.psShopRes=[];S.psSoId='';S.psSoName='';S.psCustName='';S.psKeeperName='';S.psPhone='';S.psAddress='';S.psSelShopId='';S.psSelCustomerId='';S.psSelProd={};S.psItems=[];
+  S.psStep=1;S.psMode='';S.psDsrId='';S.psDsrName='';S.psShopName='';S.psShopRes=[];S.psSoId='';S.psSoName='';S.psCustName='';S.psKeeperName='';S.psPhone='';S.psAddress='';S.psSelShopId='';S.psSelCustomerId='';S.psSelProd={};S.psItems=[];S.psComm='';S.psDisc='';
   renderTx();
 }
 
@@ -10300,7 +10416,7 @@ function _memoStock(kind, o) {
 function iso(d){if(d instanceof Date){var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+dd;}return String(d).slice(0,10);}
 function fmtBn(d){if(!d)return'';try{var p=String(d).slice(0,10).split('-');if(p.length!==3)return String(d).slice(0,10);return p[2]+'/'+p[1]+'/'+p[0];}catch(e){return String(d).slice(0,10);}}
 function prodUnit(pid){var p=(S.products||[]).find(function(x){return x.id===pid;});return p?p.unitType||'কেস':'কেস';}
-function txBdg(t){var m={give:'<span class="bdg b-bl">দেওয়া</span>',return:'<span class="bdg b-te">ফেরত</span>',damage:'<span class="bdg b-re">ড্যামেজ</span>',buy:'<span class="bdg b-gr">কেনা</span>',return_company:'<span class="bdg b-te">কোম্পানিতে ফেরত</span>',point_sale:'<span class="bdg b-pu">পয়েন্ট সেল</span>',point_damage_return:'<span class="bdg b-re">পয়েন্ট ফেরত</span>',dsr_sale:'<span class="bdg b-am">দোকানে বিক্রয়</span>'};return m[t]||'<span class="bdg b-gy">'+t+'</span>';}
+function txBdg(t){var m={give:'<span class="bdg b-bl">দেওয়া</span>',return:'<span class="bdg b-te">ফেরত</span>',damage:'<span class="bdg b-re">ড্যামেজ</span>',buy:'<span class="bdg b-gr">কেনা</span>',return_company:'<span class="bdg b-te">কোম্পানিতে ফেরত</span>',point_sale:'<span class="bdg b-pu">পয়েন্ট সেল</span>',point_damage_return:'<span class="bdg b-re">পয়েন্ট ফেরত</span>',dsr_sale:'<span class="bdg b-am">দোকানে বিক্রয়</span>',dsr_sale_return:'<span class="bdg b-te">বিক্রয় ফেরত</span>'};return m[t]||'<span class="bdg b-gy">'+t+'</span>';}
 var _ot;
 function showOvl(m){document.getElementById('ovl-m').textContent=m||'লোড হচ্ছে...';document.getElementById('ovl').style.display='flex';clearTimeout(_ot);_ot=setTimeout(hideOvl,30000);}
 function hideOvl(){document.getElementById('ovl').style.display='none';clearTimeout(_ot);}
@@ -10376,17 +10492,19 @@ function renderCal() {
   h += '</div>';
 
   h += '<div class="mets" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:12px">';
-  h += '<div class="met"><div class="ml">বকেয়া</div><div class="mv" style="color:var(--re);font-size:14px">৳'+fm(totalPending)+'</div></div>';
-  h += '<div class="met"><div class="ml">আংশিক বাকি</div><div class="mv" style="color:var(--re);font-size:14px">৳'+fm(totalPartial)+'</div></div>';
+  var _dueTodayAmt = CAL.dues.filter(function(d){return d.status!=='cleared' && d.dueDate===today;}).reduce(function(s,d){return s+Math.max(0,num(d.amount)-num(d.paidAmount));},0);
+  var _duePrevAmt  = CAL.dues.filter(function(d){return d.status!=='cleared' && d.dueDate<today;}).reduce(function(s,d){return s+Math.max(0,num(d.amount)-num(d.paidAmount));},0);
+  h += '<div class="met" style="border-top:3px solid #DC2626"><div class="ml">আজকের বাকি</div><div class="mv" style="color:#DC2626;font-size:14px">৳'+fm(_dueTodayAmt)+'</div></div>';
+  h += '<div class="met" style="border-top:3px solid #EA580C"><div class="ml">আগের বাকি</div><div class="mv" style="color:#EA580C;font-size:14px">৳'+fm(_duePrevAmt)+'</div></div>';
   h += '<div class="met"><div class="ml">পরিশোধিত</div><div class="mv" style="color:var(--gr);font-size:14px">৳'+fm(totalCleared)+'</div></div>';
   h += '<div class="met"><div class="ml">এন্ট্রি</div><div class="mv" style="font-size:14px">'+CAL.dues.length+'টি</div></div>';
   h += '</div>';
 
   h += '<div class="cal-legend">';
-  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:var(--rel);border:1.5px solid var(--re)"></div> বকেয়া</div>';
-  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:var(--rel);border:2.5px solid var(--re)"></div> আংশিক বাকি</div>';
+  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:#FEE2E2;border:2.5px solid #DC2626"></div> আজকের বাকি</div>';
+  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:#FFEDD5;border:1.5px solid #EA580C"></div> আগের বাকি</div>';
+  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:#E0F2FE;border:1.5px solid #0284C7"></div> আসছে</div>';
   h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:var(--grl);border:1.5px solid var(--gr)"></div> পরিশোধিত</div>';
-  h += '<div class="cal-leg-item"><div class="cal-leg-dot" style="background:#FFFBEB;border:1.5px solid var(--am)"></div> মিশ্র</div>';
   h += '</div>';
 
   // ── Per-person monthly due summary ─────────────────────────
@@ -10441,13 +10559,17 @@ function renderCal() {
     else if (hasDue && allPending) cls += ' has-due';
     else if (hasDue) cls += ' has-due mixed';
     if (hasDue && isHeavy && !allPaid) cls += ' due-heavy';
+    // v5.16 — time-based colour for unpaid days
+    var tcls = '';
+    if (hasDue && !allPaid) tcls = (dateStr === today) ? 'd-today' : (dateStr < today ? 'd-prev' : 'd-next');
+    if (tcls) cls += ' ' + tcls;
 
     var dotHtml = '';
     if (hasDue) {
-      if (allPaid)         dotHtml = '<div class="cal-dot cal-dot-gr"></div>';
-      else if (hasPartial) dotHtml = '<div class="cal-dot cal-dot-or"></div>';
-      else if (allPending) dotHtml = '<div class="cal-dot cal-dot-re"></div>';
-      else                 dotHtml = '<div class="cal-dot cal-dot-am"></div>';
+      if (allPaid)                 dotHtml = '<div class="cal-dot cal-dot-gr"></div>';
+      else if (tcls==='d-today')   dotHtml = '<div class="cal-dot cal-dot-re"></div>';
+      else if (tcls==='d-prev')    dotHtml = '<div class="cal-dot cal-dot-ora"></div>';
+      else                         dotHtml = '<div class="cal-dot cal-dot-blu"></div>';
     }
 
     h += '<div class="'+cls+'" onclick="calDayClick(\''+dateStr+'\')">';
@@ -10645,7 +10767,23 @@ async function openSrDueHistory(srId, srName) {
   var box = modal.querySelector('.due-modal');
   if (!r || !r.ok) { box.innerHTML = '<div class="due-modal-title">📜 '+esc(srName||'—')+'</div><div style="text-align:center;padding:20px 0;color:var(--re)">তথ্য লোড ব্যর্থ হয়েছে</div><button class="btn btn-gh btn-w" style="margin-top:10px" onclick="document.body.removeChild(document.getElementById(\'sr-due-hist-modal\'))">বন্ধ</button>'; return; }
   window._dh = { r:r, name:srName, filter:'all' };
+  _dhSyncList(srId, r.totals || {});
   _dhRender();
+}
+// v5.16 — the pop-up always loads fresh numbers; push them back into the dashboard list so the row you tapped
+// (and the header total) can never keep showing an older figure.
+function _dhSyncList(srId, t) {
+  try {
+    var seen = [];
+    [_dashCache, (typeof window._homeDashData === 'function' ? window._homeDashData() : null)].forEach(function(dc) {
+      var dl = dc && dc.dues; if (!dl || !dl.list || seen.indexOf(dl) >= 0) return; seen.push(dl);
+      var row = dl.list.filter(function(x) { return String(x.srId) === String(srId); })[0]; if (!row) return;
+      row.givenRev = num(t.givenRev); row.returnRev = num(t.returnRev); row.payments = num(t.payments); row.due = num(t.due);
+      dl.total = dl.list.reduce(function(a, x) { return a + (num(x.due) > 0 ? num(x.due) : 0); }, 0);
+      var host = document.getElementById('acc-dues');
+      if (host) { var tmp = document.createElement('div'); tmp.innerHTML = _duesAccHtml(dl); if (tmp.firstChild) host.parentNode.replaceChild(tmp.firstChild, host); }
+    });
+  } catch (e) {}
 }
 function _fmtTimeBn(ts) {
   if (!ts) return '';
@@ -10755,7 +10893,7 @@ function calPayModal(id) {
   h += '<button class="btn btn-sm btn-gh" onclick="document.getElementById(\'pay-amt\').value='+Number((remaining*3/4).toFixed(2))+'">৭৫%</button>';
   h += '<button class="btn btn-sm" style="background:var(--grl);color:var(--gr)" onclick="document.getElementById(\'pay-amt\').value='+remaining+'">সম্পূর্ণ</button>';
   h += '</div>';
-  h += '<div class="fg"><label class="fl">🔐 Owner পাসওয়ার্ড *</label>';
+  h += '<div class="fg"><label class="fl">🔐 আপনার নিজের পাসওয়ার্ড *</label>';
   h += '<input type="password" id="pay-pin" placeholder="PIN দিন" maxlength="10" inputmode="numeric"></div>';
   h += '<div style="display:flex;gap:8px;margin-top:4px">';
   h += '<button class="btn btn-bl" style="flex:1" onclick="calDoPayment(\''+id+'\','+remaining+')">✅ নিশ্চিত করুন</button>';
@@ -10771,18 +10909,13 @@ async function calDoPayment(id, maxRemaining) {
   var pin    = document.getElementById('pay-pin').value.trim();
   if (!payAmt || payAmt <= 0) return toast('পরিমাণ দিন');
   if (payAmt > maxRemaining + 0.01) return toast('পরিমাণ অবশিষ্ট বাকির বেশি হতে পারবে না');
-  if (!pin) return toast('Owner পাসওয়ার্ড দিন');
-  // Validate owner password via API (works even after password change)
-  showOvl('পাসওয়ার্ড যাচাই হচ্ছে...');
-  var authR = await apiPost('/api/auth', { password: pin });
-  hideOvl();
-  if (!authR || !authR.ok) return toast('❌ পাসওয়ার্ড ভুল');
-  if (authR.role !== 'owner') return toast('❌ শুধুমাত্র Owner পাসওয়ার্ড গ্রহণযোগ্য');
+  if (!pin) return toast('আপনার নিজের পাসওয়ার্ড দিন');
   var modal = document.querySelector('.due-modal-bg');
   if (modal) document.body.removeChild(modal);
   showOvl('পরিশোধ হচ্ছে...');
-  var r = await apiPut('/api/due-calendar', {id:id, payAmount:payAmt});
+  var r = await apiPut('/api/due-calendar', {id:id, payAmount:payAmt, collectorId:S.userId, collectorName:S.userName, actorId:S.userId, actorRole:S.role, pin:pin});
   hideOvl();
+  if (r && r.badPin) return toast('❌ পাসওয়ার্ড ভুল — কিছু পরিশোধ হয়নি');
   if (r.ok) {
     var msg = r.status==='cleared' ? '🟢 সম্পূর্ণ পরিশোধিত!' : '🔴 আংশিক পরিশোধ · বাকি: ৳'+fm(r.remaining);
     toast(msg);
@@ -10791,14 +10924,51 @@ async function calDoPayment(id, maxRemaining) {
 }
 
 function calSwitchType(type) {
-  var isDsr = type === 'dsr';
-  document.getElementById('cal-type-dsr').style.background    = isDsr ? 'var(--bl)' : '#ECFEFF';
-  document.getElementById('cal-type-dsr').style.color         = isDsr ? '#fff' : 'var(--bl)';
-  document.getElementById('cal-type-custom').style.background = !isDsr ? '#7C3AED' : '#F5F3FF';
-  document.getElementById('cal-type-custom').style.color      = !isDsr ? '#fff' : '#7C3AED';
-  document.getElementById('cal-dsr-wrap').style.display    = isDsr  ? '' : 'none';
-  document.getElementById('cal-custom-wrap').style.display = !isDsr ? '' : 'none';
+  var on = { dsr:['var(--bl)','#fff'], shop:['#0891B2','#fff'], custom:['#7C3AED','#fff'] };
+  var off = { dsr:['#ECFEFF','var(--bl)'], shop:['#ECFEFF','#0E7490'], custom:['#F5F3FF','#7C3AED'] };
+  ['dsr','shop','custom'].forEach(function(k){
+    var b = document.getElementById('cal-type-'+k); if (!b) return;
+    var c = (k===type) ? on[k] : off[k]; b.style.background = c[0]; b.style.color = c[1];
+  });
+  document.getElementById('cal-dsr-wrap').style.display    = type==='dsr'    ? '' : 'none';
+  document.getElementById('cal-custom-wrap').style.display = type==='custom' ? '' : 'none';
+  var sw = document.getElementById('cal-shopsearch-wrap'); if (sw) sw.style.display = type==='shop' ? '' : 'none';
+  var nw = document.getElementById('cal-shopname-wrap');   if (nw) nw.style.display = type==='shop' ? 'none' : '';
   document.getElementById('cal-client-type').value = type;
+}
+// v5.16 — search an existing shop by name / shop no / phone and attach the new due to it
+var _calShopTimer = null, _calShopHits = [];
+function calShopSearch() {
+  clearTimeout(_calShopTimer);
+  _calShopTimer = setTimeout(async function() {
+    var q = (v('cal-shop-q') || '').trim(), box = document.getElementById('cal-shop-res'); if (!box) return;
+    if (q.length < 1) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--mt2)">খুঁজছি...</div>';
+    var r = await apiGet('/api/shops?action=search&q=' + encodeURIComponent(q) + '&page=1&pageSize=15');
+    box = document.getElementById('cal-shop-res'); if (!box) return;
+    _calShopHits = (r && r.ok) ? (r.shops || []) : [];
+    if (!_calShopHits.length) { box.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--mt2);text-align:center">কোনো দোকান পাওয়া যায়নি</div>'; return; }
+    box.innerHTML = _calShopHits.map(function(s, i) {
+      var due = num(s.totalDue);
+      return '<div onclick="calPickShop(' + i + ')" style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--bdr);border-radius:10px;margin-bottom:4px;cursor:pointer;background:var(--card)">'
+        + '<div style="min-width:0"><div style="font-size:13px;font-weight:700">🏪 ' + esc(s.name) + (s.shopNo ? ' <span style="font-size:10px;color:var(--mt2);font-weight:500">(' + esc(s.shopNo) + ')</span>' : '') + '</div>'
+        + '<div style="font-size:11px;color:var(--mt2)">' + (s.phone ? '📞 ' + esc(s.phone) + ' · ' : '') + (s.assignedDsrName ? '🚚 ' + esc(s.assignedDsrName) : 'DSR নেই') + '</div></div>'
+        + '<div style="font-size:11px;font-weight:700;white-space:nowrap;color:' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">' + (due > 0 ? 'আগের বাকি ৳' + fm(due) : '✓ বাকি নেই') + '</div></div>';
+    }).join('');
+  }, 250);
+}
+function calPickShop(i) {
+  var s = _calShopHits[i]; if (!s) return;
+  sv('cal-shop-id', s.id); sv('cal-shop-dsr', (s.assignedDsrId || '') + '|' + (s.assignedDsrName || '')); sv('cal-shop', s.name);
+  var sel = document.getElementById('cal-shop-sel');
+  if (sel) { sel.style.display = ''; sel.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--grl);border:1.5px solid var(--gr);border-radius:10px;padding:8px 10px"><div style="font-size:12.5px;font-weight:700">✅ ' + esc(s.name) + (s.shopNo ? ' (' + esc(s.shopNo) + ')' : '') + (num(s.totalDue) > 0 ? '<div style="font-size:11px;color:var(--re);font-weight:600">আগের বাকি ৳' + fm(s.totalDue) + ' — এই এন্ট্রি তার সাথে যোগ হবে</div>' : '') + '</div><button class="btn btn-gh btn-sm" onclick="calClearShop()">বদলান</button></div>'; }
+  var res = document.getElementById('cal-shop-res'); if (res) res.innerHTML = '';
+  var q = document.getElementById('cal-shop-q'); if (q) q.style.display = 'none';
+}
+function calClearShop() {
+  sv('cal-shop-id', ''); sv('cal-shop-dsr', ''); sv('cal-shop', '');
+  var sel = document.getElementById('cal-shop-sel'); if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+  var q = document.getElementById('cal-shop-q'); if (q) { q.style.display = ''; q.value = ''; q.focus(); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -11020,11 +11190,19 @@ function calAddModal(prefillDate) {
   h += '<div class="fg"><label class="fl">বাকি কার জন্য?</label>';
   h += '<div style="display:flex;gap:8px">';
   h += '<button id="cal-type-dsr" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--bl);color:#fff;font-size:13px;font-weight:700;cursor:pointer" onclick="calSwitchType(\'dsr\')">🚚 SR / DSR</button>';
+  h += '<button id="cal-type-shop" style="flex:1;padding:8px;border-radius:8px;border:none;background:#ECFEFF;color:#0E7490;font-size:13px;font-weight:700;cursor:pointer" onclick="calSwitchType(\'shop\')">🏪 দোকান (খুঁজুন)</button>';
   h += '<button id="cal-type-custom" style="flex:1;padding:8px;border-radius:8px;border:none;background:#F5F3FF;color:#7C3AED;font-size:13px;font-weight:700;cursor:pointer" onclick="calSwitchType(\'custom\')">👤 Custom Client</button>';
   h += '</div></div>';
+  // v5.16 — search an EXISTING shop (name / shop no / phone) and add the due to it
+  h += '<div id="cal-shopsearch-wrap" class="fg" style="display:none"><label class="fl">🔍 দোকান খুঁজুন (নাম / দোকান নং / ফোন)</label>'
+     + '<input id="cal-shop-q" placeholder="যেমন: মা স্টোর বা S-0012 বা 017..." oninput="calShopSearch()" autocomplete="off">'
+     + '<input type="hidden" id="cal-shop-id" value=""><input type="hidden" id="cal-shop-dsr" value="">'
+     + '<div id="cal-shop-sel" style="display:none;margin-top:6px"></div>'
+     + '<div id="cal-shop-res" style="margin-top:6px;max-height:190px;overflow-y:auto;border-radius:10px"></div></div>';
   h += '<div id="cal-dsr-wrap" class="fg"><label class="fl">DSR/SO বাছাই করুন</label><select id="cal-sr"><option value="">-- নির্বাচন করুন --</option>'+srOpts+'</select></div>';
-  h += '<div id="cal-custom-wrap" class="fg" style="display:none"><label class="fl">কাস্টমার নাম *</label><input id="cal-custom-nm" placeholder="কাস্টমার নাম লিখুন"></div>';
-  h += '<div class="fg"><label class="fl">দোকানের নাম (ঐচ্ছিক)</label><input id="cal-shop" placeholder="যেমন: মা স্টোর"></div>';
+  var _custNames = {}; (CAL.dues||[]).forEach(function(d){ if (d.clientType==='custom' && d.dsrName) _custNames[d.dsrName]=1; });
+  h += '<div id="cal-custom-wrap" class="fg" style="display:none"><label class="fl">কাস্টমার নাম * <span style="font-weight:500;color:var(--mt2)">(আগের কাস্টমার হলে নাম লিখলেই সাজেশন আসবে)</span></label><input id="cal-custom-nm" list="cal-custom-list" autocomplete="off" placeholder="কাস্টমার নাম লিখুন"><datalist id="cal-custom-list">'+Object.keys(_custNames).map(function(n){return '<option value="'+esc(n)+'">';}).join('')+'</datalist></div>';
+  h += '<div class="fg" id="cal-shopname-wrap"><label class="fl">দোকানের নাম (ঐচ্ছিক)</label><input id="cal-shop" placeholder="যেমন: মা স্টোর"></div>';
   h += '<div class="fg"><label class="fl">বাকির তারিখ *</label><input type="date" id="cal-dt" value="'+(prefillDate||iso(new Date()))+'"></div>';
   h += '<div class="fg"><label class="fl">পরিমাণ (৳) *</label><input type="number" id="cal-am" min="0" placeholder="0"></div>';
   h += '<div class="fg"><label class="fl">নোট</label><input id="cal-nt" placeholder="ঐচ্ছিক"></div>';
@@ -11039,9 +11217,14 @@ function calAddModal(prefillDate) {
 async function calSaveNew() {
   var clientType = v('cal-client-type') || 'dsr';
   var dsrId = '', dsrName = '';
+  var shopIdSel = '';
   if (clientType === 'custom') {
     dsrName = v('cal-custom-nm').trim();
     if (!dsrName) return toast('কাস্টমার নাম দিন');
+  } else if (clientType === 'shop') {
+    shopIdSel = v('cal-shop-id');
+    if (!shopIdSel) return toast('আগে খুঁজে একটি দোকান বাছুন');
+    var sd = (v('cal-shop-dsr') || '|').split('|'); dsrId = sd[0] || ''; dsrName = sd.slice(1).join('|');
   } else {
     var srVal = v('cal-sr');
     if (srVal) { var pts=srVal.split('|'); dsrId=pts[0]; dsrName=pts.slice(1).join('|'); }
@@ -11055,7 +11238,7 @@ async function calSaveNew() {
   var modal = document.querySelector('.due-modal-bg');
   if (modal) document.body.removeChild(modal);
   showOvl('সংরক্ষণ হচ্ছে...');
-  var r = await apiPost('/api/due-calendar', {dsrId:dsrId, dsrName:dsrName, clientType:clientType, shopName:shopName, dueDate:dueDate, amount:amount, note:note});
+  var r = await apiPost('/api/due-calendar', {dsrId:dsrId, dsrName:dsrName, clientType:clientType, shopId:shopIdSel, shopName:shopName, dueDate:dueDate, amount:amount, note:note});
   hideOvl();
   if (r.ok) { toast('✅ বাকি এন্ট্রি যোগ হয়েছে'); loadCal(CAL.month); }
   else toast(r.error||'ব্যর্থ');
@@ -11510,7 +11693,7 @@ async function resetSelectedExecute(keys) {
   renderResetTab();
 }
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script id="axi-v4-js">
 /* ═══ AXIION v4 — Glass Edition: icons, regrouped nav, full-screen menu, settings hub ═══ */
 (function(){
@@ -11545,7 +11728,7 @@ refresh:'<path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8M21 4v5h-5M3 
 calc:'<rect x="5" y="3" width="14" height="18" rx="3"/><path d="M8 7h8M8 12h.1M12 12h.1M16 12h.1M8 16h.1M12 16h.1M16 16h.1"/>',
 crown:'<path d="M3 18l-1-11 6 5 4-8 4 8 6-5-1 11z"/>'};
 window.axIcon=function(k){return '<span class="ai"><svg viewBox="0 0 24 24">'+(P[k]||P.box)+'</svg></span>';};
-var IDI={retrep:'undo',settle:'calc',dash:'home',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'};
+var IDI={srtn:'undo',retrep:'undo',settle:'calc',dash:'home',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'};
 var EM={'🏠':'home','📦':'box','🧾':'receipt','🔐':'key','✅':'check','📈':'chart','📊':'chart','📍':'pin','🏪':'store','💬':'chat','📢':'bell','☎':'phone','💰':'wallet','🗓':'cal','📅':'cal','🎯':'target','📋':'truck','⚙':'cog','🗑':'trash','📤':'send','↩':'undo','⚠':'alert','🛒':'cart','💾':'save','📝':'edit','🔄':'refresh','👑':'crown','🔒':'lock','🌙':'moon','☀':'sun','🚚':'truck','🚛':'truck','🧑':'users','👆':'target'};
 var RX=new RegExp('('+Object.keys(EM).join('|')+')(\\uFE0F|\\u200d(🤝\\u200d🧑)?)?','g');
 function conv(root){
@@ -11757,8 +11940,8 @@ window.onlineDepositSave=async function(){
   var CSS = `
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:#e5e7eb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45;width:${PW}px}
-.mpg{width:${PW}px;height:${PH}px;position:relative;overflow:hidden;background:#fff;margin:0 0 14px;font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45}
+body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45;width:${PW}px}
+.mpg{width:${PW}px;height:${PH}px;position:relative;overflow:hidden;background:#fff;margin:0 0 14px;font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;color:#1e293b;font-size:12px;line-height:1.45}
 .mfr{position:absolute;left:14px;right:14px;top:14px;bottom:14px;border:1px solid #a7f3d0;border-radius:10px}
 .mbar{position:absolute;left:14px;right:14px;top:14px;height:5px;border-radius:10px 10px 0 0;background:linear-gradient(90deg,#059669,#10b981 50%,#06b6d4)}
 .wm{position:absolute;left:0;right:0;top:46%;text-align:center;transform:rotate(-30deg);font-size:112px;font-weight:800;color:#059669;opacity:.045;white-space:nowrap;letter-spacing:6px}
@@ -11947,8 +12130,8 @@ table.mt.xl{font-size:11px}
   var TCSS = `
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{background:#e5e7eb;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10px;line-height:1.35;width:${PWT}px}
-.tpg{width:${PWT}px;background:#fff;color:#000;padding:8px 7px 14px;border-top:3px solid #000;font-family:'Noto Sans','Hind Siliguri',sans-serif;font-size:10px;line-height:1.35}
+body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;color:#000;font-size:10px;line-height:1.35;width:${PWT}px}
+.tpg{width:${PWT}px;background:#fff;color:#000;padding:8px 7px 14px;border-top:3px solid #000;font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-serif;font-size:10px;line-height:1.35}
 .tshn{font-size:13px;font-weight:800;text-align:center;line-height:1.25}
 .tdist{font-size:8.5px;text-align:center;margin-top:1px}
 .tadr{font-size:9px;text-align:center;margin-top:1px}
@@ -12302,7 +12485,7 @@ body{font-family:'Noto Sans','Hind Siliguri',sans-serif;color:#000;font-size:10p
     sp.time = sp.time || hm(new Date()); sp.date = sp.date || bdtToday();
     var file = String(sp.file || sp.no || 'memo').replace(/[^\w\-]+/g, '_');
     var ov = document.createElement('div'); ov.id = 'memo-overlay';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,44,34,.62);z-index:9998;display:flex;align-items:center;justify-content:center;font-family:\'Noto Sans\',\'Hind Siliguri\',sans-serif';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(2,44,34,.62);z-index:9998;display:flex;align-items:center;justify-content:center;font-family:\'Inter\',\'Noto Sans\',\'Noto Sans Bengali\',\'Hind Siliguri\',sans-serif';
     var pn = document.createElement('div');
     pn.style.cssText = 'background:#f1f5f9;border-radius:14px;width:96%;max-width:640px;height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.35);overflow:hidden';
     pn.innerHTML = '<div style="padding:12px 16px;background:linear-gradient(90deg,#065f46,#059669);color:#fff;display:flex;justify-content:space-between;align-items:center"><div><div id="mm-t" style="font-size:14.5px;font-weight:700">📋 মেমো তৈরি হচ্ছে…</div><div id="mm-s" style="font-size:10.5px;opacity:.85">' + (sp.paper === 'a4' ? 'A4 সাইজ' : 'থার্মাল ' + THM.mm + ' মিমি') + ' · হাই-কোয়ালিটি</div></div><button id="mm-x" style="border:none;background:rgba(255,255,255,.2);color:#fff;width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer">✕</button></div>'
@@ -12558,6 +12741,7 @@ var SUB={
  'd:products':{lb:'পণ্য ক্যাটালগ',ic:'box',c:['#F59E0B','#D97706']},
  'd:register':{lb:'শপ নিবন্ধন',ic:'store',c:['#8B5CF6','#6D28D9']},
  's:sale':{lb:'বিক্রয়',ic:'cart',c:['#10B981','#047857']},
+ 's:duecol':{lb:'বাকি আদায় (DSR-এর নামে)',ic:'wallet',c:['#EF4444','#B91C1C']},
  's:todaysale':{lb:'আজকের মোট বিক্রয়',ic:'chart',c:['#6366F1','#4338CA']},
  's:dsr-tx':{lb:'DSR লেনদেন',ic:'receipt',c:['#3B82F6','#1D4ED8']},
  's:dsr-dues':{lb:'DSR বাকি',ic:'wallet',c:['#EF4444','#B91C1C']},
@@ -12571,15 +12755,15 @@ var SUB={
  's:expslip':{lb:'খরচের স্লিপ',ic:'receipt',c:['#EAB308','#A16207']},
  's:salescalc':{lb:'বিক্রয় হিসাব',ic:'calc',c:['#EC4899','#BE185D']}
 };
-var COL={retrep:['#14B8A6','#0F766E'],settle:['#10B981','#047857'],dsrtx:['#3B82F6','#1D4ED8'],tx:['#3B82F6','#1D4ED8'],prod:['#F59E0B','#D97706'],orders:['#06B6D4','#0E7490'],
+var COL={srtn:['#0D9488','#115E59'],retrep:['#14B8A6','#0F766E'],settle:['#10B981','#047857'],dsrtx:['#3B82F6','#1D4ED8'],tx:['#3B82F6','#1D4ED8'],prod:['#F59E0B','#D97706'],orders:['#06B6D4','#0E7490'],
  cal:['#EC4899','#BE185D'],attendance:['#F43F5E','#BE123C'],chat:['#0EA5E9','#0369A1'],sr:['#8B5CF6','#6D28D9'],shopsmap:['#F97316','#C2410C'],
  ownerapproval:['#22C55E','#15803D'],deposit:['#0EA5E9','#0369A1'],target:['#EF4444','#B91C1C'],numbers:['#14B8A6','#0F766E'],rep:['#6366F1','#4338CA'],exp:['#EAB308','#A16207'],
  settings:['#64748B','#334155'],pwmgr:['#A855F7','#7E22CE'],notice:['#FB923C','#EA580C'],reset:['#F87171','#DC2626'],theme:['#475569','#1E293B']};
 /* group order = how often it is used: the daily work first, rarely-used things last */
 var LAYOUT={
  owner:[['প্রতিদিনের কাজ',['settle','deposit','dsrtx','tx','retrep','prod','orders','cal','attendance','chat']],['টিম ও দোকান',['sr','shopsmap','ownerapproval','target','numbers']],['রিপোর্ট ও খরচ',['rep','exp']],['সিস্টেম',['settings','pwmgr','notice','reset','theme']]],
- dsr:[['ডেলিভারি ও আদায়',['d:shop','d:dmgcol','d:duecol','retrep']],['ক্যালেন্ডার ও হাজিরা',['cal','attendance']],['পণ্য ও টার্গেট',['d:products','target','d:register']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
- so:[['অর্ডার ও বিক্রয়',['orders','s:todaysale','s:damage','s:production']],['পণ্য ও জমা-খরচ',['s:catstock','s:depslip','s:expslip']],['বিক্রয় ও টার্গেট',['s:sale','target','s:salescalc']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
+ dsr:[['ডেলিভারি ও আদায়',['d:shop','d:dmgcol','d:duecol','retrep','srtn']],['ক্যালেন্ডার ও হাজিরা',['cal','attendance']],['পণ্য ও টার্গেট',['d:products','target','d:register']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
+ so:[['অর্ডার ও বিক্রয়',['orders','s:todaysale','s:damage','s:production']],['পণ্য ও জমা-খরচ',['s:catstock','s:depslip','s:expslip']],['বিক্রয় ও টার্গেট',['s:sale','s:duecol','target','s:salescalc']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
  driver:[['প্রতিদিনের কাজ',['attendance','chat']],['সিস্টেম',['pwmgr','theme']]]};
 LAYOUT.manager=LAYOUT.owner;
 var DEF={dsr:'tx',so:'overview'};
@@ -12602,7 +12786,7 @@ function iconKey(id){
   if(id==='theme')return document.body.classList.contains('dark')?'sun':'moon';
   if(id==='deposit')return 'wallet';
   if(SUB[id])return SUB[id].ic;
-  return (window.__IDI&&window.__IDI[id])||({retrep:'undo',dash:'home',settle:'calc',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'}[id]||'box');
+  return (window.__IDI&&window.__IDI[id])||({srtn:'undo',retrep:'undo',dash:'home',settle:'calc',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'}[id]||'box');
 }
 function allowed(id){
   if(id==='theme')return true;
@@ -12623,18 +12807,15 @@ window.buildSideMenu=function(){
   // anything a role may open that the layout forgot still shows up (never lose a page)
   var rest=perms.filter(function(id){return id!=='dash'&&!placed[id];});
   if(rest.length)groups.push(['অন্যান্য',rest]);
-  groups.forEach(function(g,gi){
-    if(!g[1].length)return;
-    var hasActive=g[1].some(isActive);
-    if(openSec[gi]===undefined)openSec[gi]=(gi===0);
-    var open=openSec[gi]||hasActive;
-    h+='<div class="mn-sec'+(open?' open':'')+'"><button class="mn-sec-h" onclick="mnToggle(this,'+gi+')"><span>'+g[0]+'</span><span class="car">▾</span></button><div class="mn-sec-b">';
+  // v5.16 — flat menu: same order as before, but no section headers / no collapsible sub-sections
+  h+='<div class="mn-flat">';
+  groups.forEach(function(g){
     g[1].forEach(function(id){
       var c=(SUB[id]&&SUB[id].c)||COL[id]||['#10B981','#047857'];
       h+='<button class="mn-row'+(isActive(id)?' active':'')+'" id="smi-'+id.replace(':','-')+'" style="--c1:'+c[0]+';--c2:'+c[1]+'" onclick="'+(id==='theme'?'toggleTheme()':'mnPick(\''+id+'\')')+'"><span class="mn-ic">'+axIcon(iconKey(id))+'</span><span class="t">'+label(id)+'</span></button>';
     });
-    h+='</div></div>';
   });
+  h+='</div>';
   el.innerHTML=h;
 };
 window.mnToggle=function(btn,gi){var sec=btn.parentNode,o=!sec.classList.contains('open');
@@ -12642,6 +12823,7 @@ window.mnToggle=function(btn,gi){var sec=btn.parentNode,o=!sec.classList.contain
   sec.classList.toggle('open',o);openSec[gi]=o;};
 window.mnPick=function(id){
   closeMenu();
+  if(id==='srtn'){ saleReturnOpen(); return; }
   if(id==='deposit'){ openOnlineDeposit(); return; }
   var sub=SUB[id];
   if(sub){
@@ -12837,6 +13019,297 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
   };
 })();
 </script>
+<script id="axi-v516-vanret-js">
+/* ═══ v5.16 — ভ্যান ফেরত (Van Return): Manager / Owner pick a DSR → his remaining van stock loads by itself →
+       confirm with OWN password → return is saved + slip. The DSR's ফেরত পণ্য page shows what is still in his van. ═══ */
+(function(){
+  var V = { dsrId:'', date:'', van:null, qty:{}, busy:false };
+  function today(){ return iso(new Date()); }
+  function prod(pid){ return (S.products||[]).filter(function(p){ return String(p.id) === String(pid); })[0]; }
+  function dsrList(){ return (S.srs||[]).filter(function(x){ return x.role === 'dsr'; }); }
+  function vanRows(van){
+    return Object.keys(van||{}).filter(function(k){ return num(van[k]) > 0 && prod(k); }).map(function(k){ var p = prod(k); return { p:p, units:num(van[k]) }; })
+      .sort(function(a,b){ return (a.p._ord||0) - (b.p._ord||0); });
+  }
+  async function ensureProducts(){
+    if (!(S.products||[]).length || !(S.srs||[]).length) {
+      var r = await apiGet('/api/dashboard?action=load-all');
+      if (r && r.ok) { S.products = r.products || []; S.srs = r.srs || []; S.stockMap = r.stockMap || {}; }
+    }
+    try { if (typeof _prodIdx === 'function') _prodIdx(); } catch(e) {}
+  }
+  function el(){
+    var e = document.getElementById('vr-pg');
+    if (!e) { e = document.createElement('div'); e.id = 'vr-pg'; e.style.cssText = 'position:fixed;inset:0;z-index:900;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 90px'; document.body.appendChild(e); }
+    e.style.display = 'block'; document.body.style.overflow = 'hidden'; return e;
+  }
+  window.vanRetClose = function(){ var e = document.getElementById('vr-pg'); if (e) e.style.display = 'none'; document.body.style.overflow = ''; };
+  window.vanRetOpen = async function(){
+    await ensureProducts();
+    V = { dsrId:'', date:today(), van:null, qty:{}, busy:false };
+    vrRender();
+  };
+  function vrRender(){
+    var e = el(), list = dsrList();
+    var h = '<div style="max-width:100%;margin:0 auto">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="ct" style="margin:0">🚐 ভ্যান ফেরত</div><button class="btn btn-gh btn-sm" onclick="vanRetClose()">✕ বন্ধ</button></div>'
+      + '<div class="card" style="border-top:3px solid var(--te)"><div class="gib" style="background:var(--tel);border-color:var(--te);margin-bottom:8px">DSR বাছলে তার গাড়িতে যে পণ্য বাকি আছে তা নিজে থেকেই চলে আসবে। পরিমাণ মিলিয়ে নিজের পাসওয়ার্ড দিলেই ফেরত জমা ও স্লিপ তৈরি হবে।</div>'
+      + '<div class="fg"><label class="fl">🚚 DSR *</label><select id="vr-dsr" onchange="vanRetPick(this.value)"><option value="">-- DSR বাছুন --</option>'
+      + list.map(function(x){ return '<option value="'+esc(x.id)+'"'+(String(x.id)===String(V.dsrId)?' selected':'')+'>'+esc(x.name)+(x.soName?' · SO: '+esc(x.soName):'')+'</option>'; }).join('') + '</select></div>'
+      + '<div class="fg"><label class="fl">📅 তারিখ</label><input type="date" id="vr-dt" max="'+today()+'" value="'+esc(V.date)+'" onchange="vanRetDate(this.value)"></div></div>';
+    if (V.dsrId && V.van === null) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">গাড়ির বাকি পণ্য লোড হচ্ছে...</div>';
+    else if (V.dsrId) h += vrBody();
+    el().innerHTML = h + '</div>';
+  }
+  function lineUnits(pid){ var q = V.qty[pid] || {}, p = prod(pid), cs = num(p && p.caseSize) || 1; return num(q.cases) * cs + num(q.pcs); }
+  function vrBody(){
+    var rows = vanRows(V.van);
+    if (!rows.length) return '<div class="card" style="text-align:center;color:var(--gr);font-weight:700;padding:22px">✅ এই DSR-এর গাড়িতে ফেরত দেওয়ার মতো কোনো পণ্য বাকি নেই</div>';
+    var h = '<div class="card" style="padding:0;overflow:hidden;border-top:3px solid var(--te)">';
+    rows.forEach(function(r){
+      var p = r.p, id = String(p.id), cs = num(p.caseSize) || 1, q = V.qty[id] || { cases:'', pcs:'' };
+      h += '<div style="padding:9px 11px;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b style="font-size:12.5px">'+esc(p.name)+'</b><span style="font-size:11px;color:var(--te);font-weight:700;white-space:nowrap">গাড়িতে: '+fmtCasePcs(r.units, cs, p.unitType)+'</span></div>'
+        + '<div style="display:flex;gap:8px;margin-top:6px;align-items:center"><div style="flex:1"><label class="fl" style="font-size:10px">'+esc(p.unitType||'কেস')+'</label><input type="number" inputmode="decimal" min="0" id="vr-c-'+id+'" value="'+esc(q.cases)+'" oninput="vanRetQty(\''+id+'\')" style="margin:0"></div>'
+        + '<div style="flex:1"><label class="fl" style="font-size:10px">পিস</label><input type="number" inputmode="decimal" min="0" id="vr-p-'+id+'" value="'+esc(q.pcs)+'" oninput="vanRetQty(\''+id+'\')" style="margin:0"></div>'
+        + '<div id="vr-v-'+id+'" style="flex:1;text-align:right;font-size:12px;font-weight:800;color:var(--te)">'+vrLineVal(id)+'</div></div></div>';
+    });
+    h += '</div>'
+      + '<div id="vr-grand" style="background:var(--tel);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px;font-weight:800;color:var(--te);display:flex;justify-content:space-between">'+vrGrand()+'</div>'
+      + '<div class="card"><div class="fg"><label class="fl">🔐 আপনার নিজের (' + (S.role==='owner'?'Owner':'Manager') + ') পাসওয়ার্ড *</label><input type="password" id="vr-pin" inputmode="numeric" maxlength="10" placeholder="পাসওয়ার্ড / PIN দিন" autocomplete="off"></div>'
+      + '<button class="btn btn-w" style="background:var(--te);color:#fff" onclick="vanRetSave()">↩️ ফেরত জমা নিন ও স্লিপ তৈরি করুন</button></div>';
+    return h;
+  }
+  function vrLineVal(pid){ var u = lineUnits(pid), p = prod(pid); return u > 0 ? '৳'+fm(u * num(p.sellingPrice)) : '—'; }
+  function vrGrand(){
+    var u = 0, a = 0; Object.keys(V.qty).forEach(function(k){ var x = lineUnits(k), p = prod(k); if (x > 0 && p) { u += x; a += x * num(p.sellingPrice); } });
+    return '<span>মোট ফেরত: '+(u > 0 ? u+' পিস' : '০')+'</span><span>৳'+fm(a)+'</span>';
+  }
+  async function loadVan(){
+    var r = await apiGet('/api/sr-payments?action=van-stock&dsrId='+encodeURIComponent(V.dsrId)+'&date='+encodeURIComponent(V.date));
+    V.van = (r && r.ok) ? (r.vanStock || {}) : {};
+    V.qty = {};
+    vanRows(V.van).forEach(function(r){            // pre-fill: everything still in the van comes back
+      var cs = num(r.p.caseSize) || 1, c = Math.floor(r.units / cs), pc = Math.round((r.units - c * cs) * 100) / 100;
+      V.qty[String(r.p.id)] = { cases: c ? String(c) : '', pcs: pc ? String(pc) : '' };
+    });
+    vrRender();
+  }
+  window.vanRetPick = function(id){ V.dsrId = id; V.van = id ? null : V.van; vrRender(); if (id) loadVan(); };
+  window.vanRetDate = function(d){ V.date = d || today(); if (V.dsrId) { V.van = null; vrRender(); loadVan(); } };
+  window.vanRetQty = function(pid){
+    V.qty[pid] = { cases:(document.getElementById('vr-c-'+pid)||{}).value, pcs:(document.getElementById('vr-p-'+pid)||{}).value };
+    var a = document.getElementById('vr-v-'+pid); if (a) a.textContent = vrLineVal(pid);
+    var g = document.getElementById('vr-grand'); if (g) g.innerHTML = vrGrand();
+  };
+  window.vanRetSave = async function(){
+    if (V.busy) return;
+    var items = [], over = '';
+    vanRows(V.van).forEach(function(r){
+      var id = String(r.p.id), u = lineUnits(id); if (u <= 0) return;
+      if (u > r.units + 0.0001) over = r.p.name;
+      var cs = num(r.p.caseSize) || 1, q = V.qty[id] || {}, ca = num(q.cases), pc = num(q.pcs);
+      items.push({ productId:r.p.id, productName:r.p.name, sku:r.p.sku, cases:ca, pcs:pc, totalUnits:u, purchasePrice:num(r.p.purchasePrice), sellingPrice:num(r.p.sellingPrice), unitType:r.p.unitType||'কেস', thumb:r.p.thumb||'' });
+    });
+    if (!items.length) return toast('কমপক্ষে একটি পরিমাণ দিন');
+    if (over) return toast('গাড়িতে যা আছে তার বেশি ফেরত নেওয়া যায় না: ' + over);
+    var pin = (document.getElementById('vr-pin') || {}).value; pin = (pin || '').trim();
+    if (!pin) return toast('আপনার নিজের পাসওয়ার্ড দিন');
+    V.busy = true; showOvl('পাসওয়ার্ড যাচাই হচ্ছে...');
+    var a = await apiPost('/api/auth', { password: pin });
+    if (!a || !a.ok || String(a.userId) !== String(S.userId)) { hideOvl(); V.busy = false; return toast('❌ পাসওয়ার্ড ভুল — এটি আপনার নিজের পাসওয়ার্ড নয়'); }
+    var dsr = dsrList().filter(function(x){ return String(x.id) === String(V.dsrId); })[0] || {};
+    var slipNo = genUID('ME-RT');
+    showOvl('সংরক্ষণ হচ্ছে...');
+    var r = await apiPost('/api/transactions', { type:'return', srId:V.dsrId, srName:dsr.name||'', date:V.date, slipNo:slipNo, items:items, note:'ভ্যান ফেরত — '+(S.userName||S.role) });
+    hideOvl(); V.busy = false;
+    if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
+    _dashCache = null;
+    items.forEach(function(i){ S.stockMap[i.productId] = (S.stockMap[i.productId] || 0) + i.totalUnits; });
+    var slip = { slipNo:slipNo, date:V.date, srName:dsr.name||'', srArea:dsr.area||'', items:items };
+    S.lastRetSlip = slip;
+    toast('✅ ভ্যান ফেরত জমা হয়েছে');
+    vanRetClose();
+    try { openReturnSlip(slip); } catch(e) {}
+    try { renderRetRep(); } catch(e) {}
+  };
+
+  /* ── DSR: what is still in my van (read-only) ── */
+  async function dsrVanCard(){
+    var host = document.getElementById('vr-dsr-card'); if (!host) return;
+    await ensureProducts();
+    var r = await apiGet('/api/sr-payments?action=van-stock&dsrId='+encodeURIComponent(S.userId)+'&date='+encodeURIComponent(today()));
+    host = document.getElementById('vr-dsr-card'); if (!host) return;
+    var rows = vanRows((r && r.ok) ? (r.vanStock || {}) : {}), tot = 0;
+    var h = '<div class="card" style="border-top:3px solid var(--te);margin-bottom:10px"><div style="font-weight:800;font-size:13px;margin-bottom:6px">🚐 আমার গাড়িতে ফেরত দেওয়ার পণ্য</div>';
+    if (!rows.length) h += '<div style="text-align:center;color:var(--gr);font-weight:700;padding:10px">✅ গাড়িতে কোনো পণ্য বাকি নেই</div>';
+    else {
+      rows.forEach(function(x){ var v = x.units * num(x.p.sellingPrice); tot += v;
+        h += '<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--bdr);font-size:12px"><span style="min-width:0"><b>'+esc(x.p.name)+'</b></span><span style="white-space:nowrap"><b style="color:var(--te)">'+fmtCasePcs(x.units, num(x.p.caseSize)||1, x.p.unitType)+'</b> <span style="color:var(--mt2)">· ৳'+fm(v)+'</span></span></div>'; });
+      h += '<div style="display:flex;justify-content:space-between;padding-top:7px;font-size:13px;font-weight:800;color:var(--te)"><span>মোট ফেরতযোগ্য মূল্য</span><span>৳'+fm(tot)+'</span></div>'
+        + '<div style="font-size:10.5px;color:var(--mt2);margin-top:4px">এই পণ্য ম্যানেজার/মালিকের কাছে জমা দিন — তিনি নিজের পাসওয়ার্ড দিয়ে ফেরত নিয়ে স্লিপ দেবেন।</div>';
+    }
+    host.innerHTML = h + '</div>';
+  }
+
+  var _orig = window.renderRetRep;
+  window.renderRetRep = function(){
+    _orig.apply(this, arguments);
+    var pg = document.getElementById('pg-retrep'); if (!pg) return;
+    if (S.role === 'owner' || S.role === 'manager') {
+      pg.insertAdjacentHTML('afterbegin', '<button class="btn btn-w" style="background:var(--te);color:#fff;margin-bottom:10px;font-size:14px" onclick="vanRetOpen()">🚐 ভ্যান ফেরত — DSR বেছে গাড়ির বাকি পণ্য ফেরত নিন</button>');
+    } else if (S.role === 'dsr') {
+      pg.insertAdjacentHTML('afterbegin', '<div id="vr-dsr-card"><div class="card" style="text-align:center;color:var(--mt2);padding:14px;margin-bottom:10px">গাড়ির পণ্য লোড হচ্ছে...</div></div>');
+      dsrVanCard();
+    }
+  };
+})();
+</script>
+
+<script id="axi-v517-salereturn-js">
+/* ═══ v5.17 — বিক্রয় ফেরত (Sale Return): a shop was given goods but cannot pay → it hands them back to the DSR.
+       Menu → pick the shop (only shops that owe) → type what came back → own password → the goods return to the
+       DSR's van stock and the shop's due goes down. The list at the bottom shows everything returned so far. ═══ */
+(function(){
+  var R = { shops:[], shopsLoaded:false, q:'', shop:null, info:null, qty:{}, busy:false, from:'', to:'', hist:null };
+  function today(){ return iso(new Date()); }
+  function monthStart(){ var d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth(), 1)); }
+  function prod(pid){ return (S.products||[]).filter(function(p){ return String(p.id) === String(pid); })[0]; }
+  async function ensureProducts(){
+    if (!(S.products||[]).length) {
+      var r = await apiGet('/api/dashboard?action=load-all');
+      if (r && r.ok) { S.products = r.products || []; S.srs = r.srs || S.srs; S.stockMap = r.stockMap || {}; }
+    }
+    try { if (typeof _prodIdx === 'function') _prodIdx(); } catch(e) {}
+  }
+  function el(){
+    var e = document.getElementById('sr-pg');
+    if (!e) { e = document.createElement('div'); e.id = 'sr-pg'; e.style.cssText = 'position:fixed;inset:0;z-index:900;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 90px'; document.body.appendChild(e); }
+    e.style.display = 'block'; document.body.style.overflow = 'hidden'; return e;
+  }
+  window.saleReturnClose = function(){ var e = document.getElementById('sr-pg'); if (e) e.style.display = 'none'; document.body.style.overflow = ''; };
+  window.saleReturnOpen = async function(){
+    R = { shops:[], shopsLoaded:false, q:'', shop:null, info:null, qty:{}, busy:false, from:monthStart(), to:today(), hist:null };
+    showOvl('লোড হচ্ছে...'); await ensureProducts(); hideOvl();
+    render(); loadShops(); loadHist();
+  };
+  function unitsOf(pid){ var q = R.qty[pid] || {}, p = prod(pid), cs = num(p && p.caseSize) || 1; return num(q.cases) * cs + num(q.pcs); }
+  function grand(){
+    var u = 0, a = 0;
+    Object.keys(R.qty).forEach(function(k){ var x = unitsOf(k), p = prod(k); if (x > 0 && p) { u += x; a += x * num(p.sellingPrice); } });
+    return { u:u, a:a };
+  }
+  function grandHtml(){
+    var g = grand(), due = R.info ? num(R.info.due) : 0, over = g.a > due + 0.009;
+    return '<span>মোট ফেরত: '+(g.u > 0 ? fn(Math.round(g.u))+' পিস' : '০')+(over ? ' <span style="color:var(--re)">⚠️ বাকির চেয়ে বেশি</span>' : '')+'</span><span>৳'+fm(g.a)+'</span>';
+  }
+  function shopListHtml(){
+    var q = (R.q || '').trim().toLowerCase();
+    var list = R.shops.filter(function(x){ return !q || (String(x.shopName||'').toLowerCase().indexOf(q) >= 0) || String(x.phone||'').indexOf(q) >= 0 || String(x.shopNo||'').toLowerCase().indexOf(q) >= 0; });
+    if (!R.shopsLoaded) return '<div style="text-align:center;color:var(--mt2);padding:14px">দোকান লোড হচ্ছে...</div>';
+    if (!list.length) return '<div style="text-align:center;color:var(--mt2);padding:14px;font-size:12px">'+(R.shops.length ? 'কোনো দোকান মেলেনি' : 'কোনো দোকানের বাকি নেই — বাকি না থাকলে পণ্য ফেরত নেওয়ার দরকার নেই')+'</div>';
+    return list.map(function(x){
+      return '<div onclick="saleReturnPick(\''+esc(x.shopId)+'\')" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--bdr);cursor:pointer"><div style="min-width:0"><div style="font-size:12.5px;font-weight:700">🏪 '+esc(x.shopName)+'</div><div style="font-size:10.5px;color:var(--mt2)">'+(x.phone ? '📞 '+esc(x.phone)+' · ' : '')+esc(x.roadName||x.address||'')+'</div></div><b style="color:var(--re);white-space:nowrap;font-size:12.5px">বাকি ৳'+fm(x.totalDue)+'</b></div>';
+    }).join('');
+  }
+  function histHtml(){
+    var h = '<div class="card" style="margin-top:12px;border-top:3px solid #0D9488"><div style="font-weight:800;font-size:13px;margin-bottom:6px">📋 আমার বিক্রয় ফেরতের বিস্তারিত</div>'
+      + '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px"><input type="date" value="'+esc(R.from)+'" max="'+today()+'" onchange="saleReturnRange(\'from\',this.value)" style="flex:1;min-width:0;margin:0;padding:6px;font-size:12.5px"><span style="color:var(--mt2)">—</span><input type="date" value="'+esc(R.to)+'" max="'+today()+'" onchange="saleReturnRange(\'to\',this.value)" style="flex:1;min-width:0;margin:0;padding:6px;font-size:12.5px"></div>';
+    if (!R.hist) return h + '<div style="text-align:center;color:var(--mt2);padding:12px">লোড হচ্ছে...</div></div>';
+    if (!R.hist.slips.length) return h + '<div style="text-align:center;color:var(--mt2);padding:12px;font-size:12px">এই সময়ে কোনো বিক্রয় ফেরত নেই</div></div>';
+    h += '<div style="display:flex;justify-content:space-between;background:#0D9488;color:#fff;border-radius:10px;padding:7px 12px;font-weight:800;margin-bottom:6px"><span style="font-size:12px">মোট ফেরত ('+fn(R.hist.slips.length)+'টি স্লিপ)</span><span>৳'+fm(R.hist.total)+'</span></div>';
+    R.hist.slips.forEach(function(sl){
+      var tm = _dmdTime(sl.createdAt);
+      h += '<div style="padding:8px 0;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:3px"><span style="font-size:12px;font-weight:700">'+_dmdShopCall(sl.shopName, sl.shopPhone, 'ফেরত', sl.shopId)+'</span><span style="font-size:10.5px;color:var(--mt2);white-space:nowrap">'+esc(fmtBn(sl.date))+(tm ? ' · 🕒 '+esc(tm) : '')+'</span></div>';
+      sl.items.forEach(function(it){ h += '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:1px 0"><span>'+esc(it.productName)+' × '+_dmdCP(it.cases, it.pcs, it.units, _utOf(it))+'</span><span style="color:var(--mt)">৳'+fm(it.value)+'</span></div>'; });
+      if (sl.items.length > 1) h += '<div style="text-align:right;font-size:12px;font-weight:800;color:#0D9488;margin-top:2px">৳'+fm(sl.total)+'</div>';
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
+  function render(){
+    var e = el();
+    var h = '<div style="max-width:100%;margin:0 auto"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="ct" style="margin:0">🔁 বিক্রয় ফেরত</div><button class="btn btn-gh btn-sm" onclick="saleReturnClose()">✕ বন্ধ</button></div>'
+      + '<div class="gib" style="background:#CCFBF1;border-color:#0D9488;margin-bottom:8px">দোকান টাকা দিতে না পারলে পণ্য ফেরত নিন — পণ্য আবার <b>গাড়ির স্টকে</b> ফিরবে এবং দোকানের <b>বাকি কমে</b> যাবে।</div>';
+    if (!R.shop) {
+      h += '<div class="card" style="padding:0;overflow:hidden;border-top:3px solid #0D9488"><div style="padding:8px 10px;border-bottom:1px solid var(--bdr)"><div class="fl" style="margin-bottom:4px">🏪 কোন দোকান পণ্য ফেরত দিচ্ছে? (শুধু যাদের বাকি আছে)</div><input type="text" id="sr-q" placeholder="দোকানের নাম / ফোন / নম্বর" value="'+esc(R.q)+'" oninput="saleReturnSearch(this.value)" autocomplete="off" style="margin:0"></div><div id="sr-shops" style="max-height:42vh;overflow-y:auto">'+shopListHtml()+'</div></div>';
+    } else {
+      h += '<div class="card" style="border-top:3px solid #0D9488"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div style="min-width:0"><div style="font-size:13px;font-weight:800">🏪 '+esc(R.shop.shopName)+'</div><div style="font-size:11px;color:var(--re);font-weight:700">'+(R.info ? 'বর্তমান বাকি ৳'+fm(R.info.due) : 'লোড হচ্ছে...')+'</div></div><button class="btn btn-gh btn-sm" onclick="saleReturnBack()">← দোকান বদলান</button></div></div>';
+      if (R.info) h += bodyHtml();
+    }
+    e.innerHTML = h + histHtml() + '</div>';
+  }
+  function bodyHtml(){
+    var rows = (R.info.products || []).filter(function(x){ return prod(x.productId); });
+    if (!rows.length) return '<div class="card" style="text-align:center;color:var(--mt2);padding:20px;font-size:12px">এই দোকান এই DSR থেকে ফেরতযোগ্য কোনো পণ্য নেয়নি (বা সবই ফেরত হয়ে গেছে)</div>';
+    var h = '<div class="card" style="padding:0;overflow:hidden;border-top:3px solid #0D9488">';
+    rows.forEach(function(r){
+      var p = prod(r.productId), id = String(p.id), cs = num(p.caseSize) || 1, q = R.qty[id] || { cases:'', pcs:'' };
+      h += '<div style="padding:9px 11px;border-bottom:1px solid var(--bdr)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b style="font-size:12.5px">'+esc(p.name)+'</b><span style="font-size:11px;color:#0D9488;font-weight:700;white-space:nowrap">ফেরতযোগ্য: '+fmtCasePcs(r.returnable, cs, p.unitType)+'</span></div>'
+        + '<div style="display:flex;gap:8px;margin-top:6px;align-items:center"><div style="flex:1"><label class="fl" style="font-size:10px">'+esc(p.unitType||'কেস')+'</label><input type="number" inputmode="decimal" min="0" id="sr-c-'+id+'" value="'+esc(q.cases)+'" oninput="saleReturnQty(\''+id+'\')" style="margin:0"></div>'
+        + '<div style="flex:1"><label class="fl" style="font-size:10px">পিস</label><input type="number" inputmode="decimal" min="0" id="sr-p-'+id+'" value="'+esc(q.pcs)+'" oninput="saleReturnQty(\''+id+'\')" style="margin:0"></div>'
+        + '<div id="sr-v-'+id+'" style="flex:1;text-align:right;font-size:12px;font-weight:800;color:#0D9488">'+lineVal(id)+'</div></div></div>';
+    });
+    h += '</div><div id="sr-grand" style="background:#CCFBF1;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px;font-weight:800;color:#0F766E;display:flex;justify-content:space-between">'+grandHtml()+'</div>'
+      + '<div class="card"><div class="fg"><label class="fl">🔐 আপনার নিজের পাসওয়ার্ড *</label><input type="password" id="sr-pin" inputmode="numeric" maxlength="10" placeholder="পাসওয়ার্ড / PIN দিন" autocomplete="off"></div>'
+      + '<button class="btn btn-w" style="background:#0D9488;color:#fff" onclick="saleReturnSave()">🔁 ফেরত নিন — গাড়িতে ফিরবে, বাকি কমবে</button></div>';
+    return h;
+  }
+  function lineVal(pid){ var u = unitsOf(pid), p = prod(pid); return u > 0 ? '৳'+fm(u * num(p.sellingPrice)) : '—'; }
+  async function loadShops(){
+    var r = await apiGet('/api/sr-payments?action=due-shops&dsrId='+encodeURIComponent(S.userId));
+    R.shops = (r && r.ok) ? (r.shops || []) : []; R.shopsLoaded = true;
+    var box = document.getElementById('sr-shops'); if (box) box.innerHTML = shopListHtml();
+  }
+  async function loadHist(){
+    var r = await apiGet('/api/shops?action=sale-return-list&dsrId='+encodeURIComponent(S.userId)+'&from='+encodeURIComponent(R.from)+'&to='+encodeURIComponent(R.to));
+    R.hist = (r && r.ok) ? r : { slips:[], total:0 };
+    if (document.getElementById('sr-pg') && document.getElementById('sr-pg').style.display !== 'none') render();
+  }
+  window.saleReturnSearch = function(v){ R.q = v; var box = document.getElementById('sr-shops'); if (box) box.innerHTML = shopListHtml(); };
+  window.saleReturnRange = function(k, v){ if (!v) return; R[k] = v; if (R.to < R.from) { if (k === 'from') R.to = R.from; else R.from = R.to; } R.hist = null; render(); loadHist(); };
+  window.saleReturnBack = function(){ R.shop = null; R.info = null; R.qty = {}; render(); };
+  window.saleReturnPick = async function(id){
+    R.shop = R.shops.filter(function(x){ return String(x.shopId) === String(id); })[0] || null;
+    if (!R.shop) return;
+    R.info = null; R.qty = {}; render();
+    var r = await apiGet('/api/shops?action=sale-return-info&shopId='+encodeURIComponent(id)+'&dsrId='+encodeURIComponent(S.userId));
+    if (!r || !r.ok) { toast((r && r.error) || 'লোড ব্যর্থ'); R.shop = null; render(); return; }
+    R.info = r; render();
+  };
+  window.saleReturnQty = function(pid){
+    R.qty[pid] = { cases:(document.getElementById('sr-c-'+pid)||{}).value, pcs:(document.getElementById('sr-p-'+pid)||{}).value };
+    var a = document.getElementById('sr-v-'+pid); if (a) a.textContent = lineVal(pid);
+    var g = document.getElementById('sr-grand'); if (g) g.innerHTML = grandHtml();
+  };
+  window.saleReturnSave = async function(){
+    if (R.busy || !R.shop || !R.info) return;
+    var items = [], over = '';
+    (R.info.products || []).forEach(function(r){
+      var p = prod(r.productId); if (!p) return;
+      var id = String(p.id), u = unitsOf(id); if (u <= 0) return;
+      if (u > num(r.returnable) + 0.0001) over = p.name;
+      var q = R.qty[id] || {};
+      items.push({ productId:p.id, productName:p.name, sku:p.sku, cases:num(q.cases), pcs:num(q.pcs), totalUnits:u, purchasePrice:num(p.purchasePrice), sellingPrice:num(p.sellingPrice), unitType:p.unitType||'কেস' });
+    });
+    if (!items.length) return toast('কমপক্ষে একটি পরিমাণ দিন');
+    if (over) return toast('দোকান যা নিয়েছিল তার বেশি ফেরত নেওয়া যায় না: ' + over);
+    if (grand().a > num(R.info.due) + 0.009) return toast('ফেরতের মূল্য দোকানের বাকির চেয়ে বেশি হতে পারে না');
+    var pin = ((document.getElementById('sr-pin') || {}).value || '').trim();
+    if (!pin) return toast('আপনার নিজের পাসওয়ার্ড দিন');
+    R.busy = true; showOvl('পাসওয়ার্ড যাচাই হচ্ছে...');
+    var a = await apiPost('/api/auth', { password: pin });
+    if (!a || !a.ok || String(a.userId) !== String(S.userId)) { hideOvl(); R.busy = false; return toast('❌ পাসওয়ার্ড ভুল — এটি আপনার নিজের পাসওয়ার্ড নয়'); }
+    showOvl('সংরক্ষণ হচ্ছে...');
+    var r = await apiPost('/api/shops?action=sale-return', { shopId:R.shop.shopId, dsrId:S.userId, dsrName:S.userName||'', date:today(), slipNo:genUID('ME-SR'), items:items });
+    hideOvl(); R.busy = false;
+    if (!r || !r.ok) return toast((r && r.error) || 'ব্যর্থ');
+    try { _dashCache = null; } catch(e) {}
+    toast('✅ ফেরত নেওয়া হয়েছে — ৳'+fm(r.value)+' বাকি থেকে বাদ, পণ্য গাড়িতে ফিরেছে');
+    R.shop = null; R.info = null; R.qty = {}; R.shopsLoaded = false; R.hist = null; render(); loadShops(); loadHist();
+  };
+})();
+</script>
+
 <script id="axi-v59-fit-js">
 /* Numbers never hide: any amount that is wider than its box is shrunk until it fits (v5.13: every tile, not just a few). */
 (function(){
@@ -12874,11 +13347,11 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
     var g=document.querySelectorAll(GEN);
     for(i=0;i<g.length;i++){ try{ if(g[i].matches(SEL)) continue; if(isGeneric(g[i])) fit(g[i],0); }catch(e){} }
   }
-  var t=null; function soon(){ clearTimeout(t); t=setTimeout(fitAll,70); }
+  var t=null; function soon(){ clearTimeout(t); t=setTimeout(function(){ (window.requestAnimationFrame||setTimeout)(fitAll); },160); }
   new MutationObserver(soon).observe(document.getElementById('app')||document.body,{childList:true,subtree:true,characterData:true});
   window.addEventListener('resize',soon); window.addEventListener('orientationchange',soon);
   document.addEventListener('click',function(){setTimeout(fitAll,120);},true);
-  setInterval(function(){ if(!document.hidden) fitAll(); },1500);   // pages shown without a re-render
+  document.addEventListener('visibilitychange',function(){ if(!document.hidden) soon(); });   // perf: was a 1.5s polling loop
   function reset(){ var l=document.querySelectorAll(SEL+','+GEN); for(var i=0;i<l.length;i++) l[i]._fk=null; }
   if(document.fonts&&document.fonts.ready) document.fonts.ready.then(function(){ reset(); fitAll(); });
   window.axFitNums=function(){ reset(); fitAll(); };
@@ -12893,6 +13366,8 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
 /* ═══ v5.15 — home redesign (Owner · Manager · SO · DSR) + new DSR / SO menus ═══ */
 (function(){
   var C = {};   // tiny cache: key → {at,data}
+  window._homeCacheClear = function(){ C = {}; };
+  window._homeDashData = function(){ return C.dash ? C.dash.data : null; };
   function fresh(k, ms){ return C[k] && Date.now() - C[k].at < (ms || 45000); }
   function put(k, d){ C[k] = { at: Date.now(), data: d }; return d; }
   function today(){ return iso(new Date()); }
@@ -12907,7 +13382,7 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
     var z = { given:0, ret:0, sale:0, damage:0, comm:0, disc:0, due:0, dueTaken:0, pay:0 };
     if (!r || !r.ok) return z;
     var g = num(r.given && r.given.total), rt = num(r.ret && r.ret.total);
-    return { given:g, ret:rt, sale:g - rt, damage:num(r.damage && r.damage.total), comm:num(r.commission && r.commission.total),
+    return { given:g, ret:rt, sale:(r.netSale != null ? num(r.netSale) : g - rt), damage:num(r.damage && r.damage.total), comm:num(r.commission && r.commission.total),
       disc:num(r.discount && r.discount.total), due:num(r.todayDue && r.todayDue.total), dueTaken:num(r.cash && r.cash.dueCollected), pay:num(r.received && r.received.period) };
   }
   var HG_ROWS = [['given','দেওয়া','#3B82F6'],['ret','ফেরত','#14B8A6'],['sale','বিক্রয়','#10B981'],['damage','ড্যামেজ','#EF4444'],['comm','কমিশন','#F59E0B'],
@@ -13045,8 +13520,8 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
     var so = tl && tl.ok && (tl.list || [])[0];
     var h = '<div class="card" style="padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="mnPick(\'d:perf\')"><div style="font-weight:800;font-size:13px;margin-bottom:6px">🎯 টার্গেট</div>';
     if (me) {
-      h += '<div style="display:flex;align-items:center;gap:12px">' + _tgtDonut(me.pct, 84, 9, 'আমার টার্গেটে', '', false) + '<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--mt2)">এ পর্যন্ত বিক্রি</div><div style="font-size:17px;font-weight:800">' + money(me.achieved) + '</div>'
-        + '<div style="font-size:11px;color:var(--mt2);margin-top:3px">' + (me.target > 0 ? 'টার্গেট ' + money(me.target) + (me.remaining > 0 ? ' · বাকি ' + money(me.remaining) : ' · ✅ পূর্ণ') : 'টার্গেট সেট নেই') + '</div>'
+      h += '<div style="display:flex;align-items:center;gap:12px">' + _tgtDonut(me.pct, 84, 9, (me.basis==='boxes'?'বক্স':'টাকা')+' টার্গেটে', '', false) + '<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--mt2)">এ পর্যন্ত বিক্রি</div><div style="font-size:17px;font-weight:800">' + money(me.achieved) + '</div>'
+        + '<div style="font-size:11px;color:var(--mt2);margin-top:3px">' + (me.targetBoxes > 0 ? '📦 ' + _fbox(me.achievedBoxes) + ' / ' + _fbox(me.targetBoxes) + ' বক্স · ' : '') + (me.target > 0 ? 'টার্গেট ' + money(me.target) + (me.remaining > 0 ? ' · বাকি ' + money(me.remaining) : ' · ✅ পূর্ণ') : 'টার্গেট সেট নেই') + '</div>'
         + '<div style="font-size:11px;margin-top:3px">🏅 র‍্যাঙ্ক <b>#' + me.rank + '</b> / ' + all.length + '</div></div></div>';
     } else h += '<div style="font-size:11px;color:var(--mt2)">আমার তথ্য পাওয়া যায়নি</div>';
     if (so) { var sp = _tgtPrimary(so); h += '<div style="margin-top:8px;font-size:11px;background:var(--bll);border-radius:10px;padding:6px 10px">📊 আমার SO <b>' + esc(so.userName) + '</b>: ' + (sp.pct == null ? 'টার্গেট নেই' : '<b style="color:' + _tgtCol(sp.pct) + '">' + (Math.round(sp.pct * 10) / 10) + '%</b> পূরণ') + '</div>'; }
