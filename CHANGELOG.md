@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.17.1
+**Database: no change.** UI only (`public/index.html`).
+
+- **DSR লেনদেন top boxes:** the DSR-name box and the date box are now exactly the same size, shape and style (one line each, ▾ on the right). আজ / রেঞ্জ chips moved to the title row.
+- **DSR name pop-up:** tapping the DSR box opens a centred grey pop-up list of names (white text, radio on the right, tap outside to close) instead of the old drop-down.
+- **Transaction boxes:** দেওয়া, ফেরত, ড্যামেজ, কমিশন, ছাড় … and the red top box use the earlier version's look: white card, full coloured outline, rounded corners, larger figure.
+
 ## 5.17.0
 **Database: ONE small SQL to run** — `migrations/003_v5_17.sql` (Supabase → SQL editor, safe to run twice). Fresh installs: `schema_fresh.sql` already has it. API files: still **12**.
 
