@@ -5289,7 +5289,8 @@ function _dsrMyDayHtml() { return _dmdBoardHtml(S.dsrMyDay, S.dsrBox || '', 'dsr
 // ── মালিক / ম্যানেজার / SO — "DSR লেনদেন": DSR বেছে একই ৮টি বক্স দেখা ──
 function _dsrvList() {
   if (S.role === 'so') return (S.soAssignedDsrs || []).filter(function(x){ return x && x.id; });
-  return (S.srs || []).filter(function(x){ return x.role === 'dsr'; });
+  // v5.17.1 — every DSR and every SO (SO sales are booked under the SO's own id, same report)
+  return (S.srs || []).filter(function(x){ return x.role === 'dsr' || x.role === 'so'; });
 }
 function _dsrvState() {
   if (!S.dsrv) S.dsrv = { dsrId: '', mode: 'today', date: iso(new Date()), from: iso(new Date()), to: iso(new Date()), data: null, open: '', loaded: false };
@@ -5305,18 +5306,18 @@ function _dsrvHtml() {
   // v5.17.1 — two IDENTICAL boxes (same width, height, border, radius): [DSR name ▾] [date ▾]; আজ / রেঞ্জ chips sit in the title row.
   // Tapping the DSR box opens a centred pop-up list of names (see dsrvDdToggle).
   var td0 = iso(new Date());
-  var curNm = g.dsrId === 'all' ? '👥 সব DSR একসাথে' : (function(){ var x = list.filter(function(y){ return String(y.id) === String(g.dsrId); })[0]; return x ? '🚚 ' + x.name : 'বাছুন'; })();
+  var curNm = g.dsrId === 'all' ? '👥 সব DSR একসাথে' : (function(){ var x = list.filter(function(y){ return String(y.id) === String(g.dsrId); })[0]; return x ? (x.role === 'so' ? '👔 ' : '🚚 ') + x.name : 'বাছুন'; })();
   // eyebrow = small coloured caption on top of each box; both boxes share the same size/shape, only the tone differs
-  var BOXB = 'height:58px;box-sizing:border-box;border-radius:14px;padding:0 12px;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0;box-shadow:var(--shad-sm);';
+  var BOXB = 'height:58px;box-sizing:border-box;border-radius:16px;padding:0 13px;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0;background:var(--card);border:1px solid var(--bdr);box-shadow:var(--shad-sm);';
   var EYE = 'font-size:9.5px;font-weight:800;letter-spacing:.4px;line-height:1.1;';
   var VAL = 'font-size:14px;font-weight:800;line-height:1.25;color:var(--tx,inherit);';
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:stretch;margin-bottom:10px">'
-    + '<div id="dsrv-pick" onclick="dsrvDdToggle()" style="' + BOXB + 'cursor:pointer;background:linear-gradient(135deg,#ECFDF5,#D1FAE5);border:1.5px solid #10B981">'
+    + '<div id="dsrv-pick" onclick="dsrvDdToggle()" style="' + BOXB + 'cursor:pointer;border-top:3px solid #10B981">'
     +   '<div style="' + EYE + 'color:#047857">🚚 DSR নির্বাচন</div>'
-    +   '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;' + VAL + 'color:#064E3B"><span style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(curNm) + '</span><span style="font-size:11px;color:#047857">▾</span></div></div>';
-  if (g.mode !== 'range') h += '<div style="' + BOXB + 'background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #3B82F6"><div style="' + EYE + 'color:#1D4ED8">📅 তারিখ</div>'
-    + '<input type="date" id="dsrv-dt" max="'+td0+'" value="'+esc(g.mode==='today' ? td0 : g.date)+'" onchange="S.dsrv.mode=\'custom\';S.dsrv.date=this.value;dsrvLoad()" style="width:100%;min-width:0;height:22px!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;font-size:14px!important;font-weight:800!important;color:#1E3A8A"></div>';
-  else h += '<div style="' + BOXB + 'background:linear-gradient(135deg,#EFF6FF,#DBEAFE);border:1.5px solid #3B82F6"><div style="' + EYE + 'color:#1D4ED8">📅 তারিখ</div><div style="' + VAL + 'color:#1E3A8A">রেঞ্জ ▾ <span style="font-size:10.5px;font-weight:600">(নিচে দিন)</span></div></div>';
+    +   '<div style="display:flex;align-items:center;justify-content:space-between;gap:4px;' + VAL + 'color:var(--tx,inherit)"><span style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(curNm) + '</span><span style="font-size:11px;color:#047857">▾</span></div></div>';
+  if (g.mode !== 'range') h += '<div style="' + BOXB + 'border-top:3px solid #3B82F6"><div style="' + EYE + 'color:#1D4ED8">📅 তারিখ</div>'
+    + '<input type="date" id="dsrv-dt" max="'+td0+'" value="'+esc(g.mode==='today' ? td0 : g.date)+'" onchange="S.dsrv.mode=\'custom\';S.dsrv.date=this.value;dsrvLoad()" style="width:100%;min-width:0;height:22px!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important;font-size:14px!important;font-weight:800!important;color:var(--tx,inherit)"></div>';
+  else h += '<div style="' + BOXB + 'border-top:3px solid #3B82F6"><div style="' + EYE + 'color:#1D4ED8">📅 তারিখ</div><div style="' + VAL + 'color:var(--tx,inherit)">রেঞ্জ ▾ <span style="font-size:10.5px;font-weight:600">(নিচে দিন)</span></div></div>';
   h += '</div>';
   if (g.mode === 'range') h += '<div class="card" style="padding:6px 8px;margin-bottom:8px"><div style="display:flex;gap:6px;align-items:center"><input type="date" id="dsrv-fr" value="'+esc(g.from)+'" onchange="S.dsrv.from=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><span style="color:var(--mt2)">—</span><input type="date" id="dsrv-to" value="'+esc(g.to)+'" onchange="S.dsrv.to=this.value" style="flex:1;min-width:0;margin:0;padding:7px 8px;font-size:13px"><button class="btn btn-bl btn-sm" onclick="dsrvLoad()">📊</button></div></div>';
   var d = g.data;
@@ -5367,13 +5368,13 @@ function dsrvDdToggle() {
   var g = _dsrvState(), list = _dsrvList();
   var rows = [];
   if (S.role !== 'so') rows.push({ id: 'all', nm: '👥 সব DSR একসাথে' });
-  list.forEach(function(x){ rows.push({ id: String(x.id), nm: x.name }); });
+  list.forEach(function(x){ rows.push({ id: String(x.id), nm: x.name, so: x.role === 'so' }); });
   var h = '<div id="dsrv-pop" onclick="dsrvDdClose()" style="position:fixed;left:0;top:0;right:0;bottom:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box">'
     + '<div onclick="event.stopPropagation()" style="width:100%;max-width:380px;max-height:72vh;overflow-y:auto;overscroll-behavior:contain;background:#424242;color:#fff;border-radius:6px;box-shadow:0 18px 50px rgba(0,0,0,.55)">';
   rows.forEach(function(r, i){
     var on = String(r.id) === String(g.dsrId);
     h += '<div onclick="dsrvPick(\'' + esc(r.id) + '\')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 20px;cursor:pointer;font-size:20px;line-height:1.3;' + (i ? 'border-top:1px solid rgba(255,255,255,.14)' : '') + '">'
-      + '<span style="min-width:0;overflow-wrap:anywhere">' + esc(r.nm) + '</span>'
+      + '<span style="min-width:0;overflow-wrap:anywhere">' + esc(r.nm) + (r.so ? ' <span style="font-size:13px;opacity:.65">· SO</span>' : '') + '</span>'
       + '<span style="flex:0 0 auto;width:22px;height:22px;box-sizing:border-box;border-radius:50%;border:2px solid ' + (on ? '#8FE3C8' : '#bdbdbd') + ';display:flex;align-items:center;justify-content:center">' + (on ? '<span style="width:12px;height:12px;border-radius:50%;background:#8FE3C8"></span>' : '') + '</span></div>';
   });
   h += '</div></div>';

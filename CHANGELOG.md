@@ -4,6 +4,8 @@
 **Database: no change.** UI only (`public/index.html`).
 
 - **DSR লেনদেন top boxes:** the DSR-name box and the date box are now exactly the same size, shape and style (one line each, ▾ on the right). আজ / রেঞ্জ chips moved to the title row.
+- **DSR/SO list:** the pop-up now lists every DSR **and** every SO (SOs tagged "· SO") plus "সব DSR একসাথে" — e.g. 6 people + all = 7 options.
+- **Eyebrow style:** the two picker boxes are white cards with a thin line and a thick coloured top line (green = DSR, blue = date), small caption above the value.
 - **DSR name pop-up:** tapping the DSR box opens a centred grey pop-up list of names (white text, radio on the right, tap outside to close) instead of the old drop-down.
 - **Transaction boxes:** দেওয়া, ফেরত, ড্যামেজ, কমিশন, ছাড় … and the red top box use the earlier version's look: white card, full coloured outline, rounded corners, larger figure.
 
