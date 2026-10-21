@@ -6653,11 +6653,11 @@ var _settle = { dsrId: '', date: '', data: null, token: '', apply: { return: tru
 function _newToken() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('t' + Date.now() + Math.random().toString(36).slice(2, 12)); }
 
 function buildPayForm() {
-  var opts = S.srs.filter(function(s) { return s.role !== 'driver'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === _settle.dsrId ? ' selected' : '') + '>' + (s.role === 'so' ? '📊 ' : '') + esc(s.name) + '</option>'; }).join('');
+  var opts = S.srs.filter(function(s) { return s.role !== 'driver'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === _settle.dsrId ? ' selected' : '') + '>' + esc(s.name) + (s.area ? ' (' + esc(s.area) + ')' : '') + '</option>'; }).join('');
   setTimeout(function() { if (_settle.dsrId) loadSettlement(); }, 0);
   // v5.18 — minimal: [DSR] [date] → everything is worked out by itself → cash received → confirm with your password
   return '<div class="card" style="padding:8px 10px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    + '<div class="fg" style="margin:0"><label class="fl">DSR / SO</label><select id="pf-sr" onchange="loadSettlement()" style="margin:0"><option value="">-- বাছাই করুন --</option>' + opts + '</select></div>'
+    + '<div class="fg" style="margin:0"><label class="fl">DSR/SO *</label><select id="pf-sr" onchange="loadSettlement()" style="margin:0"><option value="">-- DSR/SO --</option>' + opts + '</select></div>'
     + '<div class="fg" style="margin:0"><label class="fl">তারিখ</label><input type="date" id="pf-dt" max="' + iso(new Date()) + '" value="' + (_settle.date || iso(new Date())) + '" onchange="loadSettlement()" style="margin:0"></div></div></div>'
     + '<div id="settle-box"></div>'
     + '<div class="card" style="margin-top:10px;padding:8px 10px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">💵 আলাদা নগদ জমা (বাকি পরিশোধ)</div>'
@@ -12703,7 +12703,7 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
   var V = { dsrId:'', date:'', van:null, qty:{}, busy:false, host:'' };
   function today(){ return iso(new Date()); }
   function prod(pid){ return (S.products||[]).filter(function(p){ return String(p.id) === String(pid); })[0]; }
-  function dsrList(){ return (S.srs||[]).filter(function(x){ return x.role === 'dsr'; }); }
+  function dsrList(){ return (S.srs||[]).filter(function(x){ return x.role !== 'driver'; }); }
   function vanRows(van){
     return Object.keys(van||{}).filter(function(k){ return num(van[k]) > 0 && prod(k); }).map(function(k){ var p = prod(k); return { p:p, units:num(van[k]) }; })
       .sort(function(a,b){ return (a.p._ord||0) - (b.p._ord||0); });
@@ -12739,8 +12739,8 @@ body.dark .mn-row,body.dark .mn-sq:not(.out){background:rgba(148,163,184,.22);bo
     var h = '<div style="max-width:100%;margin:0 auto">'
       + (V.host ? '' : '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="ct" style="margin:0">🚐 ভ্যান ফেরত</div><button class="btn btn-gh btn-sm" onclick="vanRetClose()">✕ বন্ধ</button></div>')
       + '<div class="card" style="border-top:3px solid var(--te)">'
-      + '<div class="fg"><label class="fl">🚚 DSR *</label><select id="vr-dsr" onchange="vanRetPick(this.value)"><option value="">-- DSR বাছুন --</option>'
-      + list.map(function(x){ return '<option value="'+esc(x.id)+'"'+(String(x.id)===String(V.dsrId)?' selected':'')+'>'+esc(x.name)+(x.soName?' · SO: '+esc(x.soName):'')+'</option>'; }).join('') + '</select></div>'
+      + '<div class="fg"><label class="fl">DSR/SO *</label><select id="vr-dsr" onchange="vanRetPick(this.value)"><option value="">-- DSR/SO --</option>'
+      + list.map(function(x){ return '<option value="'+esc(x.id)+'"'+(String(x.id)===String(V.dsrId)?' selected':'')+'>'+esc(x.name)+(x.area?' ('+esc(x.area)+')':'')+'</option>'; }).join('') + '</select></div>'
       + '<div class="fg"><label class="fl">📅 তারিখ</label><input type="date" id="vr-dt" max="'+today()+'" value="'+esc(V.date)+'" onchange="vanRetDate(this.value)"></div></div>';
     if (V.dsrId && V.van === null) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:20px">গাড়ির বাকি পণ্য লোড হচ্ছে...</div>';
     else if (V.dsrId) h += vrBody();
