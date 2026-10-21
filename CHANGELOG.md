@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.18.0
+**Database: no change.** API files: still **12** (`sr-payments.js` edited).
+
+- **DSR panel red box:** shows dues only up to the previous day — a day's unpaid credit counts only after the owner/manager registers that DSR's payment for the day.
+- **Previous-due bug fixed:** the 24-hour rule is replaced by a calendar-date rule. Paid on the day the due was made = cash; any later day = "পূর্বের বাকি আদায়".
+- **DSR/date boxes:** icons removed; the date box now has the same green top border as the DSR box.
+- **DSR transaction boxes:** all boxes same size, one line, no helper text; ফেরত / বিক্রয় ফেরত and ড্যামেজ, কমিশন, ছাড় are merged; every box opens a pop-up (merged boxes list their parts first). "আমার পারফরম্যান্স" tile removed; date moved beside the "আমার লেনদেন" title and the আজ/তারিখ/রেঞ্জ chips are smaller.
+- **Menu:** "দিনশেষ হিসাব" → "দেওয়া, নেওয়া ও পেমেন্ট" (3 tabs; নেওয়া = pick DSR → van stock loads → take). "লেনদেন" → "কোম্পানি লেনদেন" (damage, buy, return to company). New "পয়েন্ট সেল" item for owner/manager (shop → DSR auto-filled; DSR only → shop required).
+- **Payment tab:** fully automatic (no ticking); DSR + date → cash → password. Point sale shown in its own box.
+- **SO menu:** product, expenses and sales-calculation removed. **Manager menu:** ফেরত পণ্য removed.
+- **Approvals removed:** every entry saves immediately; approval queue endpoints deleted. The owner page is now "অগ্রিম আবেদন" (salary-advance requests only).
+- **Due collection list:** shop name + location + due; tapping the due opens the shop's due book.
+- **SO sale message / table, tile text centring** adjusted.
+
 ## 5.17.1
 **Database: no change.** UI only (`public/index.html`).
 

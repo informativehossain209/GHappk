@@ -54,7 +54,7 @@ async function _paymentGuard(srId, total, date) {
 }
 
 // POST actions that move money / stock — protected against double taps (CALC-8).
-const IDEM_ACTIONS = new Set(['approval_submit', 'order_submit', 'give_direct', 'due-collect', 'damage-collect']);
+const IDEM_ACTIONS = new Set(['order_submit', 'give_direct', 'due-collect', 'damage-collect']);
 
 module.exports = async (req, res) => {
   cors(res);
@@ -70,119 +70,8 @@ module.exports = async (req, res) => {
 
 async function _handle(req, res, action) {
   try {
-    // ══════════════════════════════════════════════════
-    //  MANAGER APPROVAL FLOW
-    // ══════════════════════════════════════════════════
-
-    // GET pending approvals — owner sees all, manager sees own
-    if (req.method === 'GET' && action === 'approvals') {
-      const managerId = req.query && req.query.managerId;
-      let q = supabase.from('manager_pending_approvals')
-        .select('*').order('submitted_at', { ascending: false });
-      if (managerId) q = q.eq('manager_id', managerId);
-      const { data, error } = await q;
-      if (error) throw error;
-      return res.json({ ok: true, approvals: (data || []).map(mapApproval) });
-    }
-
-    // POST — Manager submits entry for approval
-    if (req.method === 'POST' && action === 'approval_submit') {
-      const d = req.body;
-      if (d.inputType === 'payment' || d.inputType === 'settlement') {
-        const a = await _verifyActor(d.managerId, d.pin); if (!a.ok) return res.json(a);
-      }
-      const { error } = await supabase.from('manager_pending_approvals').insert({
-        id:           randomUUID(),
-        manager_id:   d.managerId   || '',
-        manager_name: d.managerName || '',
-        input_type:   d.inputType   || '',
-        input_data:   d.inputData   || {},
-        submitted_at: now_(),
-        status:       'pending',
-        approved_at:  null,
-        approved_by:  null
-      });
-      if (error) throw error;
-      return res.json({ ok: true });
-    }
-
-    // POST — Owner approves a single entry
-    if (req.method === 'POST' && action === 'approval_approve') {
-      const { id } = req.body;
-      const { data: row, error: fetchErr } = await supabase
-        .from('manager_pending_approvals').select('*').eq('id', id).single();
-      if (fetchErr) throw fetchErr;
-      if (!row || row.status !== 'pending')
-        return res.json({ ok: false, error: 'এন্ট্রি পাওয়া যায়নি বা ইতিমধ্যে প্রক্রিয়া হয়েছে' });
-      const _ar = await _doApprove(row);
-      if (_ar && _ar.ok === false) {
-        // A duplicate settlement means it was already applied — close the request; any other failure stays pending.
-        if (_ar.duplicate) {
-          await supabase.from('manager_pending_approvals').update({ status: 'approved', approved_at: now_(), approved_by: 'owner' }).eq('id', id);
-        }
-        return res.json({ ok: false, error: _ar.error || 'অনুমোদন ব্যর্থ' });
-      }
-      const { error: updErr } = await supabase.from('manager_pending_approvals')
-        .update({ status: 'approved', approved_at: now_(), approved_by: 'owner' })
-        .eq('id', id);
-      if (updErr) throw updErr;
-      return res.json({ ok: true });
-    }
-
-    // POST — Owner approves ALL pending entries at once
-    if (req.method === 'POST' && action === 'approval_approve_all') {
-      const { data: rows, error: fetchErr } = await supabase
-        .from('manager_pending_approvals').select('*').eq('status', 'pending');
-      if (fetchErr) throw fetchErr;
-      if (!rows || !rows.length) return res.json({ ok: true, count: 0 });
-      const okIds = []; let failed = 0;
-      for (const row of rows) {
-        const _ar = await _doApprove(row);
-        if (_ar && _ar.ok === false && !_ar.duplicate) { failed++; continue; }
-        okIds.push(row.id);
-      }
-      if (okIds.length) {
-        const { error: updErr } = await supabase.from('manager_pending_approvals')
-          .update({ status: 'approved', approved_at: now_(), approved_by: 'owner' })
-          .in('id', okIds);
-        if (updErr) throw updErr;
-      }
-      return res.json({ ok: true, count: okIds.length, failed });
-    }
-
-    // POST — Owner rejects a single entry
-    if (req.method === 'POST' && action === 'approval_reject') {
-      const { id } = req.body;
-      const { error } = await supabase.from('manager_pending_approvals')
-        .update({ status: 'rejected', approved_at: now_(), approved_by: 'owner' })
-        .eq('id', id);
-      if (error) throw error;
-      return res.json({ ok: true });
-    }
-
-    // POST — Owner edits a pending entry's data before approving.
-    // Requires Owner PIN re-entry every time (AXIION §9 "no miss edit").
-    if (req.method === 'POST' && action === 'approval_edit') {
-      const { id, ownerPin, updatedInputData } = req.body || {};
-      if (!id || !ownerPin || !updatedInputData)
-        return res.json({ ok: false, error: 'id, ownerPin ও updatedInputData প্রয়োজন' });
-
-      const { data: ownerRow, error: pinErr } = await supabase
-        .from('user_passwords').select('id').eq('role', 'owner').eq('password', String(ownerPin).trim()).limit(1);
-      if (pinErr) throw pinErr;
-      if (!ownerRow || !ownerRow.length) return res.json({ ok: false, error: 'ভুল Owner PIN' });
-
-      const { data: row, error: fetchErr } = await supabase
-        .from('manager_pending_approvals').select('status').eq('id', id).single();
-      if (fetchErr) throw fetchErr;
-      if (!row || row.status !== 'pending')
-        return res.json({ ok: false, error: 'এন্ট্রি পাওয়া যায়নি বা ইতিমধ্যে প্রক্রিয়া হয়েছে' });
-
-      const { error } = await supabase.from('manager_pending_approvals')
-        .update({ input_data: updatedInputData }).eq('id', id);
-      if (error) throw error;
-      return res.json({ ok: true });
-    }
+    // v5.18 — the owner-approval queue (manager entries waiting for the owner) has been removed:
+    // every transaction is saved straight away by whoever enters it.
 
     // ══════════════════════════════════════════════════
     //  SO ORDERING → APPROVAL → VAN-LOAD WORKFLOW (AXIION §13)
@@ -539,7 +428,7 @@ async function _handle(req, res, action) {
         fetchAll(() => supabase.from('dsr_settlements').select('cash_received')
           .in('dsr_id', ids).gte('date', from).lte('date', to)),
         // v5.8 — everything ever received from this DSR (all dates) for the red top box
-        fetchAll(() => supabase.from('dsr_settlements').select('cash_received').in('dsr_id', ids))
+        fetchAll(() => supabase.from('dsr_settlements').select('dsr_id,date,cash_received').in('dsr_id', ids))
       ]);
 
       // shop names for the commission / discount history
@@ -594,10 +483,15 @@ async function _handle(req, res, action) {
         const rem = num(r.amount) - num(r.paid_amount);
         if (rem <= 0.004) return;
         const dd = String(r.due_date || '').slice(0, 10);
-        const line = { dsrName: nameById[String(r.dsr_id)] || '', date: dd, createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(rem), original: _m2(r.amount), paid: _m2(r.paid_amount), note: r.note || '' };
+        const line = { dsrId: String(r.dsr_id || ''), dsrName: nameById[String(r.dsr_id)] || '', date: dd, createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(rem), original: _m2(r.amount), paid: _m2(r.paid_amount), note: r.note || '' };
         if (dd >= from && dd <= to) todayDueLines.push(line); else if (dd < from) prevDueLines.push(line);
       });
       const sumL = (arr) => _m2(arr.reduce((a, r) => a + r.amount, 0));
+      // v5.18 — the red top box: a day's unpaid credit only becomes "due" after that day is closed —
+      // i.e. it is dated before today, or the owner/manager already registered that DSR's payment for it.
+      const _settledDay = new Set((settledAll || []).map(r => String(r.dsr_id) + '|' + String(r.date || '').slice(0, 10)));
+      const dueAllLines = [...prevDueLines, ...todayDueLines].filter(l => l.date < today || _settledDay.has(l.dsrId + '|' + l.date))
+        .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       const _byTime = (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
       todayDueLines.sort(_byTime); prevDueLines.sort(_byTime);
 
@@ -614,18 +508,20 @@ async function _handle(req, res, action) {
           if (initial > 0.004) { cashAtSale += initial; cashSales.push({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.due_date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(initial) }); }
         });
       }
-      // v5.14.1 — 24-HOUR RULE. Money taken for a sale within 24 h of that sale is CASH
-      // (it joins "আজকের বিক্রয়"); money taken after 24 h is an OLD DUE collected.
-      // The total cash in hand is unchanged — only which line it is listed under.
-      const _H24 = 24 * 3600 * 1000;
+      // v5.18 — DATE RULE (replaces the old 24-hour rule). Money taken on the SAME calendar day the
+      // sale/due was made is CASH of that day's sale (it joins "আজকের বিক্রয়"). Money taken on any
+      // LATER day is an OLD (previous) DUE collected. e.g. due made on the 11th: paid on the 11th = cash,
+      // paid on the 12th or later = previous-due collection — whatever the hour. Total cash in hand is
+      // unchanged — only which line it is listed under.
+      const _bdtDay = (ts) => { const t = Date.parse(ts || ''); return isFinite(t) ? new Date(t + 6 * 3600 * 1000).toISOString().slice(0, 10) : ''; };
       const colDueIds = [...new Set((dueCols || []).map(r => String(r.due_id || '')).filter(Boolean))];
-      const dueCreated = {};
+      const dueMadeOn = {};
       for (let i = 0; i < colDueIds.length; i += 80) {
-        const { data: dcRows } = await supabase.from('due_calendar').select('id,created_at').in('id', colDueIds.slice(i, i + 80));
-        (dcRows || []).forEach(r => { dueCreated[String(r.id)] = r.created_at || ''; });
+        const { data: dcRows } = await supabase.from('due_calendar').select('id,created_at,due_date').in('id', colDueIds.slice(i, i + 80));
+        (dcRows || []).forEach(r => { dueMadeOn[String(r.id)] = _bdtDay(r.created_at) || String(r.due_date || '').slice(0, 10); });
       }
-      const colWithin24 = (r) => { const c = Date.parse(dueCreated[String(r.due_id || '')] || ''), t = Date.parse(r.created_at || ''); return isFinite(c) && isFinite(t) && (t - c) <= _H24; };
-      const colsFast = (dueCols || []).filter(colWithin24), colsOld = (dueCols || []).filter(r => !colWithin24(r));
+      const colSameDay = (r) => { const made = dueMadeOn[String(r.due_id || '')]; const on = String(r.date || '').slice(0, 10) || _bdtDay(r.created_at); return !!made && !!on && on <= made; };
+      const colsFast = (dueCols || []).filter(colSameDay), colsOld = (dueCols || []).filter(r => !colSameDay(r));
       colsFast.forEach(r => {
         cashAtSale += num(r.amount);
         cashSales.push({ dsrName: nameById[String(r.dsr_id)] || '', date: String(r.date || '').slice(0, 10), createdAt: r.created_at || '', shopId: r.shop_id || '', shopPhone: shopPhone[String(r.shop_id || '')] || '', shopName: r.shop_name || '', amount: _m2(r.amount) });
@@ -683,7 +579,7 @@ async function _handle(req, res, action) {
         // totals use, so a DSR's panel and his SO's panel can never disagree.
         netSale: _m2(sumV(given) + sumV(pointSlips) - sumV(returned) - sumV(pointRetSlips)),
         // v5.13 — every unpaid due the DSR holds (this period + all earlier) — the red top box
-        dueAll: { total: _m2(sumL(todayDueLines) + sumL(prevDueLines)) },
+        dueAll: { total: sumL(dueAllLines), lines: dueAllLines },
         damage: {
           total: damageTotal,
           vanDamage: { total: sumV(vanDamage), slips: vanDamage },
@@ -926,7 +822,7 @@ async function _handle(req, res, action) {
       const t = DATE_RE.test(req.query.to || '') ? req.query.to : '';
       const [stl, pend, mgrs] = await Promise.all([
         fetchAll(() => { let q = supabase.from('dsr_settlements').select('dsr_id,dsr_name,date,cash_received,received_by_id,received_by_name,received_by_role,created_at').eq('received_by_role', 'manager').order('date', { ascending: false }); if (f) q = q.gte('date', f); if (t) q = q.lte('date', t); return q; }),
-        fetchAll(() => supabase.from('manager_pending_approvals').select('manager_id,manager_name,input_data,submitted_at').eq('input_type', 'settlement').eq('status', 'pending')),
+        Promise.resolve([]),   // v5.18 — no approval queue any more
         fetchAll(() => supabase.from('user_passwords').select('user_key,user_name').eq('role', 'manager'))
       ]);
       const by = {};
@@ -1149,122 +1045,6 @@ async function _handle(req, res, action) {
     res.status(405).json({ ok: false, error: 'Method not allowed' });
   } catch (e) {
     res.json({ ok: false, error: safeErr(e) });
-  }
-}
-
-// ── Map approval row to frontend shape ──────────────────────────────
-function mapApproval(r) {
-  return {
-    id:          String(r.id || ''),
-    managerId:   String(r.manager_id   || ''),
-    managerName: r.manager_name || '',
-    inputType:   r.input_type   || '',
-    inputData:   r.input_data   || {},
-    submittedAt: r.submitted_at || '',
-    status:      r.status       || 'pending',
-    approvedAt:  r.approved_at  || '',
-    approvedBy:  r.approved_by  || ''
-  };
-}
-
-// ── Move one approved row into its real table(s) ───────────────────
-async function _doApprove(row) {
-  const d  = row.input_data || {};
-  const ts = now_();
-
-  if (row.input_type === 'transaction') {
-    // "give" now flows through the van-load safety net (same as SO
-    // orders and Owner's give_direct) instead of writing stock out the
-    // moment Owner approves it — the DSR still has to tick every item
-    // and press "Finish Loading" before the real transaction rows (and
-    // the stock deduction) actually get written.
-    if (d.type === 'give') {
-      const items = d.items || [];
-      const rpA = await _repriceItems(items);
-      if (!rpA.ok) return { ok: false, error: rpA.error };
-      const label = 'দেওয়া (ম্যানেজার' + (d.srName ? ' → ' + d.srName : '') + ')';
-      const { error: ordErr } = await supabase.from('orders').insert({
-        id: randomUUID(), so_id: '', so_name: label,
-        items: rpA.items, requested_amount: rpA.amount,
-        status: 'approved', assigned_dsr_id: String(d.srId || ''), load_status: 'not_started', load_ticks: {},
-        approved_by: 'owner', approved_at: ts, created_at: ts
-      });
-      if (ordErr) throw ordErr;
-      return;
-    }
-
-    // Everything else is priced on the server (CALC-5 / CALC-6) and guarded
-    // against negative stock (CALC-9) exactly like a direct entry.
-    const dDate = (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday();
-    const pricedA = await priceItems(d.items || [], { type: d.type, srId: d.srId, date: dDate });
-    if (!pricedA.ok) return { ok: false, error: pricedA.error };
-    if (['point_sale', 'return_company'].includes(d.type) && await blockNegativeStock()) {
-      const msgA = stockShortage(pricedA.lines);
-      if (msgA) return { ok: false, error: msgA };
-    }
-    const txId = randomUUID();
-    const rows = pricedA.lines.map(l => txRow(l, {
-      tx_id: txId, type: d.type, sr_id: d.srId || '', sr_name: d.srName || '',
-      date: dDate, slip_no: d.slipNo || '', note: d.note || '', created_at: ts
-    }));
-    const { error: txErr } = await supabase.from('transactions').insert(rows);
-    if (txErr) throw txErr;
-
-    if (d.type === 'damage') {
-      const dmgRows = pricedA.lines.map(l => ({
-        tx_id: txId, product_id: l.productId, product_name: l.productName, sku: l.sku,
-        total_units: l.units, purchase_price: l.purchasePrice, total_cost: l.cost,
-        date: dDate, sr_id: d.srId || '', sr_name: d.srName || '',
-        status: 'pending', cleared_date: null, created_at: ts
-      }));
-      const { error: dmgErr } = await supabase.from('dmg_claims').insert(dmgRows);
-      if (dmgErr) { await supabase.from('transactions').delete().eq('tx_id', txId); throw dmgErr; }
-    }
-  }
-
-  if (row.input_type === 'payment') {
-    const cashAmt = _m2(d.cashAmount);
-    const commAmt = _m2(d.commissionAmt);
-    const discAmt = _m2(d.discountAmt);
-    const dmgAmt  = _m2(d.damageAmt);
-    const total   = _m2(cashAmt + commAmt + discAmt + dmgAmt || num(d.amount));
-    { const g = await _paymentGuard(d.srId, total, d.date); if (g) return { ok: false, error: g }; }
-    const { error } = await supabase.from('sr_payments').insert({
-      sr_id:          d.srId   || '',
-      sr_name:        d.srName || '',
-      date:           (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday(),
-      amount:         total,
-      cash_amount:    cashAmt,
-      commission_amt: commAmt,
-      discount_amt:   discAmt,
-      damage_amt:     dmgAmt,
-      note:           d.note  || '',
-      created_at:     ts
-    });
-    if (error) throw error;
-  }
-
-  if (row.input_type === 'settlement') {
-    // Manager's end-of-day settlement — recalculated from the database at
-    // the moment the Owner approves (never trusts stale numbers).
-    // v5.11 — remember WHICH manager actually took the cash from the DSR (the Owner only approves it)
-    return await _performSettlement(Object.assign({}, d, { _recvId: row.manager_id || '', _recvName: row.manager_name || '', _recvRole: 'manager' }), 'owner-approval');
-  }
-
-  if (row.input_type === 'expense') {
-    const entries = d.entries || [];
-    if (entries.length) {
-      const expRows = entries.map(e => ({
-        category_id:   String(e.categoryId   || ''),
-        category_name: String(e.categoryName || ''),
-        date:          (d.date && DATE_RE.test(d.date)) ? d.date : bdtToday(),
-        amount:        _m2(e.amount),
-        note:          d.note || '',
-        created_at:    ts
-      }));
-      const { error } = await supabase.from('exp_records').insert(expRows);
-      if (error) throw error;
-    }
   }
 }
 
