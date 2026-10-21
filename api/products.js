@@ -56,6 +56,29 @@ module.exports = async (req, res) => {
         return res.json({ ok: true, resynced: ids.length });
       }
 
+      // ── PERF — migrate-thumbs: moves photos still stored as base64 inside the database rows
+      // (products + staff) into Storage and keeps only the short URL. Run it by opening
+      //   /api/products?action=migrate-thumbs   (repeat until "remaining" is 0).
+      // A failed upload leaves that row untouched, so no photo can be lost.
+      if (action === 'migrate-thumbs') {
+        const BATCH = 15;
+        const out = { ok: true, migrated: 0, failed: 0, remaining: 0 };
+        for (const table of ['products', 'srs']) {
+          const { data: rows, error: e1 } = await supabase.from(table).select('id,thumb').like('thumb', 'data:image%').limit(BATCH);
+          if (e1) throw e1;
+          for (const r of (rows || [])) {
+            const url = await resolveThumb(r.thumb, '');
+            if (url && !String(url).startsWith('data:')) {
+              const { error: e2 } = await supabase.from(table).update({ thumb: url }).eq('id', r.id);
+              if (e2) out.failed++; else out.migrated++;
+            } else out.failed++;
+          }
+          const { count } = await supabase.from(table).select('id', { count: 'exact', head: true }).like('thumb', 'data:image%');
+          out.remaining += (count || 0);
+        }
+        return res.json(out);
+      }
+
       const { data, error } = await supabase.from('products').select('*').order('sort_order').order('created_at');
       if (error) throw error;
       return res.json((data || []).map(mapProduct));

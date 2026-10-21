@@ -425,10 +425,19 @@ async function _handle(req, res, action) {
           .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
         fetchAll(() => supabase.from('damage_collections').select('*')
           .in('dsr_id', ids).gte('date', from).lte('date', to).order('created_at')),
-        fetchAll(() => supabase.from('dsr_settlements').select('cash_received')
+        fetchAll(() => supabase.from('dsr_settlements').select('dsr_id,date,cash_received')
           .in('dsr_id', ids).gte('date', from).lte('date', to)),
-        // v5.8 — everything ever received from this DSR (all dates) for the red top box
-        fetchAll(() => supabase.from('dsr_settlements').select('dsr_id,date,cash_received').in('dsr_id', ids))
+        // v5.8 — everything ever received from this DSR (all dates) for the red top box.
+        // PERF: only the all-time TOTAL is needed — computed in the database (migrations/004_perf.sql);
+        // falls back to a one-column fetch if that function is not installed yet.
+        (async () => {
+          try {
+            const { data, error } = await supabase.rpc('dsr_received_total', { p_ids: ids.map(String) });
+            if (!error && data !== null && data !== undefined) return Number(Array.isArray(data) ? (data[0] && Object.values(data[0])[0]) : data) || 0;
+          } catch (_) {}
+          const rows = await fetchAll(() => supabase.from('dsr_settlements').select('cash_received').in('dsr_id', ids));
+          return rows.reduce((a, r) => a + num(r.cash_received), 0);
+        })()
       ]);
 
       // shop names for the commission / discount history
@@ -489,7 +498,7 @@ async function _handle(req, res, action) {
       const sumL = (arr) => _m2(arr.reduce((a, r) => a + r.amount, 0));
       // v5.18 — the red top box: a day's unpaid credit only becomes "due" after that day is closed —
       // i.e. it is dated before today, or the owner/manager already registered that DSR's payment for it.
-      const _settledDay = new Set((settledAll || []).map(r => String(r.dsr_id) + '|' + String(r.date || '').slice(0, 10)));
+      const _settledDay = new Set((settled || []).map(r => String(r.dsr_id) + '|' + String(r.date || '').slice(0, 10)));
       const dueAllLines = [...prevDueLines, ...todayDueLines].filter(l => l.date < today || _settledDay.has(l.dsrId + '|' + l.date))
         .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
       const _byTime = (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
@@ -560,7 +569,7 @@ async function _handle(req, res, action) {
       const damageTotal = _m2(sumV(vanDamage) + damageMoney + damageExchange);
       const cashInHand = _m2(cashAtSale + dueCollected - damageMoney);
       const handedOver = _m2((settled || []).reduce((a, r) => a + num(r.cash_received), 0));
-      const receivedAll = _m2((settledAll || []).reduce((a, r) => a + num(r.cash_received), 0));
+      const receivedAll = _m2(Number(settledAll) || 0);
 
       const dsrName = isAll ? 'সব DSR একসাথে' : (nameById[sid] || '');
 

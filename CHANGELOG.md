@@ -1,3 +1,11 @@
+## v5.18.1 — Speed release
+- Browser: icon + number-fit scanners now touch only changed parts of the page; 2–10 min GET cache for stable lists (cleared on every save/logout); chat refresh 60 s; location check every 10 min (sends only if moved >100 m, heartbeat 20 min); search boxes debounced (150 ms local / 400 ms server).
+- Startup: load-all, notice, deposit and advance list now go out together and are cached.
+- Slip tab loads the last 60 days, with "load older" and "show more" (50 at a time).
+- DSR day view no longer downloads every settlement ever received: the all-time total comes from a database function (migrations/004_perf.sql), with a safe fallback.
+- /api/products?action=migrate-thumbs moves old base64 photos into Storage.
+- Build step (build.js) minifies public/index.html from src/index.html. EDIT src/index.html, not public/.
+
 ## Update — slips & merged boxes
 - DSR panel: merged boxes (ফেরত / বিক্রয় ফেরত, ড্যামেজ·কমিশন·ছাড়) now show ONE summed total; tap to see each part.
 - কোম্পানি লেনদেন: "কেনা" has a company slip-number field; new 🧾 স্লিপ tab lists all purchase/return slips newest-first with search (slip no, date, product, note) and detail pop-up.
