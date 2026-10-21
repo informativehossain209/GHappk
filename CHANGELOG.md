@@ -1,3 +1,7 @@
+## Update — slips & merged boxes
+- DSR panel: merged boxes (ফেরত / বিক্রয় ফেরত, ড্যামেজ·কমিশন·ছাড়) now show ONE summed total; tap to see each part.
+- কোম্পানি লেনদেন: "কেনা" has a company slip-number field; new 🧾 স্লিপ tab lists all purchase/return slips newest-first with search (slip no, date, product, note) and detail pop-up.
+
 # Changelog
 
 ## 5.18.0

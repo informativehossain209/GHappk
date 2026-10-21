@@ -4925,9 +4925,9 @@ function _dmdBoardHtml(d, open, toggleFn) {
   var T = function(n) { return '৳' + fm(n); };
   var boxes = [
     {k:'given',      lb:'দেওয়া',                              v:T(d.given.total),                                                   c:'var(--bl)'},
-    {k:'retG',       lb:'ফেরত / বিক্রয় ফেরত',                  v:T(_dmdPartVal('ret', d)) + ' / ' + T(_dmdPartVal('saleReturn', d)), c:'var(--te)'},
+    {k:'retG',       lb:'ফেরত / বিক্রয় ফেরত',                  v:T(_dmdPartVal('ret', d) + _dmdPartVal('saleReturn', d)), c:'var(--te)'},
     {k:'sale',       lb: single ? 'আজকের বিক্রয়' : 'বিক্রয়',   v:T(netSale),                                                         c:'#10B981'},
-    {k:'dcd',        lb:'ড্যামেজ, কমিশন, ছাড়',                 v:T(_dmdPartVal('damage', d)) + ', ' + T(_dmdPartVal('commission', d)) + ', ' + T(_dmdPartVal('discount', d)), c:'var(--pu)'},
+    {k:'dcd',        lb:'ড্যামেজ, কমিশন, ছাড়',                 v:T(_dmdPartVal('damage', d) + _dmdPartVal('commission', d) + _dmdPartVal('discount', d)), c:'var(--pu)'},
     {k:'todayDue',   lb: single ? 'আজকের বাকি' : 'এই সময়ের বাকি', v:T((d.todayDue || {}).total || 0),                                  c:'var(--re)'},
     {k:'prevDue',    lb:'পূর্বের বাকি আদায়',                   v:T(c.dueCollected || 0),                                             c:'var(--or,#c27c00)'},
     {k:'pointSale',  lb:'পয়েন্ট সেল',                          v:T(ps.total),                                                        c:'#0891B2'},
@@ -8511,6 +8511,7 @@ function renderTx() {
   else if(t==='point_sale') body=buildPointSaleWiz();
   else if(t==='point_damage_return') body=buildPointDmgWiz();
   else if(t==='buy'||t==='return_company') body=buildSimpleTx();
+  else if(t==='slips') body=buildCoSlips();
   else body='<div class="card" style="text-align:center;padding:30px 14px;color:var(--mt)">'
     +'<div style="font-size:36px;margin-bottom:10px">👆</div>'
     +'<div style="font-weight:700;color:var(--txt)">উপরে থেকে একটি ধরন বাছাই করুন</div></div>';
@@ -8522,11 +8523,13 @@ function renderTx() {
     +'<button class="tb '+(t==='damage'?'td_':'')+'\" onclick="S.txType=\'damage\';S.dmgStep=1;renderTx()">⚠️ ড্যামেজ<br><small>দাবি</small></button>'
     +'<button class="tb '+(t==='buy'?'tb_':'')+'\" onclick="S.txType=\'buy\';renderTx()">🛒 কেনা<br><small>কোম্পানি</small></button>'
     +'<button class="tb '+(t==='return_company'?'tr_':'')+'\" onclick="S.txType=\'return_company\';renderTx()">↩️ কোম্পানিতে ফেরত<br><small>স্টক কমবে</small></button>'
+    +'<button class="tb '+(t==='slips'?'tb_':'')+'\" onclick="S.txType=\'slips\';renderTx()">🧾 স্লিপ<br><small>খুঁজুন ও যাচাই</small></button>'
     +'</div>';
   // the wizards address #tx-body by id — keep exactly one copy in the document
   ['pg-tx','pg-psale','pg-settle'].forEach(function(id){ if (id!==host){ var e=document.getElementById(id); if(e) e.innerHTML=''; } });
   document.getElementById(host).innerHTML=head+'<div id="tx-body">'+body+'</div>';
   if (t==='buy'||t==='return_company') setTimeout(renderTxRows, 0);
+  if (t==='slips') setTimeout(coSlipsLoad, 0);
 }
 
 function stepBar(step) {
@@ -8677,6 +8680,7 @@ function buildSimpleTx() {
   var info = rc ? '<div class="gib" style="background:var(--tel);border-color:var(--te)">↩️ কোম্পানিকে পণ্য ফেরত দিলে রেকর্ড করুন। শুধু স্টক থেকে বিয়োগ হবে — বাকি, বিক্রি বা অন্য কোনো হিসাব বদলাবে না।</div>' : '<div class="gib">কোম্পানি থেকে পণ্য কিনলে রেকর্ড করুন। স্টক বাড়বে।</div>';
   return info+'<div class="card">'
     +'<div class="g2" style="margin-bottom:10px"><div><label class="fl">তারিখ</label><input type="date" id="tx-dt" value="'+iso(new Date())+'"></div><div><label class="fl">নোট</label><input id="tx-nt" placeholder="ঐচ্ছিক"></div></div>'
+    +'<div class="fg"><label class="fl">কোম্পানির স্লিপ নং'+'</label><input id="tx-slip" placeholder="যেমন: INV-1234 (ফাঁকা রাখলে নিজে থেকে হবে)" autocomplete="off"></div>'
     +'<label class="fl" style="margin-bottom:7px">পণ্য তালিকা</label>'
     +'<div id="tx-rows"></div>'
     +'<button class="btn btn-gh btn-sm" onclick="addTxRow()" style="margin-bottom:10px">➕ পণ্য যোগ করুন</button>'
@@ -8738,7 +8742,15 @@ async function saveTx(){
       if (items[q].totalUnits > have) return toast(items[q].productName+' — স্টকে আছে '+fmtCaseOf(items[q].productId,have)+', ফেরত দিতে চাইছেন '+fmtCaseOf(items[q].productId,items[q].totalUnits));
     }
   }
-  var txNo=genUID(t==='return_company'?'ME-RC':'ME-BY'), txDate=v('tx-dt')||iso(new Date()), txNote=v('tx-nt');
+  var txDate=v('tx-dt')||iso(new Date()), txNote=v('tx-nt');
+  var typedSlip=(v('tx-slip')||'').trim();
+  var txNo=typedSlip||genUID(t==='return_company'?'ME-RC':'ME-BY');
+  if (typedSlip) {
+    // same slip number entered twice? warn before saving a duplicate purchase
+    var prior = await apiGet('/api/transactions?type='+t+'&from=2000-01-01&to=2100-01-01');
+    if (Array.isArray(prior) && prior.some(function(r){ return String(r.slipNo||'').toLowerCase()===typedSlip.toLowerCase(); })
+        && !confirm('স্লিপ নং "'+typedSlip+'" আগে একবার এন্ট্রি হয়েছে। তবুও আবার সংরক্ষণ করবেন?')) return;
+  }
   var txPayload={type:t,srId:'',srName:'',date:txDate,slipNo:txNo,note:txNote,items:items};
   var txMemo=function(pend){_memoStock(t,{no:txNo,date:txDate,partyName:S.distributorName||'কোম্পানি',items:items,note:txNote,banner:pend?'⏳ অনুমোদন পেন্ডিং — মালিকের অনুমোদনের অপেক্ষায়':'',meta:[['প্রস্তুতকারী:',_memoBy()]]});};
   showOvl('সংরক্ষণ হচ্ছে...');
@@ -8750,6 +8762,79 @@ async function saveTx(){
   toast(t==='return_company' ? '↩️ কোম্পানিতে ফেরত রেকর্ড হয়েছে — স্টক কমানো হয়েছে' : '🛒 ক্রয় রেকর্ড হয়েছে');
   items.forEach(function(i){ S.stockMap[i.productId]=(num(S.stockMap[i.productId])||0)+(t==='return_company'?-1:1)*i.totalUnits; });
   S.txItems=[{productId:'',cases:'',pcs:''}]; renderTx();
+}
+
+
+// ════════════════════════════════════════════════════
+//  কোম্পানি স্লিপ — every purchase / return-to-company slip, newest first; search by slip no, date, product, note
+// ════════════════════════════════════════════════════
+var _coSlips = null, _coSlipFilter = 'all', _coSlipQ = '';
+async function coSlipsLoad() {
+  var box = document.getElementById('co-slip-list'); if (!box) return;
+  box.innerHTML = '<div style="text-align:center;color:var(--mt2);padding:20px">লোড হচ্ছে...</div>';
+  var res = await Promise.all([
+    apiGet('/api/transactions?type=buy&from=2000-01-01&to=2100-01-01'),
+    apiGet('/api/transactions?type=return_company&from=2000-01-01&to=2100-01-01')
+  ]);
+  var rows = [].concat(Array.isArray(res[0]) ? res[0] : [], Array.isArray(res[1]) ? res[1] : []);
+  var by = {};
+  rows.forEach(function(r) {
+    var g = by[r.txId];
+    if (!g) g = by[r.txId] = { txId: r.txId, type: r.type, slipNo: r.slipNo || '', date: r.date, createdAt: r.createdAt || '', note: r.note || '', items: [], total: 0 };
+    g.items.push(r); g.total += num(r.totalCost);
+  });
+  _coSlips = Object.keys(by).map(function(k) { return by[k]; }).sort(function(a, b) {
+    return a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0);
+  });
+  coSlipsPaint();
+}
+function coSlipSearch(val) { _coSlipQ = val || ''; coSlipsPaint(); }
+function coSlipType(t) { _coSlipFilter = t; coSlipsPaint(); }
+function _coSlipDateKeys(d) { var p = String(d).split('-'); return p.length === 3 ? [d, p[2] + '/' + p[1] + '/' + p[0], p[2] + '-' + p[1] + '-' + p[0]] : [d]; }
+function coSlipsPaint() {
+  var box = document.getElementById('co-slip-list'); if (!box || !_coSlips) return;
+  var q = _coSlipQ.trim().toLowerCase();
+  var list = _coSlips.filter(function(g) {
+    if (_coSlipFilter !== 'all' && g.type !== _coSlipFilter) return false;
+    if (!q) return true;
+    var hay = [g.slipNo, g.note].concat(_coSlipDateKeys(g.date), g.items.map(function(i) { return i.productName; })).join(' | ').toLowerCase();
+    return hay.indexOf(q) >= 0;
+  });
+  var chip = function(k, lb) { return '<button class="btn btn-sm ' + (_coSlipFilter === k ? '' : 'btn-gh') + '" style="' + (_coSlipFilter === k ? 'background:var(--bl);color:#fff;' : '') + 'flex:1" onclick="coSlipType(\'' + k + '\')">' + lb + '</button>'; };
+  var h = '<div style="display:flex;gap:6px;margin-bottom:8px">' + chip('all', 'সব') + chip('buy', '🛒 কেনা') + chip('return_company', '↩️ ফেরত') + '</div>';
+  h += '<div style="font-size:11px;color:var(--mt2);margin:0 2px 8px">' + list.length + 'টি স্লিপ · সর্বশেষ তারিখ উপরে</div>';
+  if (!list.length) h += '<div class="card" style="text-align:center;color:var(--mt2);padding:22px">' + (q ? 'কোনো স্লিপ মেলেনি' : 'এখনো কোনো স্লিপ নেই') + '</div>';
+  var lastDate = '';
+  list.forEach(function(g) {
+    if (g.date !== lastDate) { lastDate = g.date; h += '<div style="font-size:12px;font-weight:800;color:var(--mt);margin:12px 2px 6px">📅 ' + fmtBn(g.date) + '</div>'; }
+    var isBuy = g.type === 'buy', clr = isBuy ? 'var(--bl)' : 'var(--te)';
+    h += '<div class="card" onclick="coSlipOpen(\'' + esc(g.txId) + '\')" style="padding:10px 12px;margin-bottom:7px;cursor:pointer;border-left:4px solid ' + clr + '">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px;word-break:break-all">' + (isBuy ? '🛒 ' : '↩️ ') + esc(g.slipNo || '(নং নেই)') + '</b><b style="color:' + clr + ';white-space:nowrap">৳' + fm(g.total) + ' ›</b></div>'
+      + '<div style="font-size:11px;color:var(--mt2);margin-top:3px">' + g.items.length + 'টি পণ্য · ' + esc(g.items.slice(0, 2).map(function(i) { return i.productName; }).join(', ')) + (g.items.length > 2 ? '…' : '') + '</div></div>';
+  });
+  box.innerHTML = h;
+}
+function coSlipOpen(txId) {
+  var g = (_coSlips || []).filter(function(x) { return x.txId === txId; })[0]; if (!g) return;
+  var isBuy = g.type === 'buy';
+  var b = '<div style="font-size:12px;color:var(--mt2);margin-bottom:8px">📅 ' + fmtBn(g.date) + ' · ' + (isBuy ? 'কোম্পানি থেকে কেনা' : 'কোম্পানিতে ফেরত') + (g.note ? '<br>📝 ' + esc(g.note) : '') + '</div>';
+  g.items.forEach(function(i) {
+    var p = (S.products || []).filter(function(x) { return x.id === i.productId; })[0] || {};
+    b += '<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 2px;border-bottom:1px solid var(--bdr);font-size:13px"><div style="min-width:0"><b>' + esc(i.productName) + '</b><div style="font-size:11px;color:var(--mt2)">' + fmtCasePcs(num(i.totalUnits), p.caseSize || 1, p.unitType || 'কেস') + ' × ৳' + fm(i.purchasePrice) + '</div></div><b style="white-space:nowrap">৳' + fm(i.totalCost) + '</b></div>';
+  });
+  b += '<div style="display:flex;justify-content:space-between;padding:10px 2px;font-size:14px;font-weight:800"><span>মোট</span><span>৳' + fm(g.total) + '</span></div>'
+    + '<button class="btn btn-gh btn-w" onclick="coSlipPrint(\'' + esc(g.txId) + '\')">🖨️ মেমো দেখুন / প্রিন্ট</button>';
+  _dmdPopShow('🧾 ' + esc(g.slipNo || 'স্লিপ'), b);
+}
+function coSlipPrint(txId) {
+  var g = (_coSlips || []).filter(function(x) { return x.txId === txId; })[0]; if (!g) return;
+  dmdPopClose();
+  _memoStock(g.type, { no: g.slipNo, date: g.date, partyName: S.distributorName || 'কোম্পানি', note: g.note, meta: [['প্রস্তুতকারী:', _memoBy()]],
+    items: g.items.map(function(i) { return { productId: i.productId, productName: i.productName, sku: i.sku, cases: num(i.cases), pcs: num(i.pcs), totalUnits: num(i.totalUnits), purchasePrice: num(i.purchasePrice), sellingPrice: num(i.sellingPrice) }; }) });
+}
+function buildCoSlips() {
+  return '<div class="card" style="padding:8px 10px;margin-bottom:10px"><input id="co-slip-q" type="search" value="' + esc(_coSlipQ) + '" oninput="coSlipSearch(this.value)" placeholder="🔍 স্লিপ নং, তারিখ (২১/১০/২০২৬), পণ্য বা নোট দিয়ে খুঁজুন" style="margin:0"></div>'
+    + '<div id="co-slip-list"></div>';
 }
 
 // ════════════════════════════════════════════════════
