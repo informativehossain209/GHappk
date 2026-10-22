@@ -109,7 +109,7 @@ async function _buildShopLedger(shopId) {
     const k = String(r.tx_id || r.id);
     const b = bills[k] || (bills[k] = { txId: k, type: r.type, date: _d10(r.date), at: r.created_at, dsrName: r.sr_name || '',
       slipNo: r.slip_no || '', note: r.note || '', rev: 0, comm: 0, disc: 0, units: 0, lines: 0, items: [] });
-    b.items.push({ n: r.product_name || '', c: num(r.cases), p: num(r.pcs), u: num(r.total_units), v: _r2(r.total_revenue) });   // v5.21 — tally-book rows list the goods
+    b.items.push({ n: r.product_name || '', c: num(r.cases), p: num(r.pcs), u: num(r.total_units), v: _r2(r.total_revenue), cm: _r2(r.commission_amt), ds: _r2(r.discount_amt) });   // v5.21 — tally-book rows list the goods
     b.rev += num(r.total_revenue); b.comm += num(r.commission_amt); b.disc += num(r.discount_amt);
     b.units += num(r.total_units); b.lines += 1;
     if (_ms(r.created_at) && _ms(r.created_at) < _ms(b.at)) b.at = r.created_at;

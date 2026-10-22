@@ -5548,6 +5548,52 @@ function _ldgItemsTxt(items) {
     return esc(it.n) + ' <b>' + q + '</b>';
   }).join(' · ');
 }
+// v5.22 — tally-book layout helpers: compact numbers that always fit, per-case commission/discount rates
+function _ldgN(x) {
+  var v = Number(x) || 0, whole = Math.abs(v - Math.round(v)) < 0.005;
+  return v.toLocaleString('en-IN', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 });
+}
+// per-case rate of a bill line's commission or discount. Returns {rate,unit} when the amount is an exact
+// per-case/per-piece rate, {flat:true} when it is a whole-bill lump (cannot be split per case), {none:true} when zero.
+function _ldgRate(it, amt) {
+  amt = Number(amt) || 0; if (amt <= 0) return { none: true };
+  var c = Number(it.c) || 0, p = Number(it.p) || 0, u = Number(it.u) || 0, eq, unit = 'case';
+  if (c > 0) { var ppc = (u - p) / c; eq = ppc > 0 ? u / ppc : c; }
+  else if (p > 0) { eq = p; unit = 'pcs'; }
+  else return { flat: true, amt: amt };
+  var r = Math.round(amt / eq * 100) / 100;
+  if (Math.abs(amt / eq - r) > 0.0051 / eq) return { flat: true, amt: amt };
+  return { rate: r, unit: unit };
+}
+function _ldgRateCell(it, amt) {
+  var r = _ldgRate(it, amt), base = 'text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;';
+  if (r.none) return '<span style="' + base + 'color:#9CA3AF">—</span>';
+  if (r.flat) return '<span style="' + base + 'color:#047857;font-weight:700">৳' + _ldgN(r.amt) + '<span style="display:block;font-size:8.5px;font-weight:600;color:#6B7280">মোট</span></span>';
+  return '<span style="' + base + 'color:#047857;font-weight:700">৳' + _ldgN(r.rate) + (r.unit === 'pcs' ? '<span style="display:block;font-size:8.5px;font-weight:600;color:#6B7280">/পিস</span>' : '') + '</span>';
+}
+function _ldgQtyCell(it) {
+  var ut = 'কেস'; try { ut = _utOf({ productName: it.n }) || 'কেস'; } catch (e) {}
+  var c = Number(it.c) || 0, p = Number(it.p) || 0, parts = [];
+  if (c) parts.push(fn(c) + ' ' + ut);
+  if (p) parts.push(fn(p) + ' পিস');
+  if (!parts.length) parts.push(fn(it.u) + ' পিস');
+  return '<span style="text-align:right;font-weight:800;font-variant-numeric:tabular-nums">' + parts.map(function(x) { return '<span style="display:block;white-space:nowrap">' + x + '</span>'; }).join('') + '</span>';
+}
+// plain two-column goods list (name · quantity) used by return / damage rows
+function _ldgGoodsLines(items) {
+  return (items || []).map(function(it) {
+    return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span style="min-width:0;word-break:break-word">' + esc(it.n) + '</span>' + _ldgQtyCell(it).replace('text-align:right;', 'text-align:right;flex-shrink:0;') + '</div>';
+  }).join('');
+}
+function _ldgQtyPlain(it) {
+  var ut = 'কেস'; try { ut = _utOf({ productName: it.n }) || 'কেস'; } catch (e) {}
+  var c = Number(it.c) || 0, p = Number(it.p) || 0, parts = [];
+  if (c) parts.push(fn(c) + ' ' + ut);
+  if (p) parts.push(fn(p) + ' পিস');
+  if (!parts.length) parts.push(fn(it.u) + ' পিস');
+  return parts.join(' ');
+}
+function _ldgTogRow(no, i) { var k = no + '-' + i; _LDG.openEv[k] = !_LDG.openEv[k]; _ldgRender(); }
 function _ldgGo(d) {
   var n = (_LDG.pages || []).length; if (!n) return;
   _LDG.page = Math.max(0, Math.min(n - 1, (_LDG.page == null ? n - 1 : _LDG.page) + d)); _ldgRender();
@@ -5578,48 +5624,108 @@ function _ldgRender() {
     + '<button class="btn btn-gh btn-sm" onclick="_ldgGo(-1)"' + (_LDG.page <= 0 ? ' disabled style="opacity:.35"' : '') + '>◀ আগের পাতা</button>'
     + '<b style="font-size:12px">পাতা ' + (_LDG.page + 1) + ' / ' + pages.length + '</b>'
     + '<button class="btn btn-gh btn-sm" onclick="_ldgGo(1)"' + (_LDG.page >= pages.length - 1 ? ' disabled style="opacity:.35"' : '') + '>পরের পাতা ▶</button></div>';
-  // the paper page
-  var line = 'rgba(100,116,139,.28)';
-  h += '<div class="tally-pg" style="border:1px solid #D9CFA8;border-radius:6px;overflow:hidden;background-color:#FFFDF2;color:#1F2937;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 27px,' + line + ' 27px,' + line + ' 28px);box-shadow:0 2px 10px rgba(0,0,0,.12);position:relative">';
-  h += '<div style="position:absolute;top:0;bottom:0;left:50px;width:1.5px;background:rgba(220,38,38,.45);pointer-events:none"></div>';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px 6px 10px;background:#FBF4D6;border-bottom:2px solid #D9CFA8;font-size:11.5px;font-weight:800">'
-    + '<span>' + (isOpen ? '🔴 চলমান পাতা' : '✅ পরিশোধিত পাতা') + '</span><span style="font-weight:600;color:#6B7280">' + fmtBn(c.startDate) + (isOpen ? ' থেকে' : ' → ' + fmtBn(c.endDate)) + '</span></div>';
-  var G = 'display:grid;grid-template-columns:44px 1fr 58px 58px 62px;gap:0;';
-  h += '<div style="' + G + 'font-size:10px;font-weight:800;color:#6B7280;border-bottom:1.5px solid #D9CFA8;padding:4px 0"><span style="padding-left:6px">তারিখ</span><span style="padding-left:10px">বিবরণ</span><span style="text-align:right">মোট</span><span style="text-align:right">জমা</span><span style="text-align:right;padding-right:6px">বাকি</span></div>';
-  (c.events || []).forEach(function(e) {
-    var cell = 'padding:5px 0 6px;';
+  // the paper page — a ruled ledger. Every entry is ONE line (তারিখ | বিবরণ | মোট | জমা | বাকি); tap a line to open its details
+  // (goods · quantity · commission/case · discount/case · bill summary). All cells of a line stretch to the same height so the
+  // vertical ruling is perfectly continuous.
+  var RULE = 'rgba(154,143,94,.45)', VL = 'border-left:1px solid ' + RULE + ';', RED = 'border-left:1.5px solid rgba(220,38,38,.42);', DW = 38;
+  var evs = c.events || [];
+  var G = 'display:grid;grid-template-columns:' + DW + 'px minmax(0,1fr) 60px 56px 62px;align-items:stretch;';
+  var CELL = 'display:flex;align-items:center;min-width:0;';
+  var DATEC = CELL + 'font-size:10.5px;padding:10px 0 10px 6px;color:#4B5563;white-space:nowrap;';
+  var DESCC = CELL + RED + 'padding:10px 4px 10px 8px;font-size:11.5px;gap:5px;';
+  var NUMC = CELL + VL + 'justify-content:flex-end;padding:10px 6px 10px 0;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums;';
+  var balClr = function(v) { return num(v) > 0 ? '#B91C1C' : '#047857'; };
+  var chev = function(open) { return '<span style="flex-shrink:0;font-size:8px;color:#9A8F5E;margin-left:auto;padding-left:1px">' + (open ? '▲' : '▼') + '</span>'; };
+  var ell = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  var more = function(n) { return n > 1 ? '<span style="flex-shrink:0;font-size:9.5px;font-weight:800;color:#8A6D1D;background:#F3E3A6;border-radius:9px;padding:1px 6px">+' + (n - 1) + '</span>' : ''; };
+  var firstTxt = function(its) { var it = its[0]; return '<span style="' + ell + 'flex:1 1 auto">' + esc(it.n) + '</span><b style="flex-shrink:0;white-space:nowrap;font-size:11px">' + _ldgQtyPlain(it) + '</b>'; };
+  // detail drawer helpers
+  var DR = 'background:#FFF7D8;border-bottom:1px solid #D9CFA8;border-left:3px solid #D97706;padding:10px 10px 12px 10px;';
+  var BOX = 'border:1px solid ' + RULE + ';border-radius:8px;overflow:hidden;background:#FFFEF6;';
+  var tc = function(inner, first, extra) { return '<div style="' + (first ? 'min-width:0;word-break:break-word;padding:6px 8px;' : VL + 'padding:6px 8px;text-align:right;') + 'display:flex;align-items:center;' + (first ? '' : 'justify-content:flex-end;') + (extra || '') + '">' + inner + '</div>'; };
+  var kv = function(l, v, clr, bold, top) { return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;' + (top ? 'border-top:1px dashed ' + RULE + ';margin-top:3px;padding-top:6px;' : '') + (bold ? 'font-weight:800;' : '') + '"><span style="color:#6B7280">' + l + '</span><span style="font-variant-numeric:tabular-nums;white-space:nowrap;' + (clr ? 'color:' + clr + ';' : '') + '">' + v + '</span></div>'; };
+  var meta = function(parts) { parts = parts.filter(Boolean); return parts.length ? '<div style="font-size:10.5px;color:#6B7280;margin-bottom:7px">' + parts.join(' · ') + '</div>' : ''; };
+
+  h += '<div class="tally-pg" style="border:1px solid #D9CFA8;border-radius:10px;overflow:hidden;background-color:#FFFDF2;color:#1F2937;box-shadow:0 3px 14px rgba(0,0,0,.13);position:relative">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;background:linear-gradient(#FBF4D6,#F6EDC3);border-bottom:2px solid #D9CFA8;font-size:12px;font-weight:800">'
+    + '<span style="white-space:nowrap">' + (isOpen ? '🔴 চলমান পাতা' : '✅ পরিশোধিত পাতা') + '</span><span style="font-weight:600;color:#6B7280;white-space:nowrap;font-size:11px">' + fmtBn(c.startDate) + (isOpen ? ' থেকে' : ' → ' + fmtBn(c.endDate)) + '</span></div>';
+  var HC = 'font-size:10px;font-weight:800;color:#6B7280;';
+  h += '<div style="' + G + 'background:#FFFBE8;border-bottom:1.5px solid #D9CFA8"><span style="' + DATEC + HC + 'padding:6px 0 6px 6px">তারিখ</span><span style="' + DESCC + HC + 'padding:6px 4px 6px 8px">বিবরণ</span>'
+    + '<span style="' + NUMC + HC + 'padding:6px 8px 6px 0">মোট</span><span style="' + NUMC + HC + 'padding:6px 8px 6px 0">জমা</span><span style="' + NUMC + HC + 'padding:6px 8px 6px 0">বাকি</span></div>';
+  evs.forEach(function(e, i) {
+    var open = !!_LDG.openEv[c.no + '-' + i], hasItems = false, rowBg = open ? 'background:#FFF7D8;' : '';
+    var line = 'border-bottom:' + (open ? '0' : '1px solid rgba(217,207,168,.85)') + ';';
+    var clk = function(on) { return on ? 'cursor:pointer;-webkit-tap-highlight-color:rgba(217,119,6,.12)" onclick="_ldgTogRow(' + c.no + ',' + i + ')"' : '"'; };
     if (e.kind === 'sale') {
-      var net = num(e.billed), paid = num(e.paid);
-      var sub = [];
-      if (num(e.commission) > 0) sub.push('কমিশন −৳' + fm(e.commission));
-      if (num(e.discount) > 0) sub.push('ছাড় −৳' + fm(e.discount));
+      var net = num(e.billed), paid = num(e.paid), its = e.items || []; hasItems = its.length > 0;
       var lbl = e.saleType === 'point_sale' ? 'কাউন্টার বিক্রয়' : (e.saleType === 'manual' ? (e.note || 'হাতে লেখা বাকি') : '');
-      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
-        + '<span style="padding-left:10px;font-size:11px;line-height:1.45;min-width:0;word-break:break-word">' + (lbl ? '<i style="color:#6B7280">' + esc(lbl) + '</i> ' : '') + _ldgItemsTxt(e.items)
-        + (sub.length ? '<div style="font-size:10px;color:#047857">' + sub.join(' · ') + '</div>' : '') + '</span>'
-        + '<b style="text-align:right;font-size:11.5px">' + fm(net) + '</b><span style="text-align:right;font-size:11.5px;color:#047857">' + (paid > 0 ? fm(paid) : '—') + '</span>'
-        + '<b style="text-align:right;padding-right:6px;font-size:11.5px;color:' + (num(e.balance) > 0 ? '#B91C1C' : '#047857') + '">' + fm(e.balance) + '</b></div>';
+      h += '<div style="' + G + line + rowBg + clk(hasItems) + '><span style="' + DATEC + '">' + _ldgShort(e.date) + '</span>'
+        + '<span style="' + DESCC + '">' + (lbl ? '<i style="color:#6B7280;flex-shrink:0">' + esc(lbl) + '</i>' : '') + (hasItems ? firstTxt(its) + more(its.length) + chev(open) : '') + '</span>'
+        + '<b style="' + NUMC + '">' + _ldgN(net) + '</b>'
+        + '<span style="' + NUMC + 'color:' + (paid > 0 ? '#047857' : '#9CA3AF') + '">' + (paid > 0 ? _ldgN(paid) : '—') + '</span>'
+        + '<b style="' + NUMC + 'color:' + balClr(e.balance) + '">' + _ldgN(e.balance) + '</b></div>';
+      if (hasItems && open) {
+        var hasC = its.some(function(it) { return num(it.cm) > 0; }), hasD = its.some(function(it) { return num(it.ds) > 0; });
+        var SG = 'display:grid;grid-template-columns:minmax(0,1fr) 64px' + (hasC ? ' 62px' : '') + (hasD ? ' 62px' : '') + ';align-items:stretch;';
+        var sc = its.reduce(function(t, it) { return t + num(it.cm); }, 0), sd = its.reduce(function(t, it) { return t + num(it.ds); }, 0);
+        h += '<div style="' + DR + '">' + meta([e.slipNo ? 'স্লিপ ' + esc(e.slipNo) : '', e.dsrName ? '🚚 ' + esc(e.dsrName) : '', e.at ? '🕐 ' + _fmtHM(e.at) : '']);
+        h += '<div style="' + BOX + '">';
+        h += '<div style="' + SG + 'background:#F6EDC3;font-size:9.5px;font-weight:800;color:#8A6D1D;border-bottom:1px solid ' + RULE + '">' + tc('পণ্য', true) + tc('পরিমাণ') + (hasC ? tc('কমিশন/কেস') : '') + (hasD ? tc('ছাড়/কেস') : '') + '</div>';
+        its.forEach(function(it, j) {
+          h += '<div style="' + SG + 'font-size:11.5px;' + (j < its.length - 1 || hasC || hasD ? 'border-bottom:1px solid rgba(154,143,94,.28)' : '') + '">' + tc(esc(it.n), true) + tc(_ldgQtyCell(it), false, 'font-weight:700')
+            + (hasC ? tc(_ldgRateCell(it, it.cm)) : '') + (hasD ? tc(_ldgRateCell(it, it.ds)) : '') + '</div>';
+        });
+        if (hasC || hasD) {
+          var tn = 'font-weight:800;color:#047857;font-variant-numeric:tabular-nums;white-space:nowrap;';
+          h += '<div style="' + SG + 'background:#FBF4D6;font-size:11px;border-top:1px solid ' + RULE + '">' + tc('<span style="color:#6B7280;font-weight:700">মোট বাদ</span>', true) + tc('')
+            + (hasC ? tc(sc > 0 ? '−' + _ldgN(sc) : '—', false, tn) : '') + (hasD ? tc(sd > 0 ? '−' + _ldgN(sd) : '—', false, tn) : '') + '</div>';
+        }
+        h += '</div>';
+        h += '<div style="margin-top:9px;padding:0 2px">' + kv('পণ্যের মূল্য', '৳' + _ldgN(e.gross))
+          + (sc > 0 ? kv('কমিশন', '−৳' + _ldgN(sc), '#047857') : '') + (sd > 0 ? kv('ছাড়', '−৳' + _ldgN(sd), '#047857') : '')
+          + kv('মোট বিল', '৳' + _ldgN(net), '', true, true) + kv('জমা', paid > 0 ? '৳' + _ldgN(paid) : '—', paid > 0 ? '#047857' : '#9CA3AF')
+          + kv('এই বিলের বাকি', '৳' + _ldgN(e.dueAdded), balClr(e.dueAdded), true) + '</div></div>';
+      }
     } else if (e.kind === 'pay') {
-      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
-        + '<span style="padding-left:10px;font-size:11px;color:#047857">💵 বাকি জমা' + (e.byName ? ' <span style="color:#6B7280">· ' + esc(e.byName) + '</span>' : '') + (e.affects ? '' : ' <i style="color:#B45309">(বিল মেলেনি)</i>') + '</span>'
-        + '<span></span><b style="text-align:right;font-size:11.5px;color:#047857">' + fm(e.amount) + '</b>'
-        + '<b style="text-align:right;padding-right:6px;font-size:11.5px;color:' + (num(e.balance) > 0 ? '#B91C1C' : '#047857') + '">' + (e.affects ? fm(e.balance) : '—') + '</b></div>';
+      h += '<div style="' + G + line + '"><span style="' + DATEC + '">' + _ldgShort(e.date) + '</span>'
+        + '<span style="' + DESCC + 'color:#047857;font-weight:700"><span style="' + ell + '">💵 বাকি জমা' + (e.byName ? ' <span style="font-weight:600;color:#6B7280">· ' + esc(e.byName) + '</span>' : '') + (e.affects ? '' : ' <i style="color:#B45309;font-weight:600">(বিল মেলেনি)</i>') + '</span></span>'
+        + '<span style="' + NUMC + '"></span><b style="' + NUMC + 'color:#047857">' + _ldgN(e.amount) + '</b>'
+        + '<b style="' + NUMC + 'color:' + (e.affects ? balClr(e.balance) : '#9CA3AF') + '">' + (e.affects ? _ldgN(e.balance) : '—') + '</b></div>';
     } else if (e.kind === 'ret') {
-      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
-        + '<span style="padding-left:10px;font-size:11px;color:#0D9488;line-height:1.45;min-width:0;word-break:break-word">' + (e.saleReturn ? '🔁 ফেরত দিল' : '↩️ ফেরত') + ' ' + _ldgItemsTxt(e.items) + '</span>'
-        + '<span style="text-align:right;font-size:11px;color:#0D9488">−' + fm(e.value) + '</span><span></span><span></span></div>';
+      var ri = e.items || []; hasItems = ri.length > 0;
+      h += '<div style="' + G + line + rowBg + clk(hasItems) + '><span style="' + DATEC + '">' + _ldgShort(e.date) + '</span>'
+        + '<span style="' + DESCC + 'color:#0D9488"><span style="flex-shrink:0;font-weight:700">' + (e.saleReturn ? '🔁' : '↩️') + '</span>' + (hasItems ? firstTxt(ri) + more(ri.length) + chev(open) : '') + '</span>'
+        + '<span style="' + NUMC + 'color:#0D9488">−' + _ldgN(e.value) + '</span><span style="' + NUMC + '"></span><span style="' + NUMC + '"></span></div>';
+      if (hasItems && open) {
+        var RG = 'display:grid;grid-template-columns:minmax(0,1fr) 72px;align-items:stretch;';
+        h += '<div style="' + DR + 'border-left-color:#0D9488">' + meta([e.dsrName ? '🚚 ' + esc(e.dsrName) : '', e.at ? '🕐 ' + _fmtHM(e.at) : '', e.saleReturn ? 'এই মূল্য বাকি থেকে বাদ গেছে' : 'বাকির হিসাবে প্রভাব নেই']) + '<div style="' + BOX + '">'
+          + '<div style="' + RG + 'background:#F6EDC3;font-size:9.5px;font-weight:800;color:#8A6D1D;border-bottom:1px solid ' + RULE + '">' + tc('পণ্য', true) + tc('পরিমাণ') + '</div>';
+        ri.forEach(function(it, j) { h += '<div style="' + RG + 'font-size:11.5px;' + (j < ri.length - 1 ? 'border-bottom:1px solid rgba(154,143,94,.28)' : '') + '">' + tc(esc(it.n), true) + tc(_ldgQtyCell(it), false, 'font-weight:700') + '</div>'; });
+        h += '</div><div style="margin-top:9px;padding:0 2px">' + kv('ফেরতের মূল্য', '৳' + _ldgN(e.value), '#0D9488', true) + '</div></div>';
+      }
     } else if (e.kind === 'dmg') {
-      var dl = (e.lines || []).map(function(l) { return esc(l.productName) + ' <b>' + fn(l.units) + ' পিস</b>'; }).join(' · ');
-      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
-        + '<span style="padding-left:10px;font-size:11px;color:#B45309;line-height:1.45;min-width:0;word-break:break-word">⚠️ ড্যামেজ ' + dl + (num(e.refund) > 0 ? ' · টাকা ফেরত ৳' + fm(e.refund) : '') + (num(e.exch) > 0 ? ' · বদল ৳' + fm(e.exch) : '') + '</span>'
-        + '<span style="text-align:right;font-size:11px;color:#B45309">' + fm(e.value) + '</span><span></span><span></span></div>';
+      var dls = e.lines || []; hasItems = dls.length > 0;
+      var d0 = dls[0] || {};
+      h += '<div style="' + G + line + rowBg + clk(hasItems) + '><span style="' + DATEC + '">' + _ldgShort(e.date) + '</span>'
+        + '<span style="' + DESCC + 'color:#B45309"><span style="flex-shrink:0;font-weight:700">⚠️</span>' + (hasItems ? '<span style="' + ell + 'flex:1 1 auto">' + esc(d0.productName) + '</span><b style="flex-shrink:0;white-space:nowrap;font-size:11px">' + fn(d0.units) + ' পিস</b>' + more(dls.length) + chev(open) : '') + '</span>'
+        + '<span style="' + NUMC + 'color:#B45309">' + _ldgN(e.value) + '</span><span style="' + NUMC + '"></span><span style="' + NUMC + '"></span></div>';
+      if (hasItems && open) {
+        var DG = 'display:grid;grid-template-columns:minmax(0,1fr) 64px 92px;align-items:stretch;';
+        h += '<div style="' + DR + 'border-left-color:#B45309">' + meta([e.dsrName ? '🚚 ' + esc(e.dsrName) : '', e.at ? '🕐 ' + _fmtHM(e.at) : '', 'বাকির হিসাবে প্রভাব নেই']) + '<div style="' + BOX + '">'
+          + '<div style="' + DG + 'background:#F6EDC3;font-size:9.5px;font-weight:800;color:#8A6D1D;border-bottom:1px solid ' + RULE + '">' + tc('পণ্য', true) + tc('পরিমাণ') + tc('সমাধান') + '</div>';
+        dls.forEach(function(l, j) {
+          var res = l.resolution === 'money' ? 'টাকা ফেরত ৳' + _ldgN(l.refund) : 'বদল: ' + esc(l.exchProductName) + ' × ' + fn(l.exchUnits);
+          h += '<div style="' + DG + 'font-size:11.5px;' + (j < dls.length - 1 ? 'border-bottom:1px solid rgba(154,143,94,.28)' : '') + '">' + tc(esc(l.productName), true) + tc(fn(l.units) + ' পিস', false, 'font-weight:700;white-space:nowrap') + tc(res, false, 'font-size:10px;color:#6B7280') + '</div>';
+        });
+        h += '</div><div style="margin-top:9px;padding:0 2px">' + kv('ড্যামেজের মূল্য', '৳' + _ldgN(e.value), '#B45309', true) + (num(e.refund) > 0 ? kv('টাকা ফেরত', '৳' + _ldgN(e.refund)) : '') + (num(e.exch) > 0 ? kv('বদল', '৳' + _ldgN(e.exch)) : '') + '</div></div>';
+      }
     }
   });
   // page total
-  var paid = num(c.paidNow) + num(c.collected);
-  h += '<div style="' + G + 'padding:6px 0 7px;background:#FBF4D6;border-top:2px solid #D9CFA8;font-size:11.5px;font-weight:800"><span></span><span style="padding-left:10px">' + (isOpen ? 'এখন পর্যন্ত' : 'পাতার হিসাব') + '</span>'
-    + '<span style="text-align:right">' + fm(c.given) + '</span><span style="text-align:right;color:#047857">' + fm(paid) + '</span><span style="text-align:right;padding-right:6px;color:' + (num(c.due) > 0 ? '#B91C1C' : '#047857') + '">' + fm(c.due) + '</span></div>';
-  h += '<div style="padding:6px 10px;font-size:11px;font-weight:700;text-align:center;' + (isOpen ? 'color:#B91C1C;background:#FEF2F2' : 'color:#047857;background:#ECFDF5') + '">'
+  var paidT = num(c.paidNow) + num(c.collected), TN = NUMC + 'font-weight:800;';
+  h += '<div style="' + G + 'background:linear-gradient(#FBF4D6,#F6EDC3);border-top:2px solid #D9CFA8;font-weight:800"><span style="' + DATEC + '"></span><span style="' + DESCC + 'font-size:12px">' + (isOpen ? 'এখন পর্যন্ত' : 'পাতার হিসাব') + '</span>'
+    + '<span style="' + TN + '">' + _ldgN(c.given) + '</span><span style="' + TN + 'color:' + (paidT > 0 ? '#047857' : '#9CA3AF') + '">' + (paidT > 0 ? _ldgN(paidT) : '—') + '</span><span style="' + TN + 'color:' + balClr(c.due) + '">' + _ldgN(c.due) + '</span></div>';
+  h += '<div style="padding:8px 10px;font-size:11px;font-weight:700;text-align:center;' + (isOpen ? 'color:#B91C1C;background:#FEF2F2' : 'color:#047857;background:#ECFDF5') + '">'
     + (isOpen ? 'বাকি ৳' + fm(c.due) + ' — শূন্য হলে এই পাতা বন্ধ হবে' : '🟢 বাকি শূন্য — পাতা বন্ধ (' + fmtBn(c.endDate) + ')') + '</div>';
   h += '</div></div>';
   el.innerHTML = h; el.scrollTop = st;

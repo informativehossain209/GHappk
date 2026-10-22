@@ -12,6 +12,13 @@
 
 # Changelog
 
+## 5.22.0
+**Database: no change.** API: `shops.js` edited (ledger now also sends each product's own commission / discount).
+
+- **Tally book (খাতা) redesigned.** Every entry is now ONE line — তারিখ · বিবরণ (first product + quantity, "+N" badge for more items) · মোট · জমা · বাকি — so long product lists never make the page tall. Vertical ruling between all columns, perfectly aligned.
+- **Tap a line to open its details:** product · quantity · commission per case · discount per case (+ "মোট বাদ" row), then the bill summary (পণ্যের মূল্য, কমিশন, ছাড়, মোট বিল, জমা, বাকি), slip no., DSR and time. Same for ফেরত (🔁) and ড্যামেজ (⚠️) lines. Tap again to close.
+- Whole amounts drop ".00"; zero shows "—". A lump-sum discount that cannot be split per case shows as a total tagged "মোট"; piece-only lines show "/পিস".
+
 ## 5.21.0
 **Database: ONE small, optional SQL** — `migrations/005_v5_21.sql` (adds who-collected / credited-to columns to `due_collections`; the app still works without it).
 
