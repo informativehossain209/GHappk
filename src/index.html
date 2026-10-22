@@ -811,6 +811,7 @@ body.dark .smi.active{background:rgba(255,255,255,.2)!important}
     <div class="page" id="pg-numbers"></div>
     <div class="page" id="pg-exp"></div>
     <div class="page" id="pg-cal"></div>
+    <div class="page" id="pg-duecol"></div>
     <div class="page" id="pg-retrep"></div>
     <div class="page" id="pg-target"></div>
     <div class="page" id="pg-orders"></div>
@@ -1166,6 +1167,7 @@ var MENU_ITEMS = [
   { id:'exp',           ic:'💰', lb:'খরচ' },
   { id:'deposit',       ic:'🏦', lb:'অনলাইন জমা' },
   { id:'cal',           ic:'🗓️', lb:'ডিউ ক্যালেন্ডার' },
+  { id:'duecol',        ic:'📥', lb:'বাকি আদায়' },
   { id:'target',        ic:'🎯', lb:'সেলস টার্গেট' },
   { id:'orders',        ic:'📋', lb:'অর্ডার ও গাড়ি লোড' },
   { id:'settings',      ic:'⚙️', lb:'দোকান/ব্যবসার তথ্য' },
@@ -1176,13 +1178,13 @@ var MENU_ITEMS = [
 // OWN pin there — the "manage everyone's PIN" admin section underneath
 // stays gated to role==='owner' inside renderPwMgrTab() itself.
 var MENU_PERMS = {
-  owner:   ['dash','settle','psale','deposit','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'],
-  manager: ['dash','settle','psale','deposit','prod','sr','tx','dsrtx','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','target','orders'],
+  owner:   ['dash','settle','psale','deposit','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','duecol','target','orders','settings','reset'],
+  manager: ['dash','settle','psale','deposit','prod','sr','tx','dsrtx','pwmgr','attendance','shopsmap','chat','numbers','exp','cal','duecol','target','orders'],
   so:      ['dash','pwmgr','chat','numbers','target','orders'],   // v5.14.3: no presence / returns chart / orders / shops-map for SO
   dsr:     ['dash','pwmgr','cal','attendance','chat','numbers','target','retrep','srtn'],   // v5.13: the van-load check now pops up in the delivery panel
   driver:  ['pwmgr','attendance','chat']
 };
-var TABS = ['dash','settle','psale','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','target','orders','settings','reset'];
+var TABS = ['dash','settle','psale','prod','sr','tx','dsrtx','retrep','pwmgr','ownerapproval','rep','attendance','shopsmap','chat','notice','numbers','exp','cal','duecol','target','orders','settings','reset'];
 
 function applyRole() {
   var r = S.role;
@@ -2306,6 +2308,7 @@ function gTab(t, _fromBack) {
   if (t==='rep')   renderRep();
   if (t==='exp')   loadExpSetup();
   if (t==='cal')   loadCal();
+  if (t==='duecol') _loadDsrDueColView();
   if (t==='attendance') renderAttendanceTab();
   if (t==='shopsmap') renderShopsMapTab();
   if (t==='chat')  renderChatTab();
@@ -3751,7 +3754,7 @@ function _perfSectionsHtml(d) {
 
   // ── DSR/SO বাকির তালিকা — total always visible in the header, full
   // list (and the tap-through to a person's due history) one tap away.
-  h+=_duesAccHtml(dues);
+  // v5.21 — the DSR/SO বাকির তালিকা accordion was removed from the owner home (see menu: দেওয়া, নেওয়া ও পেমেন্ট / due book)
 
   return h;
 }
@@ -3947,6 +3950,11 @@ function renderSoDash() {
     // v5.14.3 — SO "বিক্রয়" = the exact DSR delivery system (shop search → delivery → slip), run on a chosen DSR's van
     h += _soSaleDsrPicker() + '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">লোড হচ্ছে...</div>';
     setTimeout(function(){ if (S.role==='so' && S.soTab==='sale') _loadDsrShopView(); }, 0);
+  }
+  else if (S.soTab==='mytx') {
+    // v5.21 — the SO's own van board (given to him / sold / returned / cash in hand) — same as a DSR's লেনদেন page
+    h += '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">লোড হচ্ছে...</div>';
+    setTimeout(function(){ if (S.role==='so' && S.soTab==='mytx') _loadDsrTxView(); }, 0);
   }
   else if (S.soTab==='duecol') {
     h += _soSaleDsrPicker() + '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">লোড হচ্ছে...</div>';
@@ -4860,6 +4868,12 @@ function _dsrBuyRate(pid) {
   if (!p) return '<span style="color:var(--mt2)">—</span>';
   return '৳' + fm(num(p.purchasePrice) * (num(p.caseSize) || 1));
 }
+// v5.21 — selling (বিক্রয়) rate per case
+function _dsrSellRate(pid) {
+  var p = (S.products || []).find(function(x) { return String(x.id) === String(pid); });
+  if (!p) return '<span style="color:var(--mt2)">—</span>';
+  return '৳' + fm(num(p.sellingPrice) * (num(p.caseSize) || 1));
+}
 function _dsrTxDetailHtml(txs, myDay) {
   var shops = ((myDay || S.dsrMyDay) && (myDay || S.dsrMyDay).txShops) || {};
   var slips = _dsrTxSlips(txs), h = '';
@@ -4869,20 +4883,22 @@ function _dsrTxDetailHtml(txs, myDay) {
     var k = String(t.productId || t.productName);
     if (!pm[k]) { pm[k] = { pid: t.productId, name: t.productName, give: 0, ret: 0, dmg: 0, sold: 0, pt: 0, sret: 0, rev: 0, dmgVal: 0 }; pOrder.push(k); }
     var u = num(t.totalUnits);
-    pm[k].rev += num(t.totalRevenue);
+    // v5.21 — মোট মূল্য = বিক্রয় দর × শুধু দোকানে বিক্রি হওয়া পরিমাণ (দেওয়া/ফেরত/ড্যামেজ যোগ করে ক্রয় দরে গুণ নয়)
+    if (t.type === 'dsr_sale' || t.type === 'point_sale') pm[k].rev += num(t.totalRevenue);
+    else if (t.type === 'dsr_sale_return') pm[k].rev -= num(t.totalRevenue);
     if (t.type === 'damage') pm[k].dmgVal += num(t.totalRevenue);
     if (t.type === 'give') pm[k].give += u; else if (t.type === 'return') pm[k].ret += u;
     else if (t.type === 'damage') pm[k].dmg += u; else if (t.type === 'dsr_sale') pm[k].sold += u; else if (t.type === 'point_sale') pm[k].pt += u; else if (t.type === 'dsr_sale_return') pm[k].sret += u;
   });
   var cell = function(pid, u, clr) { return u > 0 ? '<span style="color:'+clr+'">'+_dmdCP(_dsrCaseSplit(pid, u).cases, _dsrCaseSplit(pid, u).pcs, u, _utOf({productId:pid}))+'</span>' : '<span style="color:var(--mt2)">—</span>'; };
   h += '<div style="font-size:12px;font-weight:800;margin:2px 0 4px">📦 পণ্য অনুযায়ী মোট</div>'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)"><th style="padding:5px 6px;text-align:left">পণ্য</th><th style="padding:5px 4px">দেওয়া</th><th style="padding:5px 4px">ফেরত</th><th style="padding:5px 4px">দোকানে</th><th style="padding:5px 4px">পয়েন্ট</th><th style="padding:5px 4px">দোকান-ফেরত</th><th style="padding:5px 4px">ড্যামেজ</th><th style="padding:5px 4px">ক্রয় দর</th><th style="padding:5px 4px">মোট মূল্য</th></tr></thead><tbody>';
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bll)"><th style="padding:5px 6px;text-align:left">পণ্য</th><th style="padding:5px 4px">দেওয়া</th><th style="padding:5px 4px">ফেরত</th><th style="padding:5px 4px">দোকানে</th><th style="padding:5px 4px">পয়েন্ট</th><th style="padding:5px 4px">দোকান-ফেরত</th><th style="padding:5px 4px">ড্যামেজ</th><th style="padding:5px 4px">বিক্রয় দর</th><th style="padding:5px 4px">বিক্রয় মূল্য</th></tr></thead><tbody>';
   pOrder.sort(function(a, b) { return _ordOf(pm[a]) - _ordOf(pm[b]); });
   var grandRev = 0;
   pOrder.forEach(function(k) {
     var p = pm[k];
     h += '<tr style="border-bottom:1px solid var(--bdr)"><td style="padding:5px 6px;font-weight:700">'+esc(p.name)+'</td><td style="text-align:center">'+cell(p.pid, p.give, 'var(--bl)')+'</td><td style="text-align:center">'+cell(p.pid, p.ret, 'var(--te)')+'</td><td style="text-align:center">'+cell(p.pid, p.sold, 'var(--am)')+'</td><td style="text-align:center">'+cell(p.pid, p.pt, '#0891B2')+'</td><td style="text-align:center">'+cell(p.pid, p.sret, '#0D9488')+'</td><td style="text-align:center">'+cell(p.pid, p.dmg, 'var(--re)')+(p.dmgVal > 0 ? '<div style="font-size:10px;color:var(--re)">৳'+fm(p.dmgVal)+'</div>' : '')+'</td>'
-      + '<td style="text-align:center;white-space:nowrap">'+_dsrBuyRate(p.pid)+'</td><td style="text-align:center;font-weight:800;white-space:nowrap">৳'+fm(p.rev)+'</td></tr>';
+      + '<td style="text-align:center;white-space:nowrap">'+_dsrSellRate(p.pid)+'</td><td style="text-align:center;font-weight:800;white-space:nowrap">৳'+fm(p.rev)+'</td></tr>';
     grandRev += p.rev;
   });
   h += '<tr style="background:var(--bll)"><td colspan="8" style="padding:6px;font-weight:800;text-align:right">সর্বমোট</td><td style="text-align:center;font-weight:800;color:var(--bl);white-space:nowrap">৳'+fm(grandRev)+'</td></tr>';
@@ -5508,7 +5524,7 @@ function closeShopLedger() {
   document.body.style.overflow = '';
 }
 async function openShopLedger(shopId) {
-  _LDG = { shopId: String(shopId), data: null, items: {}, openMemos: {}, openEv: {}, histOpen: false, histLimit: 15, byNo: {} };
+  _LDG = { shopId: String(shopId), data: null, items: {}, openMemos: {}, openEv: {}, histOpen: false, histLimit: 15, byNo: {}, page: null, pages: [] };
   var el = _ldgEl(); el.scrollTop = 0;
   el.innerHTML = '<div style="max-width:100%;margin:0 auto"><div class="card" style="text-align:center;padding:30px;margin-top:12px;color:var(--mt2)">📒 খাতা লোড হচ্ছে...</div></div>';
   var r = await apiGet('/api/shops?action=ledger&shopId=' + encodeURIComponent(shopId));
@@ -5520,42 +5536,92 @@ async function openShopLedger(shopId) {
   (r.cycles || []).forEach(function(c) { _LDG.byNo[c.no] = c; if (c.status === 'open') _LDG.openMemos[c.no] = true; });
   _ldgRender();
 }
+// v5.21 — হাতে-লেখা খাতার (tally book) ধাঁচে দোকানের লেনদেন: প্রতিটি পাতায় তারিখ · কী নিল · মোট · জমা · বাকি।
+// বাকি শূন্য হলে পাতা বন্ধ, পরের লেনদেন নতুন পাতায়। এই খাতাটিই সব জায়গায় দোকানের নামে ট্যাপ করলে খোলে।
+function _ldgShort(d) { var p = String(d || '').slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] : ''; }
+function _ldgItemsTxt(items) {
+  if (!items || !items.length) return '';
+  return items.map(function(it) {
+    var ut = 'কেস'; try { ut = _utOf({ productName: it.n }) || 'কেস'; } catch (e) {}
+    var q = (it.c ? fn(it.c) + ' ' + ut : '') + (it.p ? (it.c ? ' ' : '') + fn(it.p) + ' পিস' : '');
+    if (!q) q = fn(it.u) + ' পিস';
+    return esc(it.n) + ' <b>' + q + '</b>';
+  }).join(' · ');
+}
+function _ldgGo(d) {
+  var n = (_LDG.pages || []).length; if (!n) return;
+  _LDG.page = Math.max(0, Math.min(n - 1, (_LDG.page == null ? n - 1 : _LDG.page) + d)); _ldgRender();
+  var el = document.getElementById('ldg-pg'); if (el) el.scrollTop = 0;
+}
 function _ldgRender() {
   var el = document.getElementById('ldg-pg'); if (!el || !_LDG.data) return;
-  var st = el.scrollTop, r = _LDG.data, shop = r.shop || {}, sm = r.summary || {}, cycles = r.cycles || [];
-  var openC = cycles.filter(function(c) { return c.status === 'open'; })[0];
-  var closed = cycles.filter(function(c) { return c.status === 'closed'; });
-  var h = '<div style="max-width:100%;margin:0 auto">';
-  h += '<div class="ct" style="margin-bottom:4px">📒 লেনদেন খাতা — ' + esc(shop.name) + ' <span style="font-size:11px;color:var(--mt2)">(' + esc(shop.shopNo) + ')</span></div>';
-  h += '<div style="font-size:11px;color:var(--mt2);margin-bottom:10px">🚚 ' + esc(shop.assignedDsrName || '—') + (shop.roadName ? ' · 🛣️ ' + esc(shop.roadName) : '')
-    + (shop.phone ? ' · <a href="tel:' + esc(shop.phone) + '" style="color:var(--bl);font-weight:700;text-decoration:none">📞 ' + esc(shop.phone) + '</a>' : '') + '</div>';
-
-  // ── summary ──
+  var st = el.scrollTop, r = _LDG.data, shop = r.shop || {}, sm = r.summary || {};
+  var pages = (r.cycles || []).slice().reverse();          // oldest page first
+  _LDG.pages = pages;
+  if (_LDG.page == null || _LDG.page > pages.length - 1) _LDG.page = Math.max(0, pages.length - 1);
   var due = num(sm.currentDue);
-  h += '<div class="card" style="text-align:center;border-top:3px solid ' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">';
-  h += '<div style="font-size:11px;color:var(--mt2)">বর্তমান মোট বাকি</div>';
-  h += '<div style="font-size:26px;font-weight:800;color:' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">৳' + fm(due) + '</div>';
-  if (due <= 0 && sm.memoCount) h += '<div style="font-size:12px;color:var(--gr);font-weight:700">✅ সব হিসাব পরিষ্কার — কোনো বাকি নেই</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px">';
-  h += _ldgChip('মোট দেওয়া', sm.totalGiven, 'var(--txt)') + _ldgChip('মোট পরিশোধ', num(sm.paidAtDelivery) + num(sm.collectedLater), 'var(--gr)') + _ldgChip('মেমো', (sm.memoCount || 0) + ' টি', 'var(--bl)', true);
-  h += '</div>';
-  if (sm.lastPayAt) h += '<div style="font-size:10px;color:var(--mt2);margin-top:8px">💵 সর্বশেষ আদায়: ' + _ldgDT('', sm.lastPayAt) + '</div>';
-  h += '</div>';
-
-  if (!cycles.length) {
-    h += '<div class="card" style="text-align:center;padding:26px;color:var(--mt2)">এই দোকানে এখনো কোনো লেনদেন হয়নি</div>';
+  var h = '<div style="max-width:560px;margin:0 auto">';
+  h += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px"><div style="min-width:0">'
+    + '<div style="font-size:15px;font-weight:800">📒 ' + esc(shop.name) + ' <span style="font-size:11px;font-weight:600;color:var(--mt2)">' + esc(shop.shopNo || '') + '</span></div>'
+    + '<div style="font-size:11px;color:var(--mt2)">🚚 ' + esc(shop.assignedDsrName || '—') + (shop.roadName ? ' · ' + esc(shop.roadName) : '')
+    + (shop.phone ? ' · <a href="tel:' + esc(shop.phone) + '" style="color:var(--bl);font-weight:700;text-decoration:none">' + esc(shop.phone) + '</a>' : '') + '</div></div>'
+    + '<button class="btn btn-gh btn-sm" onclick="closeShopLedger()" style="flex-shrink:0">✕</button></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid var(--bdr);border-left:4px solid ' + (due > 0 ? 'var(--re)' : 'var(--gr)') + ';border-radius:10px;padding:7px 11px;margin-bottom:10px;background:var(--card)">'
+    + '<span style="font-size:12px;color:var(--mt)">এখন মোট বাকি</span><b style="font-size:18px;color:' + (due > 0 ? 'var(--re)' : 'var(--gr)') + '">৳' + fm(due) + '</b></div>';
+  if (!pages.length) {
+    h += '<div class="card" style="text-align:center;padding:26px;color:var(--mt2)">এই দোকানে এখনো কোনো লেনদেন হয়নি</div></div>';
+    el.innerHTML = h; return;
   }
-  // ── live memo ──
-  if (openC) h += _ldgMemoCard(openC);
-  // ── history ──
-  if (closed.length) {
-    h += '<div class="ct" style="margin-top:6px;cursor:pointer" onclick="_LDG.histOpen=!_LDG.histOpen;_ldgRender()">📚 আগের মেমো (' + closed.length + ' টি — বাকি শূন্য হয়ে বন্ধ) <span style="margin-left:auto;font-size:12px;color:var(--mt2)">' + (_LDG.histOpen ? '▲ লুকান' : '▼ দেখুন') + '</span></div>';
-    if (_LDG.histOpen) {
-      closed.slice(0, _LDG.histLimit).forEach(function(c) { h += _ldgMemoCard(c); });
-      if (closed.length > _LDG.histLimit) h += '<button class="btn btn-bl btn-w btn-sm" onclick="_LDG.histLimit+=15;_ldgRender()">আরও দেখান (' + (closed.length - _LDG.histLimit) + 'টি বাকি)</button>';
+  var c = pages[_LDG.page], isOpen = c.status === 'open';
+  // pager
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">'
+    + '<button class="btn btn-gh btn-sm" onclick="_ldgGo(-1)"' + (_LDG.page <= 0 ? ' disabled style="opacity:.35"' : '') + '>◀ আগের পাতা</button>'
+    + '<b style="font-size:12px">পাতা ' + (_LDG.page + 1) + ' / ' + pages.length + '</b>'
+    + '<button class="btn btn-gh btn-sm" onclick="_ldgGo(1)"' + (_LDG.page >= pages.length - 1 ? ' disabled style="opacity:.35"' : '') + '>পরের পাতা ▶</button></div>';
+  // the paper page
+  var line = 'rgba(100,116,139,.28)';
+  h += '<div class="tally-pg" style="border:1px solid #D9CFA8;border-radius:6px;overflow:hidden;background-color:#FFFDF2;color:#1F2937;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 27px,' + line + ' 27px,' + line + ' 28px);box-shadow:0 2px 10px rgba(0,0,0,.12);position:relative">';
+  h += '<div style="position:absolute;top:0;bottom:0;left:50px;width:1.5px;background:rgba(220,38,38,.45);pointer-events:none"></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px 6px 10px;background:#FBF4D6;border-bottom:2px solid #D9CFA8;font-size:11.5px;font-weight:800">'
+    + '<span>' + (isOpen ? '🔴 চলমান পাতা' : '✅ পরিশোধিত পাতা') + '</span><span style="font-weight:600;color:#6B7280">' + fmtBn(c.startDate) + (isOpen ? ' থেকে' : ' → ' + fmtBn(c.endDate)) + '</span></div>';
+  var G = 'display:grid;grid-template-columns:44px 1fr 58px 58px 62px;gap:0;';
+  h += '<div style="' + G + 'font-size:10px;font-weight:800;color:#6B7280;border-bottom:1.5px solid #D9CFA8;padding:4px 0"><span style="padding-left:6px">তারিখ</span><span style="padding-left:10px">বিবরণ</span><span style="text-align:right">মোট</span><span style="text-align:right">জমা</span><span style="text-align:right;padding-right:6px">বাকি</span></div>';
+  (c.events || []).forEach(function(e) {
+    var cell = 'padding:5px 0 6px;';
+    if (e.kind === 'sale') {
+      var net = num(e.billed), paid = num(e.paid);
+      var sub = [];
+      if (num(e.commission) > 0) sub.push('কমিশন −৳' + fm(e.commission));
+      if (num(e.discount) > 0) sub.push('ছাড় −৳' + fm(e.discount));
+      var lbl = e.saleType === 'point_sale' ? 'কাউন্টার বিক্রয়' : (e.saleType === 'manual' ? (e.note || 'হাতে লেখা বাকি') : '');
+      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
+        + '<span style="padding-left:10px;font-size:11px;line-height:1.45;min-width:0;word-break:break-word">' + (lbl ? '<i style="color:#6B7280">' + esc(lbl) + '</i> ' : '') + _ldgItemsTxt(e.items)
+        + (sub.length ? '<div style="font-size:10px;color:#047857">' + sub.join(' · ') + '</div>' : '') + '</span>'
+        + '<b style="text-align:right;font-size:11.5px">' + fm(net) + '</b><span style="text-align:right;font-size:11.5px;color:#047857">' + (paid > 0 ? fm(paid) : '—') + '</span>'
+        + '<b style="text-align:right;padding-right:6px;font-size:11.5px;color:' + (num(e.balance) > 0 ? '#B91C1C' : '#047857') + '">' + fm(e.balance) + '</b></div>';
+    } else if (e.kind === 'pay') {
+      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
+        + '<span style="padding-left:10px;font-size:11px;color:#047857">💵 বাকি জমা' + (e.byName ? ' <span style="color:#6B7280">· ' + esc(e.byName) + '</span>' : '') + (e.affects ? '' : ' <i style="color:#B45309">(বিল মেলেনি)</i>') + '</span>'
+        + '<span></span><b style="text-align:right;font-size:11.5px;color:#047857">' + fm(e.amount) + '</b>'
+        + '<b style="text-align:right;padding-right:6px;font-size:11.5px;color:' + (num(e.balance) > 0 ? '#B91C1C' : '#047857') + '">' + (e.affects ? fm(e.balance) : '—') + '</b></div>';
+    } else if (e.kind === 'ret') {
+      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
+        + '<span style="padding-left:10px;font-size:11px;color:#0D9488;line-height:1.45;min-width:0;word-break:break-word">' + (e.saleReturn ? '🔁 ফেরত দিল' : '↩️ ফেরত') + ' ' + _ldgItemsTxt(e.items) + '</span>'
+        + '<span style="text-align:right;font-size:11px;color:#0D9488">−' + fm(e.value) + '</span><span></span><span></span></div>';
+    } else if (e.kind === 'dmg') {
+      var dl = (e.lines || []).map(function(l) { return esc(l.productName) + ' <b>' + fn(l.units) + ' পিস</b>'; }).join(' · ');
+      h += '<div style="' + G + cell + 'border-bottom:1px dotted ' + line + '"><span style="font-size:10.5px;padding-left:6px;color:#4B5563">' + _ldgShort(e.date) + '</span>'
+        + '<span style="padding-left:10px;font-size:11px;color:#B45309;line-height:1.45;min-width:0;word-break:break-word">⚠️ ড্যামেজ ' + dl + (num(e.refund) > 0 ? ' · টাকা ফেরত ৳' + fm(e.refund) : '') + (num(e.exch) > 0 ? ' · বদল ৳' + fm(e.exch) : '') + '</span>'
+        + '<span style="text-align:right;font-size:11px;color:#B45309">' + fm(e.value) + '</span><span></span><span></span></div>';
     }
-  }
-  h += '</div>';
+  });
+  // page total
+  var paid = num(c.paidNow) + num(c.collected);
+  h += '<div style="' + G + 'padding:6px 0 7px;background:#FBF4D6;border-top:2px solid #D9CFA8;font-size:11.5px;font-weight:800"><span></span><span style="padding-left:10px">' + (isOpen ? 'এখন পর্যন্ত' : 'পাতার হিসাব') + '</span>'
+    + '<span style="text-align:right">' + fm(c.given) + '</span><span style="text-align:right;color:#047857">' + fm(paid) + '</span><span style="text-align:right;padding-right:6px;color:' + (num(c.due) > 0 ? '#B91C1C' : '#047857') + '">' + fm(c.due) + '</span></div>';
+  h += '<div style="padding:6px 10px;font-size:11px;font-weight:700;text-align:center;' + (isOpen ? 'color:#B91C1C;background:#FEF2F2' : 'color:#047857;background:#ECFDF5') + '">'
+    + (isOpen ? 'বাকি ৳' + fm(c.due) + ' — শূন্য হলে এই পাতা বন্ধ হবে' : '🟢 বাকি শূন্য — পাতা বন্ধ (' + fmtBn(c.endDate) + ')') + '</div>';
+  h += '</div></div>';
   el.innerHTML = h; el.scrollTop = st;
 }
 function _ldgChip(lb, val, color, raw) {
@@ -5741,14 +5807,16 @@ async function _shregSubmit() {
 }
 
 // v5.14.3 — the delivery screens belong to a DSR; an SO runs the same screens on one of his DSRs
-function _dlvId()   { return (S.role === 'so' && S.soSaleDsr && S.soSaleDsr.id) ? S.soSaleDsr.id : S.userId; }
-function _dlvName() { return (S.role === 'so' && S.soSaleDsr && S.soSaleDsr.id) ? S.soSaleDsr.name : S.userName; }
+// v5.21 — an SO now sells from HIS OWN van (stock given to him), exactly like a DSR; no borrowed DSR van any more.
+function _dlvId()   { return S.userId; }
+function _dlvName() { return S.userName; }
 function _soSaleDsrList() {
   var a = (S.soAssignedDsrs || []).filter(function(x){ return x && (x.id || x.userKey); });
   if (!a.length) a = (S.srs || []).filter(function(x){ return x.role === 'dsr'; });
   return a.map(function(x){ return { id: String(x.id || x.userKey), name: x.name || '', area: x.area || '' }; });
 }
 function _soSaleDsrPicker() {
+  return '';   // v5.21 — removed: the SO has his own van
   var list = _soSaleDsrList();
   if (!list.length) return '<div class="card" style="text-align:center;color:var(--mt2);padding:16px">কোনো নিযুক্ত DSR নেই — বিক্রয়ের জন্য একজন DSR দরকার</div>';
   if (!S.soSaleDsr || !list.some(function(x){ return x.id === String(S.soSaleDsr.id); })) S.soSaleDsr = list[0];
@@ -5765,6 +5833,7 @@ function soSaleDsrPick(id) {
 }
 async function _loadDsrShopView() {
   if (!S.dsrShopMode) S.dsrShopMode = 'list';
+  if (S.role !== 'dsr' && S.dsrShopAll === undefined) S.dsrShopAll = true;   // v5.21 — SO sees every shop, nearest first
   if (S.dsrShopMode === 'list') setTimeout(vanPopCheck, 400);   // v5.13 — pending load → pop-up
   if (S.dsrShopMode === 'detail') return _renderDsrShopDetail();
   if (S.dsrShopMode === 'sale')   return _renderDsrShopSale();
@@ -6405,49 +6474,90 @@ function _enc(x) { return encodeURIComponent(x == null ? '' : x); }
 function _row(l, r, style) { return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;' + (style || '') + '"><span>' + l + '</span><span style="font-weight:700">' + r + '</span></div>'; }
 
 // ── DSR • বাকি আদায় ────────────────────────────────────────────────
-async function _loadDsrDueColView() {
-  var el = document.getElementById('pg-dash'); if (!el) return;
+function _dcHost() { return document.getElementById(S.tab === 'duecol' ? 'pg-duecol' : 'pg-dash'); }
+// metres between two GPS points
+function _dcDist(lat1, lng1, lat2, lng2) {
+  var R = 6371000, r = Math.PI / 180, dLa = (lat2 - lat1) * r, dLn = (lng2 - lng1) * r;
+  var a = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLn / 2) * Math.sin(dLn / 2);
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function _dcDistTxt(m) { return m < 1000 ? fn(m) + ' মি' : (m / 1000).toFixed(1) + ' কি.মি'; }
+// v5.21 — due collection for EVERY role. Nearest shop first (live GPS), with the distance in metres.
+// DSR → his own shops (switch to "all shops" any time); owner / manager / SO → every shop that owes.
+async function _loadDsrDueColView(keepCoords) {
+  var el = _dcHost(); if (!el) return;
   showOvl('লোড হচ্ছে...');
   var today = iso(new Date());
+  var allScope = S.role !== 'dsr' || !!S.dcAll;
+  var coordsP = (keepCoords && S.dcCoords) ? Promise.resolve(S.dcCoords) : _getCoords(7000).catch(function() { return null; });
   var res = await Promise.all([
-    apiGet('/api/sr-payments?action=due-shops&dsrId=' + _enc(_dlvId())),
-    apiGet('/api/sr-payments?action=collections-list&dsrId=' + _enc(_dlvId()) + '&from=' + today + '&to=' + today)
+    apiGet('/api/sr-payments?action=due-shops' + (allScope ? '&scope=all' : '&dsrId=' + _enc(S.userId))),
+    apiGet('/api/sr-payments?action=collections-list&from=' + today + '&to=' + today),
+    coordsP
   ]);
   hideOvl();
   S.dcData = (res[0] && res[0].ok) ? res[0] : { shops: [], totalDue: 0 };
-  S.dcToday = (res[1] && res[1].ok) ? res[1] : { dues: [], totals: { dueCollected: 0 } };
+  var all = (res[1] && res[1].ok) ? res[1] : { dues: [] };
+  var mine = (all.dues || []).filter(function(x) { return String(x.collectorId || '') === String(S.userId) || (!x.collectorId && String(x.dsrId) === String(S.userId)); });
+  S.dcToday = { dues: mine, totals: { dueCollected: mine.reduce(function(t, x) { return t + num(x.amount); }, 0) } };
+  S.dcCoords = res[2] || null;
   S.dcQ = S.dcQ || ''; S.dcOpen = S.dcOpen || {};
   _renderDsrDueColView();
 }
+function _dcSorted() {
+  var q = (S.dcQ || '').trim().toLowerCase(), c = S.dcCoords;
+  var list = ((S.dcData || {}).shops || []).filter(function(s) {
+    return !q || [s.shopName, s.keeperName, s.phone, s.shopNo, s.roadName, s.address, s.assignedDsrName].join(' ').toLowerCase().indexOf(q) >= 0;
+  }).map(function(s) {
+    s._m = (c && s.lat != null && s.lng != null && isFinite(s.lat) && isFinite(s.lng)) ? _dcDist(c.lat, c.lng, s.lat, s.lng) : null;
+    return s;
+  });
+  list.sort(function(a, b) {
+    if (a._m != null && b._m != null) return a._m - b._m;
+    if (a._m != null) return -1; if (b._m != null) return 1;
+    return num(b.totalDue) - num(a.totalDue);
+  });
+  return list;
+}
 function _renderDsrDueColView() {
-  var el = document.getElementById('pg-dash'); if (!el) return;
+  var el = _dcHost(); if (!el) return;
   var d = S.dcData || { shops: [], totalDue: 0 };
-  var h = _dsrTabBar() + '<div class="ct">📥 বাকি আদায়</div>';
+  var h = (S.tab === 'duecol' ? '' : _dsrTabBar()) + '<div class="ct">📥 বাকি আদায়</div>';
   h += '<div class="g2" style="margin-bottom:10px">';
   h += '<div class="met" style="border-top:3px solid var(--re)"><div class="ml">মোট বাকি (' + (d.shops || []).length + 'টি দোকান)</div><div class="mv" style="color:var(--re)">৳' + fm(d.totalDue) + '</div></div>';
-  h += '<div class="met" style="border-top:3px solid var(--gr)"><div class="ml">আজ আদায় করেছি</div><div class="mv" style="color:var(--gr)">৳' + fm(((S.dcToday || {}).totals || {}).dueCollected || 0) + '</div></div>';
+  h += '<div class="met" style="border-top:3px solid var(--gr)"><div class="ml">আজ আমি আদায় করেছি</div><div class="mv" style="color:var(--gr)">৳' + fm(((S.dcToday || {}).totals || {}).dueCollected || 0) + '</div></div>';
   h += '</div>';
-  h += '<div class="card" style="padding:8px 11px;margin-bottom:8px"><input placeholder="🔍 দোকান / মালিক / ফোন / রোড খুঁজুন..." value="' + esc(S.dcQ || '') + '" oninput="S.dcQ=this.value;_dcRefreshList()" style="margin:0"></div>';
+  h += '<div class="card" style="padding:8px 11px;margin-bottom:8px"><input placeholder="🔍 দোকান / মালিক / ফোন / রোড খুঁজুন..." value="' + esc(S.dcQ || '') + '" oninput="S.dcQ=this.value;_dcRefreshList()" style="margin:0">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;font-size:11px;color:var(--mt2)">'
+    + '<span>' + (S.dcCoords ? '📍 আপনার কাছের দোকান আগে দেখানো হচ্ছে' : '⚠️ লোকেশন পাওয়া যায়নি — GPS চালু করে রিফ্রেশ দিন') + '</span>'
+    + '<button class="btn btn-gh btn-sm" onclick="S.dcCoords=null;_loadDsrDueColView()">📍 রিফ্রেশ</button></div>'
+    + (S.role === 'dsr' ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:6px"><input type="checkbox" style="width:auto" ' + (S.dcAll ? 'checked' : '') + ' onchange="S.dcAll=this.checked;_loadDsrDueColView(true)"> অন্য DSR-এর দোকানও দেখান</label>' : '')
+    + '</div>';
   h += '<div id="dc-list">' + _dcListHtml() + '</div>';
-  h += '<div class="ib" style="margin-top:8px">এখানে আদায় করা টাকা দিনশেষে আপনার হিসাবে (নগদ জমা) নিজে থেকেই যোগ হবে — আলাদা করে লিখতে হবে না।</div>';
+  h += '<div class="ib" style="margin-top:8px">' + (S.role === 'dsr' || S.role === 'so'
+    ? 'আদায় করা টাকা দিনশেষে আপনার হিসাবে (নগদ জমা) নিজে থেকেই যোগ হবে। আদায়ের ক্রেডিট দোকানের নিজস্ব DSR-এর নামে নিজে থেকেই লেখা হবে।'
+    : 'আদায়ের ক্রেডিট দোকানের নিজস্ব DSR-এর নামে নিজে থেকেই লেখা হবে — আলাদা করে DSR বাছতে হবে না।') + '</div>';
   el.innerHTML = h; setTimeout(_tickerStart, 50);
 }
 function _dcRefreshList() { var e = document.getElementById('dc-list'); if (e) e.innerHTML = _dcListHtml(); }
 function _dcListHtml() {
-  var q = (S.dcQ || '').trim().toLowerCase();
-  var shops = ((S.dcData || {}).shops || []).filter(function(s) {
-    return !q || [s.shopName, s.keeperName, s.phone, s.shopNo, s.roadName, s.address].join(' ').toLowerCase().indexOf(q) >= 0;
-  });
+  var shops = _dcSorted(), q = (S.dcQ || '').trim();
   if (!shops.length) return '<div class="card" style="text-align:center;color:var(--gr);font-weight:700;padding:18px">' + (q ? 'কিছু পাওয়া যায়নি' : '✅ কোনো দোকানের বাকি নেই') + '</div>';
-  var h = '';
+  var h = '', lastBand = '';
+  var band = function(m) { return m == null ? 'লোকেশন নেই' : m <= 100 ? '১০০ মিটারের মধ্যে' : m <= 300 ? '৩০০ মিটারের মধ্যে' : m <= 1000 ? '১ কি.মি-এর মধ্যে' : '১ কি.মি-এর বেশি দূরে'; };
   shops.forEach(function(s) {
-    // v5.18 — only: shop name · location · due. Tapping the due opens the shop's due book (খাতা).
+    if (S.dcCoords) {
+      var b = band(s._m);
+      if (b !== lastBand) { h += '<div style="font-size:11px;font-weight:800;color:var(--mt);margin:10px 2px 4px">📍 ' + b + '</div>'; lastBand = b; }
+    }
     var _loc = [s.roadName, s.address].filter(Boolean).join(' · ');
+    var sid = esc(String(s.shopId)).replace(/\'/g, '');
     h += '<div class="card" style="margin-bottom:8px">';
     h += '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center">';
-    h += '<div style="min-width:0"><div style="font-weight:700;font-size:13px">' + esc(s.shopName) + '</div>';
+    h += '<div style="min-width:0"><div style="font-weight:700;font-size:13px">' + esc(s.shopName) + (s._m != null ? ' <span style="font-size:10.5px;font-weight:800;color:' + (s._m <= 100 ? 'var(--gr)' : 'var(--bl)') + ';background:var(--bll);border-radius:99px;padding:1px 8px;white-space:nowrap">📍 ' + _dcDistTxt(s._m) + '</span>' : '') + '</div>';
     if (_loc) h += '<div style="font-size:11px;color:var(--mt2)">' + esc(_loc) + '</div>';
-    h += '</div><div onclick="openShopLedger(\'' + esc(String(s.shopId)).replace(/\'/g, '') + '\')" style="text-align:right;flex-shrink:0;cursor:pointer"><div style="font-size:10px;color:var(--mt)">বাকি ›</div><div style="font-weight:700;font-size:16px;color:var(--re)">৳' + fm(s.totalDue) + '</div></div></div>';
+    if (S.role !== 'dsr' && s.assignedDsrName) h += '<div style="font-size:10.5px;color:var(--mt2)">🚚 ' + esc(s.assignedDsrName) + ' এর দোকান</div>';
+    h += '</div><div onclick="openShopLedger(\'' + sid + '\')" style="text-align:right;flex-shrink:0;cursor:pointer"><div style="font-size:10px;color:var(--mt)">খাতা ›</div><div style="font-weight:700;font-size:16px;color:var(--re)">৳' + fm(s.totalDue) + '</div></div></div>';
     h += '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">';
     h += '<input type="number" inputmode="decimal" min="0" id="dc-amt-' + s.shopId + '" placeholder="কত টাকা আদায়?" style="flex:1;margin:0">';
     h += '<button class="btn btn-gh btn-sm" onclick="document.getElementById(\'dc-amt-' + s.shopId + '\').value=' + s.totalDue + '">সম্পূর্ণ</button>';
@@ -6503,12 +6613,12 @@ async function dsrDueCollect(shopId) {
     + (full ? '<div style="color:var(--gr);font-weight:700">✅ সম্পূর্ণ পরিশোধ</div>' : '<div style="color:var(--re);font-weight:700">🔴 আংশিক — বাকি থাকবে ৳' + fm(s.totalDue - amt) + '</div>'));
   if (!pin) return;
   _dcBusy = true; showOvl('জমা হচ্ছে...');
-  var r = await apiPost('/api/sr-payments?action=due-collect', { dsrId: _dlvId(), dsrName: _dlvName(), actorId: S.userId, shopId: shopId, amount: amt, pin: pin });
+  var r = await apiPost('/api/sr-payments?action=due-collect', { actorId: S.userId, actorName: S.userName, shopId: shopId, amount: amt, pin: pin });   // v5.21 — the server credits the shop's own DSR
   hideOvl(); _dcBusy = false;
   if (!r || !r.ok) return toast((r && r.badPin) ? '❌ পাসওয়ার্ড ভুল — কিছু আদায় হয়নি' : ((r && r.error) || 'ব্যর্থ'));
   toast(r.remaining <= 0.005 ? '✅ ৳' + fm(r.collected) + ' আদায় — এই দোকানের সব বাকি পরিশোধিত' : '✅ ৳' + fm(r.collected) + ' আদায় — এখনো বাকি ৳' + fm(r.remaining));
   _dueReceiptMemo(s, r);
-  _loadDsrDueColView();
+  _loadDsrDueColView(true);
 }
 
 // ── DSR • ড্যামেজ কালেকশন ───────────────────────────────────────────
@@ -6718,7 +6828,7 @@ async function loadSettlement() {
 
 function _settleTotals() {
   var d = _settle.data, a = _settle.apply, p = d.pending;
-  var cash = _settle.cash === '' ? p.cashExpected : num(_settle.cash);
+  var cash = p.cashExpected;   // v5.21 — locked: always exactly what is in hand
   var reduce = cash + (a.commission ? p.commission : 0) + (a.discount ? p.discount : 0) + (a.damage ? p.damage : 0) + (a.return ? d.returnValue : 0);
   return { cash: cash, reduce: reduce, after: d.lifetimeDue - reduce, short: Math.max(0, p.cashExpected - cash) };
 }
@@ -6753,7 +6863,7 @@ function _renderSettlement() {
   h += '<div class="card" style="margin-top:8px;background:var(--grl);border:1.5px solid var(--gr)">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-weight:800;font-size:13px">DSR-এর হাতে নগদ</span><b style="font-size:20px;color:var(--gr)">৳' + fm(p.cashExpected) + '</b></div>';
   if (d.ownPocketShortfall > 0) h += '<div style="font-size:11px;color:var(--am);margin-top:4px">DSR নিজের পকেট থেকে ৳' + fm(d.ownPocketShortfall) + ' বেশি দিয়েছে — তাকে ফেরত দিন</div>';
-  h += '<div class="fg" style="margin:8px 0 0"><label class="fl">কত নগদ পেলেন?</label><input type="number" id="st-cash" min="0" step="0.01" inputmode="decimal" value="' + esc(_settle.cash) + '" oninput="_settle.cash=this.value;_settleRefreshTotals()" style="margin:0"></div>';
+  h += '<div style="font-size:11px;color:var(--mt2);margin-top:6px">DSR/SO-এর হাতে যত নগদ আছে ঠিক তত টাকাই জমা হবে — কম বা বেশি লেখার সুযোগ নেই।</div>';
   h += '<div id="st-short" style="font-size:11px;margin-top:4px"></div></div>';
   h += '<button class="btn btn-gr btn-w" id="st-btn" style="margin-top:8px" onclick="settleConfirm()">✅ হিসাব সম্পন্ন করুন</button>';
   box.innerHTML = h;
@@ -6831,7 +6941,7 @@ async function _loadCollectionsTab() {
   var tabs = document.querySelector('#pg-settle .nav-box-grid');
   var f = S.colFrom || iso(new Date()), t = S.colTo || f, dsr = S.colDsr || '';
   var r = await apiGet('/api/sr-payments?action=collections-list&from=' + f + '&to=' + t + (dsr ? '&dsrId=' + _enc(dsr) : ''));
-  var opts = '<option value="">সব DSR</option>' + S.srs.filter(function(s) { return s.role === 'dsr'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === dsr ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('');
+  var opts = '<option value="">সব DSR</option>' + S.srs.filter(function(s) { return s.role !== 'driver'; }).map(function(s) { return '<option value="' + s.id + '"' + (s.id === dsr ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('');
   var h = '<div class="card" style="margin-top:10px"><div class="g2"><div class="fg"><label class="fl">শুরু</label><input type="date" value="' + f + '" onchange="S.colFrom=this.value;if(S.colTo<S.colFrom)S.colTo=S.colFrom;_loadCollectionsTab()"></div>'
     + '<div class="fg"><label class="fl">শেষ</label><input type="date" value="' + t + '" onchange="S.colTo=this.value;_loadCollectionsTab()"></div></div>'
     + '<div class="fg"><label class="fl">DSR</label><select onchange="S.colDsr=this.value;_loadCollectionsTab()">' + opts + '</select></div></div>';
@@ -10932,40 +11042,28 @@ async function _downloadDepositSlip(period) {
   var bank = 0, depot = 0, run = 0, nBank = 0, nDepot = 0;
   rows.forEach(function (x) { if (x.method === 'depot') { depot += num(x.amount); nDepot++; } else { bank += num(x.amount); nBank++; } });
   var total = bank + depot;
+  // v5.21 — minimal slip: shop name / mobile / address on top, then ONE sheet: date · day · method · amount, and the total once.
   var body = rows.map(function (x, i) {
-    run += num(x.amount);
-    return [M.dg(String(i + 1).padStart(2, '0')), M.dmy(x.date), wdOf(x.date), x.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক',
-      esc(x.setBy || '—'), { h: M.money(x.amount), cls: 'r amt', al: 'right' }, { h: M.money(run), cls: 'r', al: 'right' }];
+    return [M.dg(String(i + 1).padStart(2, '0')), M.dmy(x.date), wdOf(x.date), x.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক', { h: M.money(x.amount), cls: 'r amt', al: 'right' }];
   });
-  var cols = [{ h: 'ক্র. নং', w: '8%' }, { h: 'তারিখ', w: '15%' }, { h: 'বার', w: '15%' }, { h: 'জমার মাধ্যম', w: '16%' }, { h: 'এন্ট্রি করেছেন', w: '16%' },
-    { h: 'জমার পরিমাণ (৳)', a: 'r', w: '15%' }, { h: 'ক্রমপুঞ্জিত (৳)', a: 'r', w: '15%' }];
-  var tbl = M.T(cols, body.length ? body : [[{ h: 'এই চক্রে কোনো জমার রেকর্ড নেই', span: 7 }]],
-    [{ h: 'সর্বমোট জমা (Grand Total)', span: 5, al: 'right' }, { h: M.money(total), al: 'right' }, { h: M.money(total), al: 'right' }], 'xl');
-  var info = M.kv('জমার বিবরণ (Statement Details)', [['হিসাব চক্র:', '<b>' + label + '</b>'], ['চক্রের সময়কাল:', M.dmy(r.periodStart) + ' – ' + M.dmy(r.periodEnd)],
-    ['মোট এন্ট্রি:', M.int(rows.length) + ' টি'], ['প্রস্তুতকারী:', esc(_memoBy())]]);
+  var cols = [{ h: 'ক্র.', w: '9%' }, { h: 'তারিখ', w: '22%' }, { h: 'বার', w: '23%' }, { h: 'মাধ্যম', w: '22%' }, { h: 'জমা (৳)', a: 'r', w: '24%' }];
+  var tbl = M.T(cols, body.length ? body : [[{ h: 'এই চক্রে কোনো জমার রেকর্ড নেই', span: 5 }]],
+    [{ h: 'মোট জমা', span: 4, al: 'right' }, { h: M.money(total), al: 'right' }], 'xl');
+  var first = 5, last = first + Math.max(rows.length, 1) - 1;
   var X = function (v, f) { return f ? { t: 'n', v: v, f: f } : v; };
-  var first = 6, last = first + Math.max(rows.length, 1) - 1;
   var sheetRows = [
-    [(S.shopName || 'AXIION DMS') + ' — অনলাইন জমার বিবরণী (Online Deposit Statement)'],
-    ['হিসাব চক্র: ' + label + '  (' + M.dmy(r.periodStart) + ' – ' + M.dmy(r.periodEnd) + ')'],
-    ['প্রস্তুতকারী: ' + _memoBy() + '    তৈরির তারিখ: ' + M.dmy(iso(new Date()))],
+    [(S.shopName || 'AXIION DMS') + ' — অনলাইন জমা'],
+    [label + '  (' + M.dmy(r.periodStart) + ' – ' + M.dmy(r.periodEnd) + ')'],
     [],
-    ['ক্র. নং', 'তারিখ', 'বার', 'জমার মাধ্যম', 'এন্ট্রি করেছেন', 'জমার পরিমাণ (৳)', 'ক্রমপুঞ্জিত (৳)']
+    ['ক্র.', 'তারিখ', 'বার', 'মাধ্যম', 'জমা (৳)']
   ];
-  var runX = 0;
-  rows.forEach(function (x, i) { runX += num(x.amount); sheetRows.push([i + 1, M.dmy(x.date), wdOf(x.date), x.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক', x.setBy || '', num(x.amount), X(runX, 'SUM(F' + first + ':F' + (first + i) + ')')]); });
-  sheetRows.push(['', '', '', '', 'সর্বমোট জমা', X(total, 'SUM(F' + first + ':F' + last + ')'), '']);
-  sheetRows.push([]);
-  sheetRows.push(['', '', '', '', 'ব্যাংক জমা (' + nBank + ' টি)', bank, '']);
-  sheetRows.push(['', '', '', '', 'ডিপো (নগদ) জমা (' + nDepot + ' টি)', depot, '']);
-  _memoShow({ paper: 'a4', title: 'অনলাইন জমার বিবরণী', en: 'ONLINE DEPOSIT STATEMENT', no: 'DEP-' + String(period).replace(/\D/g, ''), date: iso(new Date()), period: label, file: 'Online_Deposit_' + period,
+  rows.forEach(function (x, i) { sheetRows.push([i + 1, M.dmy(x.date), wdOf(x.date), x.method === 'depot' ? 'ডিপো (নগদ)' : 'ব্যাংক', num(x.amount)]); });
+  sheetRows.push(['', '', '', 'মোট জমা', X(total, 'SUM(E' + first + ':E' + last + ')')]);
+  _memoShow({ paper: 'a4', title: 'অনলাইন জমা', date: iso(new Date()), period: label, file: 'Online_Deposit_' + period,
     shareText: 'মোট জমা: ৳' + M.money(total) + ' (' + label + ')',
-    sheet: { name: 'Online Deposit', rows: sheetRows, widths: [8, 14, 14, 16, 22, 18, 18], merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } }, { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } }] },
-    blocks: [info, tbl,
-      M.stats([['ব্যাংক জমা (' + M.int(nBank) + ' টি)', '৳ ' + M.money(bank)], ['ডিপো (নগদ) জমা (' + M.int(nDepot) + ' টি)', '৳ ' + M.money(depot), 'w'], ['মোট জমা', '৳ ' + M.money(total), 't']])
-    ],
-    closing: { total: total, words: total, wordsLabel: 'কথায় (মোট জমা):', summary: [['মোট এন্ট্রি', M.int(rows.length) + ' টি'], ['ব্যাংক জমা', '৳ ' + M.money(bank)], ['ডিপো (নগদ) জমা', '৳ ' + M.money(depot)], ['মোট জমা', '৳ ' + M.money(total), 'big']],
-      sigs: [['প্রস্তুতকারী', _memoBy()], ['যাচাইকারী', 'ম্যানেজার'], ['অনুমোদনকারী', 'মালিক']] } });
+    sheet: { name: 'Online Deposit', rows: sheetRows, widths: [8, 14, 16, 16, 18], merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } }] },
+    blocks: [tbl],
+    closing: { verify: false } });
 }
 
 function calAddModal(prefillDate) {
@@ -11853,9 +11951,9 @@ table.mt.xl{font-size:11px}
     var s = S_(); return { name: s.shopName || 'AXIION DMS', addr: String(s.shopAddress || '').trim(), phone: String(s.shopPhone || '').trim(), dist: String(s.distributorName || '').trim(), tin: String(s.shopTin || '').trim(), logo: String(s.logoText || '').trim() };
   }
   function headFull(sp, si) {
-    return '<div class="hd"><div><div class="chips">' + (si.dist ? '<span class="c1">● অনুমোদিত ডিস্ট্রিবিউটর</span><span class="c2">' + e(si.dist) + '</span>' : '') + '</div>'
+    return '<div class="hd"><div>'
       + '<div class="shn">' + e(si.name) + '</div>' + (si.addr ? '<div class="adr">' + e(si.addr) + '</div>' : '')
-      + ((si.phone || si.tin) ? '<div class="ctc">' + (si.phone ? '<b>মোবাইল:</b> ' + e(dg(si.phone)) : '') + (si.phone && si.tin ? ' &nbsp;•&nbsp; ' : '') + (si.tin ? '<b>টি আই এন:</b> ' + e(dg(si.tin)) : '') + '</div>' : '') + '</div>'
+      + (si.phone ? '<div class="ctc"><b>মোবাইল:</b> ' + e(dg(si.phone)) + '</div>' : '') + '</div>'
       + '<div class="hr"><div class="tb"><b>' + e(sp.title) + '</b>' + (sp.en ? '<i>' + e(sp.en) + '</i>' : '') + '</div>'
       + '<div class="hm">' + (sp.no ? '<div><b>মেমো নং:</b> <span class="no">' + e(sp.no) + '</span></div>' : '') + '<div><b>তারিখ ও সময়:</b> ' + dmy(sp.date) + ' • ' + e(sp.time) + '</div>' + (sp.period ? '<div><b>সময়কাল:</b> ' + e(sp.period) + '</div>' : '') + '</div></div></div>'
       + (sp.banner ? '<div class="ban">' + e(sp.banner) + '</div>' : '');
@@ -11863,20 +11961,10 @@ table.mt.xl{font-size:11px}
   function headSlim(sp, si) { return '<div class="h2"><b>' + e(si.name) + '</b><span>' + e(sp.title) + (sp.no ? ' · ' + e(sp.no) : '') + ' · ' + dmy(sp.date) + '</span></div>'; }
 
   function closing(sp, si) {
-    var c = sp.closing || {}, left = '', right = '';
-    var payload = [si.name, sp.no || sp.title, sp.date, c.total != null ? money(c.total) : ''].join(' | ');
-    var qr = qrSvg(payload);
-    if (c.verify !== false) {
-      left += '<div class="vb">' + (qr ? '<div class="qr">' + qr + '</div>' : '') + '<div><b>✔ ডিজিটাল মেমো কোড</b><p>কিউআর স্ক্যান করলে মেমো নং, তারিখ ও মোট পরিমাণ দেখা যাবে।</p><code>HASH: ' + hash(payload + JSON.stringify(sp.blocks || '').length) + '-AXIION</code></div></div>';
-    }
-    if (c.words != null) left += '<div class="wd"><b>' + e(c.wordsLabel || 'কথায়:') + '</b> ' + e(taka(c.words)) + '</div>';
-    if (c.verify !== false && sp.no) left += '<div class="bc">' + barcodeSvg(String(sp.no).replace(/[^\x20-\x7e]/g, '')) + '<small>*' + e(sp.no) + '*</small></div>';
-    if (c.summary && c.summary.length) right = '<div class="sm"><h4>' + e(c.summaryTitle || 'হিসাব ও আর্থিক বিবরণ') + '</h4>' + c.summary.map(function (r) { return '<div class="sr ' + (r[2] || '') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>';
-    var out = '<div class="cl"><div>' + left + '</div>' + (right ? '<div>' + right + '</div>' : '') + '</div>';
-    if (c.terms) out += '<div class="tm"><b>শর্তাবলী:</b> ' + c.terms + '</div>';
-    var sg = c.sigs || ['প্রস্তুতকারী', 'গ্রহণকারী', 'অনুমোদনকারী'];
-    out += '<div class="sg">' + sg.map(function (s) { return '<div>' + e(s[0] || s) + (s[1] ? '<small>' + e(s[1]) + '</small>' : '') + '</div>'; }).join('') + '</div>';
-    return { t: 'html', html: out };
+    // v5.21 — minimal: only the money summary (no QR / barcode / hash / signatures / terms / words)
+    var c = sp.closing || {};
+    if (!(c.summary && c.summary.length)) return { t: 'html', html: '' };
+    return { t: 'html', html: '<div class="sm" style="margin-top:12px"><h4>' + e(c.summaryTitle || 'হিসাব') + '</h4>' + c.summary.map(function (r) { return '<div class="sr ' + (r[2] || '') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>' };
   }
 
   /* ── paginate (real DOM measurement → no clipped/overflowing rows) ── */
@@ -11979,6 +12067,7 @@ body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-se
 
   function thCh(c) { return c && typeof c === 'object' ? c.h : c; }
   // generic table → receipt lines: first column (after "#") = title, last column = amount (right), middle columns = small "label: value" lines
+  var _thNoFoot = false;   // v5.21 — the table's own total line is skipped when the closing summary already shows it
   function thermalTable(b) {
     if (b.th) return b.th;
     var cols = b.cols || [], rows = b.raw || [], out = '', hasNo = cols.length && /^#$/.test(String(cols[0].h).trim());
@@ -11989,35 +12078,24 @@ body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-se
       out += '<div class="tr"><span>' + thCh(r[s]) + '</span><b>' + thCh(r[last]) + '</b></div>';
       for (var i = s + 1; i < last; i++) { var v = thCh(r[i]); if (v === '' || v == null || v === '—') continue; out += '<div class="tmid">' + (cols[i] ? cols[i].h + ': ' : '') + v + '</div>'; }
     });
-    if (b.rawFoot && b.rawFoot.length > 1) out += '<div class="tf"><span>' + thCh(b.rawFoot[0]) + '</span><span>' + thCh(b.rawFoot[b.rawFoot.length - 1]) + '</span></div>';
+    if (b.rawFoot && b.rawFoot.length > 1 && !_thNoFoot) out += '<div class="tf"><span>' + thCh(b.rawFoot[0]) + '</span><span>' + thCh(b.rawFoot[b.rawFoot.length - 1]) + '</span></div>';
     return out;
   }
   function thermalClosing(sp, si) {
+    // v5.21 — minimal: only the money summary. No QR / barcode / hash / signature lines / terms / words / thank-you footer.
     var c = sp.closing || {}, o = '';
     if (c.summary && c.summary.length) o += '<div class="tsm">' + c.summary.map(function (r) { return '<div class="sr ' + (r[2] || '') + '"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div>';
-    if (c.words != null) o += '<div class="twd"><b>' + e(c.wordsLabel || 'কথায়:') + '</b> ' + e(taka(c.words)) + '</div>';
-    if (c.verify !== false) {
-      var payload = [si.name, sp.no || sp.title, sp.date, c.total != null ? money(c.total) : ''].join(' | ');
-      var qr = qrSvg(payload);
-      if (qr) o += '<div class="tqr">' + qr + '</div>';
-      o += '<div class="thash">HASH: ' + hash(payload) + '-AXIION</div>';
-      if (sp.no) o += '<div class="tbc">' + barcodeSvg(String(sp.no).replace(/[^\x20-\x7e]/g, '')) + '<small>*' + e(sp.no) + '*</small></div>';
-    }
-    if (c.terms) o += '<div class="ttm"><b>শর্তাবলী:</b> ' + c.terms + '</div>';
-    var sg = c.sigs || ['প্রস্তুতকারী', 'গ্রহণকারী'];
-    o += sg.map(function (s) { return '<div class="tsg">' + e(s[0] || s) + (s[1] ? '<small>' + e(s[1]) + '</small>' : '') + '</div>'; }).join('');
-    return o + '<div class="tfoot">ধন্যবাদ · AXIION DMS</div>';
+    return o;
   }
   // builds the single receipt strip, returns its pixel height
   function thermalDoc(doc, sp) {
     var si = shopInfo(), host = doc.getElementById('host'); host.innerHTML = '';
     var h = '<div class="tshn">' + e(si.name) + '</div>';
-    if (si.dist) h += '<div class="tdist">অনুমোদিত ডিস্ট্রিবিউটর: ' + e(si.dist) + '</div>';
-    if (si.addr) h += '<div class="tadr">' + e(si.addr) + '</div>';
-    if (si.phone || si.tin) h += '<div class="tadr">' + (si.phone ? 'মোবাইল: ' + e(dg(si.phone)) : '') + (si.phone && si.tin ? ' · ' : '') + (si.tin ? 'টি আই এন: ' + e(dg(si.tin)) : '') + '</div>';
-    h += '<div class="ttl">' + e(sp.title) + (sp.en ? '<i>' + e(sp.en) + '</i>' : '') + '</div>';
+    if (si.phone) h += '<div class="tadr">' + e(dg(si.phone)) + '</div>';   // v5.21 — short header: shop name + phone only
+    h += '<div class="ttl">' + e(sp.title) + '</div>';
     h += '<div class="tmeta">' + (sp.no ? '<div><span>মেমো নং:</span><b>' + e(sp.no) + '</b></div>' : '') + '<div><span>তারিখ:</span><b>' + dmy(sp.date) + ' ' + e(sp.time) + '</b></div>' + (sp.period ? '<div><span>সময়কাল:</span><b>' + e(sp.period) + '</b></div>' : '') + '</div>';
     if (sp.banner) h += '<div class="tban">' + e(sp.banner) + '</div>';
+    _thNoFoot = !!((sp.closing || {}).summary && sp.closing.summary.length);
     (sp.blocks || []).forEach(function (b) { if (b.t === 'html') h += b.html; else if (b.t === 'tbl') h += thermalTable(b); });
     h += thermalClosing(sp, si);
     var pg = doc.createElement('div'); pg.className = 'tpg'; pg.innerHTML = h; host.appendChild(pg);
@@ -12048,7 +12126,7 @@ body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-se
     }));
   }
   var needH2C = function () { return load('h2c', function () { return !!window.html2canvas; }); };
-  var needQR = function () { return load('qr', function () { return !!window.qrcode; }).catch(function () { }); };
+  var needQR = function () { return Promise.resolve(); };   // v5.21 — QR codes removed from every slip
 
   /* ── rasterisers ──────────────────────────────────────────────
      1) NATIVE: the browser itself draws the page (SVG foreignObject with
@@ -12440,7 +12518,7 @@ body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-se
     });
     return { rows: rows, th: th, tCases: tCases, tPcs: tPcs, tUnits: tUnits, tAmt: tAmt, tComm: tComm, tDisc: tDisc, by: uOrder.map(function (n) { return { unit: n, cases: byU[n] }; }) };
   }
-  function withTh(b, R) { b.th = R.th.join('') + '<div class="tf"><span>মোট পরিমাণ</span><span>' + cpTot(R) + '</span></div>'; return b; }
+  function withTh(b, R) { b.th = R.th.join(''); return b; }   // v5.21 — the total lives once, in the closing summary
   // মোট পরিমাণ = প্রতিটি পণ্যের নিজস্ব ইউনিটে ("5 কেস · 2 ডজন · 3 পিস") — মোট পিস কখনোই নয়
   function cpTot(R) { return (R.by || []).map(function (x) { return int(x.cases) + ' ' + e(x.unit); }).concat(R.tPcs ? [int(R.tPcs) + ' পিস'] : []).join(' · ') || '০'; }
   var ITEM_COLS = function (mode) {
@@ -12454,13 +12532,13 @@ body{font-family:'Inter','Noto Sans','Noto Sans Bengali','Hind Siliguri',sans-se
     if (o.partyName) party.push([K.party + ':', '<b>' + e(o.partyName) + '</b>']);
     if (o.partyArea) party.push(['এলাকা / রুট:', e(o.partyArea)]);
     if (o.partyPhone) party.push(['মোবাইল:', e(dg(o.partyPhone))]);
-    var meta = [['মেমো নং:', e(o.no || '')], ['তারিখ:', dmy(o.date)], ['মোট আইটেম:', int((o.items || []).length) + ' টি']];
+    var meta = [];   // v5.21 — memo no / date are already in the header; item count + qty + value are in the summary
     (o.meta || []).forEach(function (m) { meta.push(m); });
     var cards = { t: 'html', html: '<div class="cards"><div><h3>' + K.party + '</h3>' + (party.length ? party : [['—', '']]).map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div><div><h3>' + K.meta + '</h3>' + meta.map(function (r) { return '<div class="kv"><span>' + r[0] + '</span><b>' + r[1] + '</b></div>'; }).join('') + '</div></div>' };
     var foot = [{ h: 'সর্বমোট পরিমাণ:', span: 2, al: 'right' }, { h: cpTot(R), al: 'center' }, { h: 'সাব-টোটাল:', al: 'right' }, { h: '৳ ' + money(R.tAmt), al: 'right' }];
     var blocks = [cards, withTh(T(ITEM_COLS(mode), R.rows, foot), R)];
     if (o.note) blocks.push(note('<b>নোট:</b> ' + e(o.note)));
-    var sum = [['মোট পণ্য (আইটেম)', int((o.items || []).length) + ' টি'], ['মোট পরিমাণ', cpTot(R)], ['মোট মূল্য', '৳ ' + money(R.tAmt), 'big']];
+    var sum = [['মোট আইটেম', int((o.items || []).length) + ' টি'], ['মোট পরিমাণ', cpTot(R)], ['মোট মূল্য', '৳ ' + money(R.tAmt), 'big']];
     return { kind: o.kind, title: K.title, en: K.en, no: o.no, date: o.date, banner: o.banner, phone: o.partyPhone, file: o.no, blocks: blocks, shareText: 'মোট: ৳' + money(R.tAmt), closing: { total: R.tAmt, words: R.tAmt, wordsLabel: 'কথায় (মোট মূল্য):', summary: sum, sigs: K.sigs, terms: o.terms } };
   }
 
@@ -12544,7 +12622,8 @@ var SUB={
  'd:products':{lb:'পণ্য ক্যাটালগ',ic:'box',c:['#F59E0B','#D97706']},
  'd:register':{lb:'শপ নিবন্ধন',ic:'store',c:['#8B5CF6','#6D28D9']},
  's:sale':{lb:'বিক্রয়',ic:'cart',c:['#10B981','#047857']},
- 's:duecol':{lb:'বাকি আদায় (DSR-এর নামে)',ic:'wallet',c:['#EF4444','#B91C1C']},
+ 's:duecol':{lb:'বাকি আদায়',ic:'wallet',c:['#EF4444','#B91C1C']},
+ 's:mytx':{lb:'আমার লেনদেন',ic:'receipt',c:['#3B82F6','#1D4ED8']},
  's:todaysale':{lb:'আজকের মোট বিক্রয়',ic:'chart',c:['#6366F1','#4338CA']},
  's:dsr-tx':{lb:'DSR লেনদেন',ic:'receipt',c:['#3B82F6','#1D4ED8']},
  's:dsr-dues':{lb:'DSR বাকি',ic:'wallet',c:['#EF4444','#B91C1C']},
@@ -12559,14 +12638,14 @@ var SUB={
  's:salescalc':{lb:'বিক্রয় হিসাব',ic:'calc',c:['#EC4899','#BE185D']}
 };
 var COL={psale:['#8B5CF6','#6D28D9'],srtn:['#0D9488','#115E59'],retrep:['#14B8A6','#0F766E'],settle:['#10B981','#047857'],dsrtx:['#3B82F6','#1D4ED8'],tx:['#3B82F6','#1D4ED8'],prod:['#F59E0B','#D97706'],orders:['#06B6D4','#0E7490'],
- cal:['#EC4899','#BE185D'],attendance:['#F43F5E','#BE123C'],chat:['#0EA5E9','#0369A1'],sr:['#8B5CF6','#6D28D9'],shopsmap:['#F97316','#C2410C'],
+ cal:['#EC4899','#BE185D'],duecol:['#EF4444','#B91C1C'],attendance:['#F43F5E','#BE123C'],chat:['#0EA5E9','#0369A1'],sr:['#8B5CF6','#6D28D9'],shopsmap:['#F97316','#C2410C'],
  ownerapproval:['#22C55E','#15803D'],deposit:['#0EA5E9','#0369A1'],target:['#EF4444','#B91C1C'],numbers:['#14B8A6','#0F766E'],rep:['#6366F1','#4338CA'],exp:['#EAB308','#A16207'],
  settings:['#64748B','#334155'],pwmgr:['#A855F7','#7E22CE'],notice:['#FB923C','#EA580C'],reset:['#F87171','#DC2626'],theme:['#475569','#1E293B']};
 /* group order = how often it is used: the daily work first, rarely-used things last */
 var LAYOUT={
- owner:[['প্রতিদিনের কাজ',['settle','psale','deposit','dsrtx','tx','retrep','prod','orders','cal','attendance','chat']],['টিম ও দোকান',['sr','shopsmap','ownerapproval','target','numbers']],['রিপোর্ট ও খরচ',['rep','exp']],['সিস্টেম',['settings','pwmgr','notice','reset','theme']]],
+ owner:[['প্রতিদিনের কাজ',['settle','duecol','psale','deposit','dsrtx','tx','retrep','prod','orders','cal','attendance','chat']],['টিম ও দোকান',['sr','shopsmap','ownerapproval','target','numbers']],['রিপোর্ট ও খরচ',['rep','exp']],['সিস্টেম',['settings','pwmgr','notice','reset','theme']]],
  dsr:[['ডেলিভারি ও আদায়',['d:shop','d:dmgcol','d:duecol','retrep','srtn']],['ক্যালেন্ডার ও হাজিরা',['cal','attendance']],['পণ্য ও টার্গেট',['d:products','target','d:register']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
- so:[['অর্ডার ও বিক্রয়',['orders','s:todaysale','s:damage','s:production']],['পণ্য ও জমা-খরচ',['s:catstock','s:depslip','s:expslip']],['বিক্রয় ও টার্গেট',['s:sale','s:duecol','target']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
+ so:[['অর্ডার ও বিক্রয়',['orders','s:todaysale','s:damage','s:production']],['পণ্য ও জমা-খরচ',['s:catstock','s:depslip','s:expslip']],['বিক্রয় ও টার্গেট',['s:sale','s:duecol','s:mytx','target']],['যোগাযোগ',['chat','numbers']],['সিস্টেম',['pwmgr','theme']]],
  driver:[['প্রতিদিনের কাজ',['attendance','chat']],['সিস্টেম',['pwmgr','theme']]]};
 LAYOUT.manager=LAYOUT.owner;
 var DEF={dsr:'tx',so:'overview'};
@@ -12589,7 +12668,7 @@ function iconKey(id){
   if(id==='theme')return document.body.classList.contains('dark')?'sun':'moon';
   if(id==='deposit')return 'wallet';
   if(SUB[id])return SUB[id].ic;
-  return (window.__IDI&&window.__IDI[id])||({psale:'cart',srtn:'undo',retrep:'undo',dash:'home',settle:'calc',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'}[id]||'box');
+  return (window.__IDI&&window.__IDI[id])||({duecol:'wallet',psale:'cart',srtn:'undo',retrep:'undo',dash:'home',settle:'calc',prod:'box',sr:'users',tx:'receipt',dsrtx:'receipt',pwmgr:'key',ownerapproval:'check',rep:'chart',attendance:'pin',shopsmap:'store',chat:'chat',notice:'bell',numbers:'phone',exp:'wallet',cal:'cal',target:'target',orders:'truck',settings:'cog',reset:'trash'}[id]||'box');
 }
 function allowed(id){
   if(id==='theme')return true;
@@ -12619,6 +12698,8 @@ window.buildSideMenu=function(){
     });
   });
   h+='</div>';
+  // v5.21 — a second logout at the very end of the menu (the top one stays)
+  h+='<button class="mn-row mn-row-out" onclick="closeMenu();logout()" style="--c1:#EF4444;--c2:#B91C1C;margin-top:10px;border-color:rgba(239,68,68,.45);color:var(--re)"><span class="mn-ic">'+axIcon('lock')+'</span><span class="t">লগ আউট</span></button>';
   el.innerHTML=h;
 };
 window.mnToggle=function(btn,gi){var sec=btn.parentNode,o=!sec.classList.contains('open');

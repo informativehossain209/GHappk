@@ -822,7 +822,12 @@ CREATE TABLE IF NOT EXISTS due_collections (
   dsr_name    TEXT          DEFAULT '',
   date        DATE          NOT NULL,
   amount      NUMERIC(14,4) NOT NULL DEFAULT 0,
-  created_at  TIMESTAMPTZ   DEFAULT NOW()
+  created_at  TIMESTAMPTZ   DEFAULT NOW(),
+  credit_dsr_id   TEXT DEFAULT '',   -- v5.21: the shop's own DSR (gets the credit)
+  credit_dsr_name TEXT DEFAULT '',
+  collector_id    TEXT DEFAULT '',   -- v5.21: who really took the money (any role)
+  collector_name  TEXT DEFAULT '',
+  collector_role  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_duecol_dsr_date ON due_collections(dsr_id, date);
 CREATE INDEX IF NOT EXISTS idx_duecol_due      ON due_collections(due_id);

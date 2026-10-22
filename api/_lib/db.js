@@ -876,12 +876,25 @@ async function applyDuePayment(dueId, pay, meta) {
   if (!upd || !upd.length) return { applied: 0, conflict: true, paidAmount: already, remaining: Math.max(0, R(total - already)), status: cur.status };
   const logged = R(newPaid - already);   // includes a swallowed rounding crumb
   if (cur.client_type === 'shop') {
-    const { error: lErr } = await supabase.from('due_collections').insert({
+    // v5.21 — dsr_id = whoever HOLDS the cash (a DSR / an SO); '' when the owner or a manager took it
+    // (the company already has it, so no DSR's day-end cash goes up). credit_* = the shop's own DSR, who
+    // gets the credit for the collection. collector_* = who actually took the money.
+    const row = {
       due_id: String(dueId), shop_id: String(cur.shop_id || ''), shop_name: cur.shop_name || '',
-      dsr_id: String(meta.dsrId || cur.dsr_id || ''), dsr_name: meta.dsrName || cur.dsr_name || '',
+      dsr_id: meta.noCashHolder ? '' : String(meta.dsrId || cur.dsr_id || ''), dsr_name: meta.noCashHolder ? '' : (meta.dsrName || cur.dsr_name || ''),
       date, amount: logged, created_at: now_()
-    });
-    if (lErr) throw lErr;
+    };
+    const ext = (meta.creditId || meta.collectorId) ? {
+      credit_dsr_id: String(meta.creditId || ''), credit_dsr_name: String(meta.creditName || ''),
+      collector_id: String(meta.collectorId || ''), collector_name: String(meta.collectorName || ''), collector_role: String(meta.collectorRole || '')
+    } : null;
+    let ins = await supabase.from('due_collections').insert(ext ? Object.assign({}, row, ext) : row);
+    // migrations/005_v5_21.sql not run yet → save the plain row (the money is still recorded)
+    if (ins.error && ext && /credit_dsr|collector_/i.test(String(ins.error.message || ''))) {
+      if (meta.noCashHolder) row.dsr_id = String(meta.creditId || cur.dsr_id || ''), row.dsr_name = String(meta.creditName || cur.dsr_name || '');
+      ins = await supabase.from('due_collections').insert(row);
+    }
+    if (ins.error) throw ins.error;
   }
   return { applied: logged, paidAmount: newPaid, remaining, status };
 }

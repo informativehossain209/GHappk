@@ -56,6 +56,46 @@ async function _paymentGuard(srId, total, date) {
 // POST actions that move money / stock — protected against double taps (CALC-8).
 const IDEM_ACTIONS = new Set(['order_submit', 'give_direct', 'due-collect', 'damage-collect']);
 
+
+// v5.21 — shared by every due-collection list: groups open due rows by shop and adds the shop's GPS,
+// its own DSR and its road, so the app can sort "nearest first" for every role.
+async function _dueShopsPayload(rows) {
+  const shopIds = [...new Set(rows.map(r => String(r.shop_id || '')).filter(Boolean))];
+  const shopMap = {};
+  for (let i = 0; i < shopIds.length; i += 80) {
+    const { data: sh, error: sErr } = await supabase.from('shops').select('id,shop_no,name,keeper_name,phone,address,road_name,lat,lng,assigned_dsr_id').in('id', shopIds.slice(i, i + 80));
+    if (sErr) throw sErr;
+    (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
+  }
+  const dsrIds = [...new Set(Object.values(shopMap).map(x => String(x.assigned_dsr_id || '')).filter(Boolean))];
+  const dsrName = {};
+  if (dsrIds.length) {
+    const { data: ss } = await supabase.from('srs').select('id,name').in('id', dsrIds);
+    (ss || []).forEach(x => { dsrName[String(x.id)] = x.name || ''; });
+  }
+  const grouped = {};
+  rows.forEach(r => {
+    const sid = String(r.shop_id || '');
+    const rem = num(r.amount) - num(r.paid_amount);
+    if (rem <= 0.0001) return;
+    if (!grouped[sid]) {
+      const sh = shopMap[sid] || {};
+      grouped[sid] = {
+        shopId: sid, shopNo: sh.shop_no || '', shopName: sh.name || r.shop_name || 'অজানা দোকান',
+        keeperName: sh.keeper_name || '', phone: sh.phone || '', address: sh.address || '', roadName: sh.road_name || '',
+        lat: sh.lat != null ? Number(sh.lat) : null, lng: sh.lng != null ? Number(sh.lng) : null,
+        assignedDsrId: String(sh.assigned_dsr_id || ''), assignedDsrName: dsrName[String(sh.assigned_dsr_id || '')] || '',
+        totalDue: 0, dues: []
+      };
+    }
+    grouped[sid].totalDue += rem;
+    grouped[sid].dues.push({ id: String(r.id), dueDate: String(r.due_date || '').slice(0, 10), amount: num(r.amount), paid: num(r.paid_amount), remaining: rem, note: r.note || '' });
+  });
+  const shops = Object.values(grouped).sort((x, y) => y.totalDue - x.totalDue);
+  shops.forEach(x => x.dues.sort((p, q) => p.dueDate.localeCompare(q.dueDate)));
+  return { ok: true, shops, totalDue: shops.reduce((t, x) => t + x.totalDue, 0) };
+}
+
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -660,7 +700,13 @@ async function _handle(req, res, action) {
     // ══════════════════════════════════════════════════
     if (req.method === 'GET' && action === 'due-shops') {
       const { dsrId } = req.query;
-      if (!dsrId) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
+      // v5.21 — scope=all (owner / manager / SO): every shop that owes, not just one DSR's
+      const allScope = String(req.query.scope || '') === 'all';
+      if (!dsrId && !allScope) return res.json({ ok: false, error: 'dsrId প্রয়োজন' });
+      if (allScope) {
+        const rowsAll = await fetchAll(() => supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id').eq('client_type', 'shop').in('status', ['pending', 'partial']));
+        return res.json(await _dueShopsPayload(rowsAll));
+      }
       const { data: mine, error: mErr } = await supabase.from('shops').select('id').eq('assigned_dsr_id', String(dsrId));
       if (mErr) throw mErr;
       const myShopIds = (mine || []).map(x => String(x.id));
@@ -673,48 +719,24 @@ async function _handle(req, res, action) {
       if (a.error) throw a.error; if (b.error) throw b.error;
       const seen = {}; const rows = [];
       [...(a.data || []), ...(b.data || [])].forEach(r => { if (!seen[r.id]) { seen[r.id] = 1; rows.push(r); } });
-      const shopIds = [...new Set(rows.map(r => String(r.shop_id || '')).filter(Boolean))];
-      const shopMap = {};
-      if (shopIds.length) {
-        const { data: sh, error: sErr } = await supabase.from('shops').select('id,shop_no,name,keeper_name,phone,address,road_name').in('id', shopIds);
-        if (sErr) throw sErr;
-        (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
-      }
-      const grouped = {};
-      rows.forEach(r => {
-        const sid = String(r.shop_id || '');
-        const rem = num(r.amount) - num(r.paid_amount);
-        if (rem <= 0.0001) return;
-        if (!grouped[sid]) {
-          const sh = shopMap[sid] || {};
-          grouped[sid] = {
-            shopId: sid, shopNo: sh.shop_no || '', shopName: sh.name || r.shop_name || 'অজানা দোকান',
-            keeperName: sh.keeper_name || '', phone: sh.phone || '', address: sh.address || '', roadName: sh.road_name || '',
-            totalDue: 0, dues: []
-          };
-        }
-        grouped[sid].totalDue += rem;
-        grouped[sid].dues.push({ id: String(r.id), dueDate: String(r.due_date || '').slice(0, 10), amount: num(r.amount), paid: num(r.paid_amount), remaining: rem, note: r.note || '' });
-      });
-      const shops = Object.values(grouped).sort((x, y) => y.totalDue - x.totalDue);
-      shops.forEach(x => x.dues.sort((p, q) => p.dueDate.localeCompare(q.dueDate)));
-      return res.json({ ok: true, shops, totalDue: shops.reduce((t, x) => t + x.totalDue, 0) });
+      return res.json(await _dueShopsPayload(rows));
     }
 
     if (req.method === 'POST' && action === 'due-collect') {
       const d = req.body || {};
       const amount = num(d.amount);
-      if (!d.dsrId || !d.shopId) return res.json({ ok: false, error: 'dsrId ও shopId প্রয়োজন' });
+      if (!d.shopId || !(d.actorId || d.dsrId)) return res.json({ ok: false, error: 'shopId ও আদায়কারী প্রয়োজন' });
       if (amount <= 0) return res.json({ ok: false, error: 'পরিমাণ ০-এর বেশি হতে হবে' });
       // v5.6 — every collection (full OR partial) needs the DSR's own password.
       // Checked here on the server so it cannot be skipped from the browser.
       {
         const pin = String(d.pin == null ? '' : d.pin).trim();
         if (!pin) return res.json({ ok: false, error: 'আপনার পাসওয়ার্ড দিন', needPin: true });
-        const { data: pw, error: pwErr } = await supabase.from('user_passwords').select('user_key')
+        const { data: pw, error: pwErr } = await supabase.from('user_passwords').select('user_key,role')
           .eq('user_key', String(d.actorId || d.dsrId)).eq('password', pin).limit(1);   // v5.16: an SO collecting on a DSR's van confirms with his OWN password
         if (pwErr) throw pwErr;
         if (!pw || !pw.length) return res.json({ ok: false, error: 'পাসওয়ার্ড ভুল — আদায় হয়নি', badPin: true });
+        d._actorRole = String(pw[0].role || '');
       }
       const { data: dues, error: dErr } = await supabase.from('due_calendar').select('id,dsr_id,dsr_name,client_type,shop_id,shop_name,due_date,amount,paid_amount,note,status,cleared_date,created_at,tx_id')
         .eq('client_type', 'shop').eq('shop_id', String(d.shopId)).in('status', ['pending', 'partial'])
@@ -724,7 +746,17 @@ async function _handle(req, res, action) {
       if (owed <= 0) return res.json({ ok: false, error: 'এই দোকানের কোনো বাকি নেই' });
       if (amount > owed + 0.0001) return res.json({ ok: false, error: 'বাকি আছে মাত্র ৳' + owed.toFixed(2) + ' — এর বেশি নেওয়া যাবে না' });
       let left = amount, collected = 0;
-      const meta = { dsrId: String(d.dsrId), dsrName: d.dsrName || '', date: bdtToday() };
+      // v5.21 — ANY role can collect. The credit always goes to the shop's own (registered) DSR automatically;
+      // the cash is on the person who really took it: a DSR / SO → his own day-end cash, owner / manager → none.
+      const actorId = String(d.actorId || d.dsrId);
+      const actorRole = d._actorRole || (d.actorId ? '' : 'dsr');
+      let actorName = String(d.actorName || d.dsrName || '');
+      const { data: shRow } = await supabase.from('shops').select('assigned_dsr_id,assigned_dsr_name').eq('id', String(d.shopId)).maybeSingle();
+      const creditId = String((shRow && shRow.assigned_dsr_id) || (actorRole === 'dsr' ? actorId : '') || '');
+      const creditName = String((shRow && shRow.assigned_dsr_name) || (creditId === actorId ? actorName : '') || '');
+      const holdsCash = actorRole === 'dsr' || actorRole === 'so';
+      const meta = { dsrId: holdsCash ? actorId : '', dsrName: holdsCash ? actorName : '', noCashHolder: !holdsCash, date: bdtToday(),
+        creditId, creditName, collectorId: actorId, collectorName: actorName, collectorRole: actorRole };
       for (const r of dues) {
         if (left <= 0.0001) break;
         const rem = Math.max(0, num(r.amount) - num(r.paid_amount));
@@ -863,7 +895,7 @@ async function _handle(req, res, action) {
       const f = DATE_RE.test(from || '') ? from : bdtToday();
       const t = DATE_RE.test(to || '') ? to : f;
       const [dc, gc] = await Promise.all([
-        fetchAll(() => { let q = supabase.from('due_collections').select('id,due_id,shop_id,shop_name,dsr_id,dsr_name,date,amount,created_at').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; }),
+        fetchAll(() => supabase.from('due_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false })).then(rs => (dsrId ? (rs || []).filter(r => String(r.dsr_id || '') === String(dsrId) || String(r.credit_dsr_id || '') === String(dsrId)) : rs)),   // v5.21 — a DSR also sees what others collected from HIS shops
         fetchAll(() => { let q = supabase.from('damage_collections').select('*').gte('date', f).lte('date', t).order('created_at', { ascending: false }); if (dsrId) q = q.eq('dsr_id', String(dsrId)); return q; })
       ]);
       const shopIds = [...new Set([...(dc || []), ...(gc || [])].map(r => String(r.shop_id || '')).filter(Boolean))];
@@ -875,7 +907,7 @@ async function _handle(req, res, action) {
         (sh || []).forEach(x => { shopMap[String(x.id)] = x; });
       }
       const shopInfo = id => { const x = shopMap[String(id || '')] || {}; return { shopNo: x.shop_no || '', keeperName: x.keeper_name || '', phone: x.phone || '', address: x.address || '', roadName: x.road_name || '' }; };
-      const dues = (dc || []).map(r => ({ id: String(r.id), date: String(r.date).slice(0, 10), dsrId: r.dsr_id, dsrName: r.dsr_name || '', shopId: r.shop_id || '', shopName: r.shop_name || '', amount: num(r.amount), createdAt: r.created_at, ...shopInfo(r.shop_id) }));
+      const dues = (dc || []).map(r => ({ id: String(r.id), date: String(r.date).slice(0, 10), dsrId: r.credit_dsr_id || r.dsr_id, dsrName: r.credit_dsr_name || r.dsr_name || '', collectorId: r.collector_id || r.dsr_id || '', collectorName: r.collector_name || r.dsr_name || '', collectorRole: r.collector_role || '', shopId: r.shop_id || '', shopName: r.shop_name || '', amount: num(r.amount), createdAt: r.created_at, ...shopInfo(r.shop_id) }));
       const damages = (gc || []).map(r => ({
         id: String(r.id), colId: r.col_id, date: String(r.date).slice(0, 10), dsrId: r.dsr_id, dsrName: r.dsr_name || '',
         shopId: r.shop_id || '', shopName: r.shop_name || '', productName: r.product_name || '', units: num(r.units),
@@ -1251,7 +1283,7 @@ async function _performSettlement(d, byName) {
   const comm = ap.commission !== false ? c.pending.commission : 0;
   const disc = ap.discount   !== false ? c.pending.discount   : 0;
   const dmg  = ap.damage     !== false ? c.pending.damage     : 0;
-  const cashRecv = Math.max(0, _r2(d.cashReceived === undefined || d.cashReceived === '' ? c.pending.cashExpected : d.cashReceived));
+  const cashRecv = Math.max(0, _r2(c.pending.cashExpected));   // v5.21 — payment is always exactly the cash in hand (no editing)
 
   if (!c.hasPending) return { ok: false, duplicate: true, error: 'নতুন কোনো হিসাব বাকি নেই — আগের হিসাব ইতিমধ্যে সংরক্ষিত আছে।' };
   if (!doReturn && comm + disc + dmg + cashRecv <= 0 && Math.abs(c.pending.cashExpectedRaw) <= 0.005)

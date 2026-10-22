@@ -12,6 +12,19 @@
 
 # Changelog
 
+## 5.21.0
+**Database: ONE small, optional SQL** — `migrations/005_v5_21.sql` (adds who-collected / credited-to columns to `due_collections`; the app still works without it).
+
+- **বাকি আদায় for every role** (owner, manager, SO, DSR): shops are sorted by your live GPS — nearest first, with the distance in metres, grouped 100 m / 300 m / 1 km / further / no location. Owner/manager/SO see every shop that owes; a DSR sees his own shops (tick "other DSRs' shops" for more).
+- **Auto-credit:** whoever collects, the credit goes to the shop's registered DSR automatically. Cash stays with the person who took it (DSR/SO → his own day-end cash; owner/manager → nobody's).
+- **SO has his own van:** stock given to an SO is sold from the SO's own van (no borrowed DSR van, picker removed). SO uses the same delivery screens, shop auto-detect (nearby shop prompt) and has "আমার লেনদেন"; he appears in the payment / van-return / collection lists like a DSR.
+- **Menu:** extra logout button at the very end (the top one stays).
+- **Owner home:** the "DSR/SO বাকির তালিকা" block was removed.
+- **Transaction details:** each product's total = selling price × only the quantity sold to shops (point sale included, shop-returns deducted). Column "ক্রয় দর" → "বিক্রয় দর".
+- **Tally book (খাতা):** tapping a shop opens a hand-written-ledger style book — one page per due cycle: date · what was taken · total · paid · due, commission/discount under the row, deposits as rows; page closes when due hits zero and the next sale starts a new page (◀ ▶ to flip).
+- **DSR/SO payment:** cash is locked to exactly what is in hand (no editing; enforced on the server too).
+- **Slips:** removed QR, barcode, hash, signature boxes, terms, amount-in-words, thank-you footer, distributor/TIN lines, duplicated memo no/date/total lines. Online-deposit slip: name · mobile · address, then ONE sheet (date · day · method · amount) and the total once.
+
 ## 5.18.0
 **Database: no change.** API files: still **12** (`sr-payments.js` edited).
 

@@ -96,10 +96,10 @@ async function _buildShopLedger(shopId) {
   const sid = String(shopId);
   const [txRows, dueRows, colRows, dmgRows] = await Promise.all([
     fetchAll(() => supabase.from('transactions')
-      .select('id,tx_id,type,date,created_at,sr_name,slip_no,total_units,total_revenue,commission_amt,discount_amt,note')
+      .select('id,tx_id,type,date,created_at,sr_name,slip_no,total_units,total_revenue,commission_amt,discount_amt,note,product_name,cases,pcs')
       .eq('shop_id', sid).in('type', ['dsr_sale', 'dsr_sale_return', 'point_sale', 'point_damage_return'])),
     fetchAll(() => supabase.from('due_calendar').select(DUE_COLS_).eq('shop_id', sid).eq('client_type', 'shop')),
-    fetchAll(() => supabase.from('due_collections').select('id,due_id,shop_id,dsr_name,date,amount,created_at').eq('shop_id', sid)),
+    fetchAll(() => supabase.from('due_collections').select('*').eq('shop_id', sid)),
     fetchAll(() => supabase.from('damage_collections').select('*').eq('shop_id', sid))
   ]);
 
@@ -108,7 +108,8 @@ async function _buildShopLedger(shopId) {
   (txRows || []).forEach(r => {
     const k = String(r.tx_id || r.id);
     const b = bills[k] || (bills[k] = { txId: k, type: r.type, date: _d10(r.date), at: r.created_at, dsrName: r.sr_name || '',
-      slipNo: r.slip_no || '', note: r.note || '', rev: 0, comm: 0, disc: 0, units: 0, lines: 0 });
+      slipNo: r.slip_no || '', note: r.note || '', rev: 0, comm: 0, disc: 0, units: 0, lines: 0, items: [] });
+    b.items.push({ n: r.product_name || '', c: num(r.cases), p: num(r.pcs), u: num(r.total_units), v: _r2(r.total_revenue) });   // v5.21 — tally-book rows list the goods
     b.rev += num(r.total_revenue); b.comm += num(r.commission_amt); b.disc += num(r.discount_amt);
     b.units += num(r.total_units); b.lines += 1;
     if (_ms(r.created_at) && _ms(r.created_at) < _ms(b.at)) b.at = r.created_at;
@@ -146,7 +147,7 @@ async function _buildShopLedger(shopId) {
   const ev = [];
   billList.forEach(b => {
     if (b.type === 'point_damage_return' || b.type === 'dsr_sale_return') {
-      ev.push({ kind: 'ret', key: b.txId, txId: b.txId, at: b.at, date: b.date, dsrName: b.dsrName, value: _r2(b.rev), units: b.units, note: b.note, saleReturn: b.type === 'dsr_sale_return' });
+      ev.push({ kind: 'ret', key: b.txId, txId: b.txId, at: b.at, date: b.date, dsrName: b.dsrName, value: _r2(b.rev), units: b.units, note: b.note, items: b.items, saleReturn: b.type === 'dsr_sale_return' });
       return;
     }
     let billed = b.payable, paid = b.payable;         // counter sales are settled on the spot
@@ -159,7 +160,7 @@ async function _buildShopLedger(shopId) {
     ev.push({ kind: 'sale', key: b.txId, txId: b.txId, dueId: b.due ? String(b.due.id) : '', saleType: b.type,
       at: b.at, date: b.date, slipNo: b.slipNo, dsrName: b.dsrName,
       gross: _r2(b.rev), discount: _r2(b.disc), commission: _r2(b.comm), billed, paid, dueAdded: _r2(billed - paid),
-      units: b.units, itemCount: b.lines, note: b.note, affects: true });
+      units: b.units, itemCount: b.lines, note: b.note, items: b.items, affects: true });
   });
   // due rows that belong to no bill (manually added dues, or very old data)
   dues.filter(d => !d._used).forEach(d => {
@@ -174,7 +175,7 @@ async function _buildShopLedger(shopId) {
   ev.forEach(e => { if (e.kind === 'sale' && e.dueId) keyOfDue[e.dueId] = e; });
   (colRows || []).forEach(c => {
     const sale = keyOfDue[String(c.due_id)];
-    ev.push({ kind: 'pay', key: 'c:' + c.id, at: c.created_at, date: _d10(c.date), amount: _r2(c.amount), byName: c.dsr_name || '',
+    ev.push({ kind: 'pay', key: 'c:' + c.id, at: c.created_at, date: _d10(c.date), amount: _r2(c.amount), byName: c.collector_name || c.dsr_name || c.credit_dsr_name || '',
       forKey: sale ? sale.key : '', forDate: sale ? sale.date : '', forSlip: sale ? sale.slipNo : '', affects: !!sale });
   });
   const dmgGroups = {};
