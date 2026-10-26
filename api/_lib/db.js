@@ -1,5 +1,3 @@
-// api/_lib/db.js — AXIION DMS (manual / owner-only edition)
-// Shared database client + every calculation helper. Calculation rules are the same as the original DMS.
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
@@ -10,8 +8,9 @@ const supabase = createClient(
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
+
 // ── Pagination-safe full-table fetch ──────────────────────────────────
 // PostgREST (Supabase's REST layer) silently caps any query at 1000 rows
 // by default — no error, it just returns the first page. Anything that
@@ -74,6 +73,7 @@ function ds(v)  { if (!v) return ''; return String(v).slice(0, 10); }
 function today(){ return bdtDateStr(new Date()); }
 function now_() { return new Date().toISOString(); }
 function str(v, max = 255) { return String(v || '').trim().slice(0, max); }
+
 // ── Asia/Dhaka date helpers (V30 — Daily Report generation) ──────────
 // The company operates in Bangladesh; "today"/"yesterday" for report
 // generation must follow Asia/Dhaka local time, not the server's UTC
@@ -92,6 +92,14 @@ function addDaysStr(dateStr, delta) {
   return dt.toISOString().slice(0, 10);
 }
 function bdtYesterday() { return addDaysStr(bdtToday(), -1); }
+// V56 §4 — day-of-week for a plain 'YYYY-MM-DD' string, UTC-based so it's
+// independent of server TZ. 0=Sunday..6=Saturday (matches JS Date.getDay()
+// convention already used by attendance.js's local _weekdayOfDateStr).
+function weekdayOf(dateStr) {
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
 // ── "Salary/Target Month" cycle (V41 update 7) ────────────────────────
 // Every monthly calculation in the app (salary, targets, reports, the
 // bonus/damage cycle) is scoped NOT to the plain calendar month but to a
@@ -140,7 +148,6 @@ function safeErr(e) {
   return 'সার্ভার সমস্যা হয়েছে, আবার চেষ্টা করুন';
 }
 
-// ───────────────────────── row mappers ─────────────────────────
 function mapProduct(r) {
   return {
     id: String(r.id || ''),
@@ -171,23 +178,153 @@ function mapProduct(r) {
     createdAt: r.created_at || ''
   };
 }
+
 function mapSR(r) {
   return {
-    id: String(r.id || ''), name: r.name || '', phone: r.phone || '', area: r.area || '',
+    id: String(r.id || ''),
+    name: r.name || '',
+    phone: r.phone || '',
+    area: r.area || '',
     role: r.role || 'dsr',
-    // displayNo: stable per-role numbering (DSR-1, DSR-2 …), assigned once, never reused
+    thumb: r.thumb || '',
+    soId: String(r.so_id || ''),
+    soName: r.so_name || '',
+    // displayNo: AXIION §10 — stable per-role numbering, assigned once,
+    // never reused, independent of who currently holds the slot.
+    // Update #20: matching displayNo across roles (DSR-1 ↔ SO-1, …) is
+    // the auto-pair — so_id/soName are set automatically at creation,
+    // no manual "connect" handshake exists anymore.
     displayNo: r.display_no != null ? Number(r.display_no) : null,
+    // roadId/roadName (Update #22): which Road this SO/DSR belongs to —
+    // set automatically via api/srs.js action=road-assign-so, never by
+    // manual per-person selection.
+    roadId: String(r.road_id || ''),
+    roadName: r.road_name || '',
     createdAt: r.created_at || ''
   };
 }
+
 function mapShop(r) {
   return {
-    id: String(r.id || ''), shopNo: r.shop_no || '', name: r.name || '', keeperName: r.keeper_name || '',
-    phone: r.phone || '', address: r.address || '',
-    assignedDsrId: String(r.assigned_dsr_id || ''), assignedDsrName: r.assigned_dsr_name || '',
+    id: String(r.id || ''),
+    shopNo: r.shop_no || '',
+    name: r.name || '',
+    keeperName: r.keeper_name || '',
+    phone: r.phone || '',
+    address: r.address || '',
+    lat: r.lat != null ? Number(r.lat) : null,
+    lng: r.lng != null ? Number(r.lng) : null,
+    assignedDsrId: String(r.assigned_dsr_id || ''),
+    assignedDsrName: r.assigned_dsr_name || '',
+    roadId: String(r.road_id || ''),
+    roadName: r.road_name || '',
     createdAt: r.created_at || ''
   };
 }
+
+// Update #51 — Point-of-Sale customer capture. A proper stored record
+// (name/phone/address/keeper name — same basic fields as normal shop
+// registration) instead of just a free-text customer name.
+function mapPosCustomer(r) {
+  return {
+    id: String(r.id || ''),
+    name: r.name || '',
+    keeperName: r.keeper_name || '',
+    phone: r.phone || '',
+    address: r.address || '',
+    createdAt: r.created_at || ''
+  };
+}
+
+// ── Roads feature (Updates #21–27) ──────────────────────────────────
+function mapRoad(r) {
+  return {
+    id: String(r.id || ''),
+    name: r.name || '',
+    soId: String(r.so_id || ''),
+    soName: r.so_name || '',
+    dsrId: String(r.dsr_id || ''),
+    dsrName: r.dsr_name || '',
+    createdAt: r.created_at || ''
+  };
+}
+
+function mapRoadPlan(r) {
+  return {
+    id: String(r.id || ''),
+    roadId: String(r.road_id || ''),
+    roadName: r.road_name || '',
+    soId: String(r.so_id || ''),
+    soName: r.so_name || '',
+    dsrId: String(r.dsr_id || ''),
+    dsrName: r.dsr_name || '',
+    soVisitDate: r.so_visit_date || '',
+    dsrVisitDate: r.dsr_visit_date || '',
+    createdBy: r.created_by || '',
+    createdAt: r.created_at || ''
+  };
+}
+
+// V56 §4 — weekly recurring visit-day rule (replaces one-row-per-date
+// road_visit_plans for the forward-looking PLAN — road_visit_plans stays
+// for old/legacy data, shop_visits still covers the actual-visit audit
+// trail). Field names deliberately match mapRoadPlan's output (id,
+// roadId, roadName, soId, soName, dsrId, dsrName, createdBy, createdAt)
+// so _roadDutyWidget()/_roadDutyBanner() on the front-end work unchanged
+// against either shape — only weekday/activeFrom are new/extra.
+function mapRoadWeeklyPlan(r) {
+  return {
+    id: String(r.id || ''),
+    roadId: String(r.road_id || ''),
+    roadName: r.road_name || '',
+    soId: String(r.so_id || ''),
+    soName: r.so_name || '',
+    dsrId: String(r.dsr_id || ''),
+    dsrName: r.dsr_name || '',
+    weekday: r.weekday != null ? Number(r.weekday) : null,
+    activeFrom: r.active_from || '',
+    createdBy: r.created_by || '',
+    createdAt: r.created_at || ''
+  };
+}
+
+function mapShopVisit(r) {
+  return {
+    id: String(r.id || ''),
+    shopId: String(r.shop_id || ''),
+    visitRole: r.visit_role || '',
+    visitorId: String(r.visitor_id || ''),
+    visitorName: r.visitor_name || '',
+    visitDate: r.visit_date || '',
+    createdAt: r.created_at || ''
+  };
+}
+
+function mapOrder(r) {
+  return {
+    id: String(r.id || ''),
+    soId: String(r.so_id || ''),
+    soName: r.so_name || '',
+    items: r.items || [],
+    requestedAmount: String(r.requested_amount || 0),
+    status: r.status || 'pending',
+    modifiedBy: r.modified_by || '',
+    modifiedAmount: r.modified_amount != null ? String(r.modified_amount) : '',
+    proposedItems: r.proposed_items || null,
+    assignedDsrId: String(r.assigned_dsr_id || ''),
+    loadStatus: r.load_status || 'not_started',
+    loadTicks: r.load_ticks || {},
+    approvedBy: r.approved_by || '',
+    approvedAt: r.approved_at || '',
+    createdAt: r.created_at || '',
+    // v60 — simplified flow: what was originally ordered/given (before
+    // the DSR adjusted quantities at loading) and when the van load
+    // was confirmed (= when stock actually left the warehouse).
+    originalItems: r.original_items || null,
+    loadedAt: r.loaded_at || ''
+  };
+}
+
 function mapTx(r) {
   return {
     txId: String(r.tx_id || ''),
@@ -222,6 +359,7 @@ function mapTx(r) {
     createdAt: r.created_at || ''
   };
 }
+
 function mapDmg(r) {
   return {
     id: String(r.id || ''),
@@ -290,30 +428,61 @@ function mapExpRecord(r) {
 }
 function mapDue(r) {
   return {
-    id: String(r.id || ''), dsrId: String(r.dsr_id || ''), dsrName: r.dsr_name || '',
-    clientType: r.client_type || 'shop', shopId: String(r.shop_id || ''), shopName: r.shop_name || '',
-    dueDate: r.due_date ? String(r.due_date).slice(0, 10) : '',
-    entryDate: r.entry_date ? String(r.entry_date).slice(0, 10) : (r.created_at ? String(r.created_at).slice(0, 10) : ''),
-    amount: String(r.amount || 0), paidAmount: String(r.paid_amount || 0), initialPaid: String(r.initial_paid || 0),
-    note: r.note || '', status: r.status || 'pending',
-    clearedDate: r.cleared_date ? String(r.cleared_date).slice(0, 10) : '',
-    createdAt: r.created_at || '', txId: String(r.tx_id || '')
-  };
-}
-function mapSlip(r) {
-  const n = (v) => Number(v) || 0;
-  return {
-    id: String(r.id || ''), slipNo: r.slip_no || '', dsrId: String(r.dsr_id || ''), dsrName: r.dsr_name || '',
-    date: r.date ? String(r.date).slice(0, 10) : '',
-    givenAmt: n(r.given_amt), returnAmt: n(r.return_amt), damageAmt: n(r.damage_amt),
-    commAmt: n(r.comm_amt), discAmt: n(r.disc_amt), expectedCash: n(r.expected_cash), cashAmt: n(r.cash_amt),
-    dueBefore: n(r.due_before), dueAfter: n(r.due_after), note: r.note || '',
-    returnTxId: r.return_tx_id || '', damageTxId: r.damage_tx_id || '', paymentId: r.payment_id || '',
-    createdAt: r.created_at || ''
+    id: String(r.id || ''),
+    dsrId: String(r.dsr_id || ''),
+    dsrName: r.dsr_name || '',
+    clientType: r.client_type || 'dsr',
+    shopId: String(r.shop_id || ''),
+    shopName: r.shop_name || '',
+    dueDate: r.due_date ? String(r.due_date).slice(0,10) : '',
+    amount: String(r.amount || 0),
+    paidAmount: String(r.paid_amount || 0),
+    note: r.note || '',
+    status: r.status || 'pending',
+    clearedDate: r.cleared_date ? String(r.cleared_date).slice(0,10) : '',
+    createdAt: r.created_at || '',
+    txId: String(r.tx_id || '')
   };
 }
 
-// ───────────────────────── bonus / free ─────────────────────────
+function mapChatMsg(r) {
+  return {
+    id:         String(r.id || ''),
+    senderId:   String(r.sender_id || ''),
+    senderName: r.sender_name || '',
+    senderRole: r.sender_role || '',
+    message:    r.message || '',
+    createdAt:  r.created_at || ''
+  };
+}
+
+function calcStock(allTx) {
+  const m = {};
+  allTx.forEach(r => {
+    const pid = r.productId; if (!pid) return;
+    if (!m[pid]) m[pid] = 0;
+    const u = num(r.totalUnits);
+    if (r.type === 'buy')    m[pid] += u;
+    if (r.type === 'give')   m[pid] -= u;
+    if (r.type === 'return') m[pid] += u;
+    // v60 — 'return_company': stock sent back to the company, leaves the warehouse.
+    if (r.type === 'return_company') m[pid] -= u;
+    // V35 — 'damage' deliberately does NOT touch stock. Damage is only a
+    // reporting/reimbursement record (see dmg_claims + DSR payment page);
+    // the physical product was already removed from warehouse stock at
+    // 'give' time (or was never in warehouse stock if damaged before
+    // being given out), so subtracting it again here would incorrectly
+    // double-count the loss.
+    if (r.type === 'point_sale')          m[pid] -= u;
+    if (r.type === 'point_damage_return') m[pid] += u;
+    // 'dsr_sale' (V31) is a DSR selling stock he ALREADY took via 'give' —
+    // that stock left the warehouse and was deducted already at give-time,
+    // so a dsr_sale row deliberately does NOT touch stock again here.
+  });
+  return m;
+}
+
+// Sign of a transaction for BONUS purposes (net pieces sold).
 function _bonusSign(type) {
   return (type === 'give' || type === 'point_sale') ? 1
        : (type === 'return' || type === 'point_damage_return') ? -1 : 0;
@@ -397,12 +566,32 @@ async function computeBonusRangeSummary(from, to) {
   });
 }
 
-// ───────────────────────── profit ─────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+//  PROFIT  (CALC-1, v5.1) — ONE definition, used by the dashboard
+//  (today / month / range) and by the report.
+//
+//    gross profit = revenue − purchase cost            (give + point_sale − return − point_damage_return)
+//    net profit   = gross profit
+//                   − commission  − discount           (sr_payments, by payment date)
+//                   − damage loss                      (dmg_claims.total_cost, van damage + shop damage collection, by date)
+//                   − bonus                            (computeBonusRangeSummary)
+//                   − expenses                         (exp_records)
+//  Each deduction can be switched off in app_settings.profit_rules (owner
+//  Settings page); the full breakdown is always returned so the screen can
+//  show every line.
+// ══════════════════════════════════════════════════════════════════════
 // v5.7 — NET profit = gross profit − commission ONLY. Discount, damage, bonus and expenses are
 // no longer deducted (they are still returned as separate figures for display). The rules are
 // fixed here on purpose so an old saved `profit_rules` row can never switch them back on.
 const DEFAULT_PROFIT_RULES = { commission: true, discount: false, damage: false, bonus: false, expenses: false };
-async function getProfitRules() { return Object.assign({}, DEFAULT_PROFIT_RULES); }
+async function getProfitRules() {
+  try {
+    const { data, error } = await supabase.from('app_settings').select('profit_rules').eq('id', 1).maybeSingle();
+    if (error) throw error;
+    return Object.assign({}, DEFAULT_PROFIT_RULES);
+  } catch (e) { return Object.assign({}, DEFAULT_PROFIT_RULES); }
+}
+
 async function getSalesSummary(from, to) {
   try {
     const { data, error } = await supabase.rpc('sales_summary', { p_from: from, p_to: to });
@@ -467,7 +656,13 @@ async function computeProfit(from, to) {
   };
 }
 
-// ───────────────────────── aggregates ─────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+//  SMALL AGGREGATES (PERF-3, v5.1)
+//  The dashboards used to download every transaction row of the month and
+//  add them up in Node. These are summed INSIDE Postgres and return a few
+//  numbers per person / product. Each has an identical (slower) fallback so
+//  the app keeps working before the SQL migration has been run.
+// ══════════════════════════════════════════════════════════════════════
 async function _rpcOr(name, args, fallback) {
   try {
     const { data, error } = await supabase.rpc(name, args);
@@ -476,6 +671,33 @@ async function _rpcOr(name, args, fallback) {
   } catch (e) { return fallback(); }
 }
 
+// per SR: out = give+point_sale, in = return+point_damage_return, plus give/return only
+async function getSrSalesTotals(from, to) {
+  const rows = await _rpcOr('sr_sales_totals', { p_from: from, p_to: to }, async () => {
+    const tx = await fetchAll(() => supabase.from('transactions').select('sr_id,type,total_units,total_revenue')
+      .in('type', ['give', 'return', 'point_sale', 'point_damage_return']).gte('date', from).lte('date', to));
+    const m = {};
+    tx.forEach(r => {
+      const sid = String(r.sr_id || ''); if (!sid) return;
+      const o = m[sid] || (m[sid] = { sr_id: sid, out_rev: 0, in_rev: 0, out_units: 0, in_units: 0, give_rev: 0, give_units: 0, ret_rev: 0, ret_units: 0 });
+      const u = num(r.total_units), v = num(r.total_revenue);
+      if (r.type === 'give' || r.type === 'point_sale') { o.out_rev += v; o.out_units += u; }
+      else { o.in_rev += v; o.in_units += u; }
+      if (r.type === 'give') { o.give_rev += v; o.give_units += u; }
+      if (r.type === 'return') { o.ret_rev += v; o.ret_units += u; }
+    });
+    return Object.values(m);
+  });
+  const out = {};
+  rows.forEach(r => {
+    const sid = String(r.sr_id || ''); if (!sid) return;
+    out[sid] = { outRev: num(r.out_rev), inRev: num(r.in_rev), outUnits: num(r.out_units), inUnits: num(r.in_units),
+      giveRev: num(r.give_rev), giveUnits: num(r.give_units), retRev: num(r.ret_rev), retUnits: num(r.ret_units) };
+  });
+  return out;
+}
+
+// per product: net pieces sold (give+point_sale − return − point_damage_return)
 // ── v5.4 display helpers: exact "cases + loose pieces" totals ─────────────
 // Units are summed PER PRODUCT first and then split with THAT product's own
 // case size, so the answer is exact (never a bare total-piece count).
@@ -539,7 +761,145 @@ async function getProductNetUnits(from, to) {
   return out;
 }
 
-// ───────────────────────── audit / idempotency / stock guard ─────────────────────────
+async function getPaymentsTotal(from, to) {
+  const rows = await _rpcOr('payments_total', { p_from: from, p_to: to }, async () => {
+    const pay = await fetchAll(() => supabase.from('sr_payments').select('amount').gte('date', from).lte('date', to));
+    return [{ total: pay.reduce((s, r) => s + num(r.amount), 0) }];
+  });
+  // a scalar-returning SQL function comes back as a bare number
+  const r0 = rows;
+  if (typeof r0 === 'number') return r0;
+  if (Array.isArray(r0)) return r0.length && typeof r0[0] === 'object' ? num(r0[0].total) : num(r0[0]);
+  return num(r0);
+}
+
+// warehouse movement of one day per product (for "yesterday's closing stock")
+async function getStockMovement(date) {
+  const SIGN = { buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1, return_company: -1 };
+  const rows = await _rpcOr('stock_movement', { p_date: date }, async () => {
+    const tx = await fetchAll(() => supabase.from('transactions').select('product_id,type,total_units').eq('date', date).in('type', Object.keys(SIGN)));
+    const m = {};
+    tx.forEach(r => { const k = String(r.product_id || ''); if (!k) return; m[k] = (m[k] || 0) + SIGN[r.type] * num(r.total_units); });
+    return Object.keys(m).map(k => ({ product_id: k, delta: m[k] }));
+  });
+  const out = {};
+  rows.forEach(r => { out[String(r.product_id || '')] = num(r.delta); });
+  return out;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  VAN STOCK + DUE PAYMENT HELPERS
+// ══════════════════════════════════════════════════════════════════════
+// What is physically left on ONE DSR's van, CARRIED OVER across days
+// (CALC-2, v5.1). Stock a DSR did not hand back no longer vanishes at
+// midnight:
+//   given − returned − sold-to-shops − damage − damage-exchange replacements
+//   summed over EVERY day up to and including `date`.
+// Damage claims created by "damage collection" (tx_id starts with 'dc:')
+// are goods taken back FROM a shop, never from the van, so they are
+// always ignored here.
+//   opts.damage = 'cleared' (default) — only Owner-cleared van damage is
+//                 subtracted (the selling screen);
+//   opts.damage = 'all' — every van-damage claim is subtracted (the
+//                 end-of-day settlement).
+// Returns { stock: {productId: units}, give: {productId: {u, v}} } where
+// `give` is lifetime given units / value (for the return price).
+async function computeVanDetail(dsrId, date, opts) {
+  const mode = (opts && opts.damage) || 'cleared';
+  const upto = date || bdtToday();
+  try {
+    const { data, error } = await supabase.rpc('van_stock_totals', { p_dsr_id: String(dsrId), p_upto: upto, p_all_damage: mode === 'all' });
+    if (error) throw error;
+    const stock = {}, give = {};
+    (data || []).forEach(r => {
+      const k = String(r.product_id || ''); if (!k) return;
+      const q = Math.max(0, +num(r.qty).toFixed(4));
+      if (q > 0) stock[k] = q;
+      give[k] = { u: num(r.give_units), v: num(r.give_rev) };
+    });
+    return { stock, give };
+  } catch (e) {
+    // function not installed yet → same numbers, slower
+    const [tx, dmg, exch] = await Promise.all([
+      fetchAll(() => supabase.from('transactions').select('type,product_id,total_units,total_revenue')
+        .eq('sr_id', String(dsrId)).lte('date', upto).in('type', ['give', 'return', 'dsr_sale', 'dsr_sale_return'])),
+      fetchAll(() => {
+        let q = supabase.from('dmg_claims').select('product_id,total_units,status,tx_id')
+          .eq('sr_id', String(dsrId)).lte('date', upto);
+        if (mode !== 'all') q = q.eq('status', 'cleared');
+        return q;
+      }),
+      fetchAll(() => supabase.from('damage_collections').select('exch_product_id,exch_units')
+        .eq('dsr_id', String(dsrId)).lte('date', upto).eq('resolution', 'exchange'))
+    ]);
+    const st = {}, give = {};
+    const add = (pid, delta) => { pid = String(pid || ''); if (!pid) return; st[pid] = (st[pid] || 0) + delta; };
+    tx.forEach(r => {
+      add(r.product_id, (r.type === 'give' || r.type === 'dsr_sale_return') ? num(r.total_units) : -num(r.total_units));
+      if (r.type === 'give') { const k = String(r.product_id); const g = give[k] || (give[k] = { u: 0, v: 0 }); g.u += num(r.total_units); g.v += num(r.total_revenue); }
+    });
+    dmg.forEach(r => { if (String(r.tx_id || '').startsWith('dc:')) return; add(r.product_id, -num(r.total_units)); });
+    exch.forEach(r => add(r.exch_product_id, -num(r.exch_units)));
+    const stock = {};
+    Object.keys(st).forEach(k => { const q = Math.max(0, +st[k].toFixed(4)); if (q > 0) stock[k] = q; });
+    return { stock, give };
+  }
+}
+async function computeVanStock(dsrId, date, opts) {
+  return (await computeVanDetail(dsrId, date, opts)).stock;
+}
+
+// Applies a payment to ONE due_calendar row: caps at what is still owed,
+// guards against a concurrent double-write (optimistic check on
+// paid_amount) and — for shop dues — logs a due_collections row so the
+// end-of-day settlement knows exactly how much cash the DSR collected
+// today. Returns { applied, paidAmount, remaining, status, conflict? }.
+// v5.1 (CALC-6): amounts are kept to 2 decimals and a remainder under
+// ৳0.01 counts as fully paid, so a due can never get stuck on a rounding crumb.
+async function applyDuePayment(dueId, pay, meta) {
+  meta = meta || {};
+  const R = n => Math.round((num(n) + Number.EPSILON) * 100) / 100;
+  const { data: cur, error } = await supabase.from('due_calendar').select('*').eq('id', dueId).single();
+  if (error) throw error;
+  const total = R(cur.amount), already = R(cur.paid_amount);
+  const applied = R(Math.min(num(pay), Math.max(0, total - already)));
+  if (applied <= 0) return { applied: 0, paidAmount: already, remaining: Math.max(0, R(total - already)), status: cur.status };
+  let newPaid = R(already + applied);
+  let remaining = R(total - newPaid);
+  if (remaining < 0.01) { remaining = 0; newPaid = total; }
+  const status = remaining <= 0 ? 'cleared' : 'partial';
+  const date = meta.date || bdtToday();
+  const { data: upd, error: uErr } = await supabase.from('due_calendar').update({
+    paid_amount: newPaid, status, cleared_date: status === 'cleared' ? date : null
+  }).eq('id', dueId).eq('paid_amount', cur.paid_amount).select('id');
+  if (uErr) throw uErr;
+  if (!upd || !upd.length) return { applied: 0, conflict: true, paidAmount: already, remaining: Math.max(0, R(total - already)), status: cur.status };
+  const logged = R(newPaid - already);   // includes a swallowed rounding crumb
+  if (cur.client_type === 'shop') {
+    // v5.21 — dsr_id = whoever HOLDS the cash (a DSR / an SO); '' when the owner or a manager took it
+    // (the company already has it, so no DSR's day-end cash goes up). credit_* = the shop's own DSR, who
+    // gets the credit for the collection. collector_* = who actually took the money.
+    const row = {
+      due_id: String(dueId), shop_id: String(cur.shop_id || ''), shop_name: cur.shop_name || '',
+      dsr_id: meta.noCashHolder ? '' : String(meta.dsrId || cur.dsr_id || ''), dsr_name: meta.noCashHolder ? '' : (meta.dsrName || cur.dsr_name || ''),
+      date, amount: logged, created_at: now_()
+    };
+    const ext = (meta.creditId || meta.collectorId) ? {
+      credit_dsr_id: String(meta.creditId || ''), credit_dsr_name: String(meta.creditName || ''),
+      collector_id: String(meta.collectorId || ''), collector_name: String(meta.collectorName || ''), collector_role: String(meta.collectorRole || '')
+    } : null;
+    let ins = await supabase.from('due_collections').insert(ext ? Object.assign({}, row, ext) : row);
+    // migrations/005_v5_21.sql not run yet → save the plain row (the money is still recorded)
+    if (ins.error && ext && /credit_dsr|collector_/i.test(String(ins.error.message || ''))) {
+      if (meta.noCashHolder) row.dsr_id = String(meta.creditId || cur.dsr_id || ''), row.dsr_name = String(meta.creditName || cur.dsr_name || '');
+      ins = await supabase.from('due_collections').insert(row);
+    }
+    if (ins.error) throw ins.error;
+  }
+  return { applied: logged, paidAmount: newPaid, remaining, status };
+}
+
+// ── Audit trail (CALC-7) — best effort, never blocks the real action ──
 async function auditLog(actor, action, table, rowId, oldData, newData) {
   try {
     await supabase.from('audit_log').insert({
@@ -604,6 +964,8 @@ async function blockNegativeStock() {
     return !(data && data.block_negative_stock === false);
   } catch (e) { return true; }
 }
+
+
 // ══════════════════════════════════════════════════════════════════════
 //  LIFETIME DUE TOTALS — ONE source of truth for every panel
 // ══════════════════════════════════════════════════════════════════════
@@ -660,12 +1022,15 @@ async function getDueTotals(srIds) {
 
 module.exports = {
   supabase, getDueTotals, cors, num, ds, today, now_, str, safeErr, fetchAll, pageParams,
-  mapProduct, mapSR, mapShop, mapTx, mapDmg, mapBonus, mapPayment, mapExpCat, mapExpRecord, mapDue, mapSlip,
-  computeBonusRangeSummary,
-  bdtDateStr, bdtToday, addDaysStr, bdtYesterday,
+  mapProduct, mapSR, mapTx, mapDmg, mapBonus, mapPayment,
+  mapExpCat, mapExpRecord, mapDue, mapChatMsg, mapShop, mapOrder,
+  mapRoad, mapRoadPlan, mapRoadWeeklyPlan, mapShopVisit, mapPosCustomer,
+  calcStock, computeBonusRangeSummary,
+  bdtDateStr, bdtToday, addDaysStr, bdtYesterday, weekdayOf,
   cyclePeriodBounds, cyclePeriodForDate, cyclePeriodToday, cyclePeriodDates,
-  _bonusSign, getSalesSummary, getProfitExtras, getProfitRules, computeProfit, DEFAULT_PROFIT_RULES,
-  getProductNetUnits, auditLog, idemRun, blockNegativeStock,
+  computeVanStock, computeVanDetail, applyDuePayment, _bonusSign,
+  getSalesSummary, getProfitExtras, getProfitRules, computeProfit, DEFAULT_PROFIT_RULES,
+  getSrSalesTotals, getProductNetUnits, getPaymentsTotal, getStockMovement,
+  auditLog, idemRun, blockNegativeStock,
   cpSplit, cpGroups, getCaseTotals, withUnits
 };
-
