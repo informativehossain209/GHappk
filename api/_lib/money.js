@@ -1,4 +1,4 @@
-// api/_lib/money.js — v5.1
+// api/_lib/money.js — AXIION DMS (manual edition)
 // ONE place that turns "what the screen sent" into "what gets stored".
 //
 //  CALC-5  prices / costs are read from the products table on the server;
@@ -10,8 +10,8 @@
 //  CALC-3  every sale row also remembers the bonus rule that was valid on
 //          that day, so editing a product later cannot rewrite old bonus.
 //
-// This file lives in api/_lib/ so it does NOT count as a 13th serverless
-// function on the Vercel Hobby plan.
+// This file lives in api/_lib/ so it does NOT count as a serverless function
+// on the Vercel Hobby plan (underscore folders are excluded).
 const { supabase, num, fetchAll } = require('./db');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,7 +90,7 @@ async function weightedGivePrices(srId, productIds, uptoDate) {
 
 // Turn the items array of a request into trusted lines.
 //   opts.type            transaction type (decides which prices are used)
-//   opts.srId / opts.date  needed for 'return' (price-at-give lookup)
+//   opts.srId / opts.date  needed for 'return' / 'damage' (price-at-give lookup: the DSR is credited at the price he was charged)
 // Returns { ok:true, lines, products } or { ok:false, error }.
 async function priceItems(items, opts) {
   opts = opts || {};
@@ -98,7 +98,7 @@ async function priceItems(items, opts) {
   if (!Array.isArray(items) || !items.length) return { ok: false, error: 'কমপক্ষে একটি আইটেম দিন' };
   const prods = await loadProducts(items.map(i => i && i.productId));
   let givePrice = {};
-  if (type === 'return' && opts.srId) {
+  if ((type === 'return' || type === 'damage') && opts.srId) {
     givePrice = await weightedGivePrices(opts.srId, Object.keys(prods), opts.date);
   }
   const lines = [];
@@ -113,7 +113,7 @@ async function priceItems(items, opts) {
     if (units <= 0) return { ok: false, error: name + ' — পরিমাণ ০-এর বেশি হতে হবে' };
 
     let spOverride = null, revenue, cost, sp, pp;
-    if (type === 'return' && givePrice[pid] !== undefined) spOverride = givePrice[pid];
+    if ((type === 'return' || type === 'damage') && givePrice[pid] !== undefined) spOverride = givePrice[pid];
     if (spOverride !== null) { sp = spOverride; revenue = lineMoney(prod, units, 'sell', spOverride); }
     else { sp = num(prod.selling_price); revenue = lineMoney(prod, units, 'sell'); }
 
@@ -170,3 +170,27 @@ function stockShortage(lines) {
 }
 
 module.exports = { r2, r4, UUID_RE, loadProducts, lineMoney, itemUnits, weightedGivePrices, priceItems, bonusSnapshot, txRow, stockShortage };
+
+// ── Undo helpers (delete of a wrongly typed entry) ─────────────────────
+// The stock trigger only fires on INSERT, so deleting rows must give the stock back by hand.
+const STOCK_SIGN = { buy: 1, give: -1, return: 1, point_sale: -1, point_damage_return: 1, return_company: -1 };
+// Reverse the stock effect of `rows` (transactions rows). Returns an error string or ''.
+async function reverseStock(rows, guardNegative) {
+  const delta = {};
+  (rows || []).forEach(r => { const s = STOCK_SIGN[r.type]; if (s) delta[String(r.product_id)] = (delta[String(r.product_id)] || 0) - s * num(r.total_units); });
+  const ids = Object.keys(delta).filter(k => Math.abs(delta[k]) > 0);
+  if (!ids.length) return '';
+  const prods = await loadProducts(ids);
+  if (guardNegative) for (const id of ids) {
+    const p = prods[id]; if (!p) continue;
+    if (num(p.current_stock) + delta[id] < -0.0001) return (p.name || 'পণ্য') + ' — মুছলে স্টক ঋণাত্মক হয়ে যাবে (স্টকে আছে ' + num(p.current_stock) + ' পিস)';
+  }
+  for (const id of ids) {
+    const p = prods[id]; if (!p) continue;
+    const { error } = await supabase.from('products').update({ current_stock: r4(num(p.current_stock) + delta[id]) }).eq('id', id);
+    if (error) throw error;
+  }
+  return '';
+}
+module.exports.reverseStock = reverseStock;
+module.exports.STOCK_SIGN = STOCK_SIGN;

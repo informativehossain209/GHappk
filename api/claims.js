@@ -14,6 +14,7 @@ const {
   supabase, cors, num, now_, mapDmg, safeErr,
   cyclePeriodBounds, cyclePeriodToday, computeBonusRangeSummary, fetchAll
 } = require('./_lib/db');
+const { requireAuth } = require('./_lib/auth');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PERIOD_RE = /^\d{4}-\d{2}$/;
@@ -44,6 +45,7 @@ function _resolveRange(req) {
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (!requireAuth(req, res)) return;
   const type = (req.query && req.query.type) || '';
 
   try {

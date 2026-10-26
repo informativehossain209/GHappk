@@ -1,7 +1,8 @@
 const { supabase, cors, num, now_, mapProduct, str, safeErr, fetchAll } = require('./_lib/db');
 const { resolveThumb, deleteThumb } = require('./_lib/thumb');
+const { requireAuth } = require('./_lib/auth');
 
-// V40 — stock delta rule, kept identical to the DB trigger
+// Stock delta rule — kept identical to the DB trigger
 // (trg_apply_stock_delta / apply_stock_delta() in schema.sql) so this
 // manual resync can never disagree with what the trigger computes
 // going forward.
@@ -13,6 +14,7 @@ const STOCK_TYPE_SIGN = {
 module.exports = async (req, res) => {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (!requireAuth(req, res)) return;
 
   try {
     if (req.method === 'GET') {
@@ -63,7 +65,7 @@ module.exports = async (req, res) => {
       if (action === 'migrate-thumbs') {
         const BATCH = 15;
         const out = { ok: true, migrated: 0, failed: 0, remaining: 0 };
-        for (const table of ['products', 'srs']) {
+        for (const table of ['products']) {
           const { data: rows, error: e1 } = await supabase.from(table).select('id,thumb').like('thumb', 'data:image%').limit(BATCH);
           if (e1) throw e1;
           for (const r of (rows || [])) {
@@ -177,6 +179,9 @@ module.exports = async (req, res) => {
     if (req.method === 'DELETE') {
       const id = req.body?.id || req.query?.id;
       if (!id) return res.json({ ok: false, error: 'id প্রয়োজন' });
+      // a product that already has history can never be deleted (the old slips would lose their product)
+      const { count: used } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('product_id', String(id));
+      if (used) return res.json({ ok: false, error: 'এই পণ্যের লেনদেনের হিসাব আছে — মুছে ফেলা যাবে না' });
       const { data: row } = await supabase.from('products').select('thumb').eq('id', id).single();
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw error;
